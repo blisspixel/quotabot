@@ -89,22 +89,24 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Next
 
-**Finish 0.10.x stabilization, complete the bounded provider-ID cache migration,
-activate the implemented platform-signing paths, and run one signed rehearsal.**
+**Continue focused 0.10.x hardening, complete the bounded provider-ID cache
+migration, activate the implemented platform-signing paths, and run one signed
+rehearsal before 1.0.**
 Feature breadth is frozen. Completed candidate detail belongs in
 [CHANGELOG.md](CHANGELOG.md); this section records only the remaining dependency
 order.
 
-1. Release candidate 17 is the current stabilization baseline. It hardens the
-   checksum-verified `quotabot update` path with module-independent Windows
-   hashing, a legacy-shell-compatible ZIP staging name, authenticated GitHub
-   metadata reads when an explicit token is already present, and failure
-   diagnostics in the hosted lifecycle smoke. The immutable rc.16 Windows
-   bundle cannot receive that correction retroactively, so affected rc.16
-   installations use the documented exact-tag rc.17 bootstrap once. Every
-   candidate publication is gated by the complete three-OS tag workflow and
-   subsequent cross-platform install smoke; unsigned transition status remains
-   explicit until the signed lifecycle passes.
+1. Stable 0.10.0 is the current hardening baseline. It promotes the fully
+   verified rc.17 correction for checksum-verified `quotabot update`, including
+   module-independent Windows hashing, a legacy-shell-compatible ZIP staging
+   name, authenticated GitHub metadata reads when an explicit token is already
+   present, and actionable hosted lifecycle diagnostics. The immutable rc.16
+   Windows bundle cannot receive that correction retroactively, so affected
+   rc.16 installations use the documented exact-tag v0.10.0 bootstrap once.
+   Stable publication now explicitly binds and verifies GitHub Latest, and the
+   three-OS lifecycle exercises the canonical unversioned installer path.
+   Unsigned transition status remains explicit until the signed lifecycle
+   passes.
 2. The repository now implements fail-closed Windows and macOS signing paths for
    the CLI and desktop assets. They preserve immutable unsigned handoffs,
    inventory every native module, sign only the exact validated targets, verify
@@ -132,7 +134,7 @@ order.
    credential, and exact environment values and secrets. Both platform paths
    must pass a successful protected rehearsal before their repository modes
    change.
-6. Activate both modes for one 0.10.x candidate and run the signed lifecycle
+6. Activate both modes for one 0.10.x release candidate and run the signed lifecycle
    through fresh download, install, launch, update, rollback, data-preserving
    uninstall, checksum, provenance, and immutable publication. Reopen product
    breadth only after every exit criterion passes.
@@ -142,7 +144,7 @@ the explicit unsigned disclosure until the exact artifacts have native signing
 evidence. Repository readiness is not activation, and deterministic tests are
 not a successful protected rehearsal.
 
-**0.10.x exit criteria**
+**0.10.x completion criteria before 1.0**
 
 - No open reproducible correctness or credential-lifecycle defect. Every fixed
   bug has a regression at the lowest deterministic layer and, when applicable,
@@ -282,9 +284,9 @@ dated idle-machine validation of the Claude and Codex grants, then the frozen
 
 ## Current state
 
-The current line, **0.9.9**, remains the tagged default installer version. The
-focused **0.10.0-rc.17** candidate carries the latest stabilization inventory
-described in [Next](#next). The stable line contains the implemented
+The current line, **0.10.0**, is the tagged default installer version and carries
+the latest hardening inventory described in [Next](#next). The stable line
+contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
 calibrated forecast behind a single decision core (0.7), and the self-tuning
 calibration moat (0.8). Those
@@ -299,15 +301,15 @@ milestone sections below.
 
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
-| Core contracts and automated quality | Stabilization candidate | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, and install-lifecycle regressions are covered | Keep every candidate green across the full matrix and resolve any new reproducible defect before signing activation |
-| Integration trust boundary | Stabilization candidate | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
+| Core contracts and automated quality | Stable 0.10.0 baseline | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered | Keep every 0.10.x patch green across the full matrix and resolve any new reproducible defect before signing activation |
+| Integration trust boundary | Stable 0.10.0 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
 | Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
-| Installation and update | Rehearsed on 0.9.9; corrective rc.17 | The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9) locked its 14-asset set ([release 32290931121](https://github.com/blisspixel/quotabot/actions/runs/32290931121)) and passed [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058), including upgrade from v0.9.8; rc.17 adds the bundled self-update correction and exact forced-update lifecycle coverage after rc.16 exposed a Windows PowerShell compatibility defect | Retain rc.17's complete cross-platform lifecycle evidence, then repeat on the signed rehearsal and frozen 1.0 candidate |
+| Installation and update | Stable 0.10.0 | The immutable [v0.10.0 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0) promotes rc.17's bundled self-update correction, exact forced-update coverage, explicit GitHub Latest contract, canonical unversioned install, and cross-platform lifecycle after rc.16 exposed a Windows PowerShell compatibility defect | Retain the complete cross-platform evidence for each focused patch, then repeat on the signed rehearsal and frozen 1.0 candidate |
 | Native signing | Repository-ready; inactive | Exact Windows PE and macOS Mach-O inventories and deltas, isolated signer jobs, protected nonpublishing rehearsal workflows, reviewed `main` and `v*` environment policies, deterministic policy and failure tests, credential-free packaging, bounded receipts, and exact draft-asset re-verification are implemented for CLI and desktop; current published artifacts remain unsigned | Provision both owner identities and the exact protected-environment values and secrets, pass native protected rehearsals, activate both modes, and retain one signed 0.10.x lifecycle record |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Ready for signed rerun | v0.9.9 completed the tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal; rc.12 repeated the cross-platform acquisition and desktop-run matrix | Run a signed 0.10.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Stable unsigned lifecycle complete | v0.10.0 completes the tag, asset, checksum, provenance, GitHub Latest, install, upgrade, state, self-update, and immutable-publication lifecycle as an explicitly unsigned transition release | Run a signed 0.10.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Run focused 0.10.x stabilization
@@ -333,12 +335,12 @@ self-tuning decision engine grounded in longitudinal local history no competitor
 keeps. An exceptional 1.0 therefore ships that engine, not only a hardened meter,
 which is why calibration lands before 1.0 rather than after it.
 
-- **0.10.x, now - stabilization and signed release readiness.** Keep the shipped
+- **0.10.x, now - stable hardening and signed 1.0 readiness.** Keep the shipped
   explanation and decision-receipt work stable while taking focused corrective
   patches for provider truth, cross-machine correctness, install and update,
   desktop robustness, and documentation. Activate the implemented signing paths
   only after owner provisioning and successful protected rehearsals. No new
-  breadth. This line ends when the 0.10.x exit criteria pass.
+  breadth. Keep the line focused until the 0.10.x completion criteria pass.
 - **0.6 - Truthful substrate, core shipped.** Every advertised route means
   exactly what it says on every admitted provider. The remaining field evidence
   and migration hardening listed below are 1.0 acceptance work, not a second
@@ -731,7 +733,7 @@ an actionable recovery path instead of a plausible-looking partial success.
   0.10.x candidate for the native install, update, rollback, provider, and
   accessibility evidence pass.
 
-Acceptance: every 0.10.x exit criterion in [Next](#next) passes. There is no
+Acceptance: every 0.10.x completion criterion in [Next](#next) passes. There is no
 open reproducible correctness or credential-lifecycle defect, no unresolved
 actionable dependency advisory in scope, all required CI is green from clean
 main, and exact downloaded Windows and macOS draft assets pass native signature
@@ -754,8 +756,8 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   native Windows/Linux readiness checks, build-provenance attestations, and a
   draft-release barrier. Clean native runners also re-download the draft assets
   and exercise side-by-side update, rollback, and data-preserving uninstall
-  mechanics. v0.9.9 supplies a green tagged acquisition record, and rc.12 passed
-  the cross-platform install, upgrade, source-setup, and desktop-run matrix.
+  mechanics. Stable v0.10.0 supplies the current green tagged acquisition,
+  explicit GitHub Latest, self-update, and canonical unversioned install record.
   Signed platform-identity evidence and the same record on the exact 1.0 candidate
   remain required before this gate is closed. The credential-free Windows
   verifier covers an exact post-signing inventory, every shipped PE module,
@@ -794,11 +796,10 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   attestation, persistent-state, and source-setup matrix; exercise the
   inspect-before-run, update, data-preserving uninstall, destructive reset, and
   rollback paths, automating what can run safely on hosted clean machines.
-  **Done for the v0.9.9 rehearsal and rc.12 follow-up:** the published v0.9.9
-  matrix passed on Windows, macOS, and Ubuntu, including upgrade from the actual
-  preceding stable release, v0.9.8. The rc.12 matrix passed install, upgrade,
-  source-setup, and desktop-run checks across the same three operating systems.
-  Repeat it on the exact signed 1.0 candidate.
+  **Done for stable v0.10.0:** the published matrix covers Windows, macOS, and
+  Ubuntu, including upgrade from the actual preceding stable release, exact-tag
+  self-update, canonical Latest acquisition, persistent state, source setup, and
+  desktop-run checks. Repeat it on the exact signed 1.0 candidate.
 - Rehearse and cut: freeze the exact candidate from a clean main worktree; run all
   local and hosted gates; build the tag artifacts and verify checksums and
   attestations; install and smoke on clean native Windows, macOS, and Linux; repeat

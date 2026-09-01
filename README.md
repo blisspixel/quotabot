@@ -9,15 +9,14 @@ quotabot shows how much included quota remains across AI coding subscriptions
 and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
-> **Current stable:** 0.9.9. quotabot remains under active 0.x development.
-> **Current release candidate:** 0.10.0-rc.17.
-> **Next:** complete the bounded provider-ID cache migration, finish the focused
-> 0.10.x stabilization gate, provision the Windows and Apple publisher
-> identities, and rehearse the repository-ready signing paths on one signed
-> candidate. No new product breadth. See [roadmap
+> **Current stable:** 0.10.0. quotabot remains under active 0.x development.
+> **Next:** continue the focused 0.10.x hardening line with the bounded
+> provider-ID cache migration, native field validation, Windows and Apple
+> publisher identity provisioning, and one signed lifecycle rehearsal before
+> 1.0. No new product breadth. See [roadmap
 > Next](ROADMAP.md#next) and the [documentation index](docs/README.md).
 
-Release candidates state Windows and macOS signing mode at the top of the
+Releases state Windows and macOS signing mode at the top of the
 GitHub release notes. The source workflow now has fail-closed signing paths for
 both platforms, snapshots that policy once per run, and binds final signed-asset
 digests to native fresh-download verification. Existing published artifacts are
@@ -70,10 +69,10 @@ quotabot suggest
 `doctor` explains stale or unavailable evidence and gives a repair command.
 `suggest` ranks usable subscriptions and supplies a local fallback when one is
 available. The `quotabot update` command begins with release candidate 16; an
-older stable install can bootstrap it by running the one-line installer with an
-exact rc.17 or later tag. Windows rc.16 users should use that same exact rc.17
+older install can bootstrap it by running the one-line installer with the exact
+stable `v0.10.0` tag. Windows rc.16 users should use that same exact stable
 bootstrap once because the immutable rc.16 Windows bundle has a PowerShell
-self-update compatibility defect. For that preview path, inspect-before-run
+self-update compatibility defect. For inspect-before-run
 installation, login, updates, rollback, and uninstall, use the [setup
 guide](docs/SETUP.md).
 
@@ -117,7 +116,7 @@ provider-owned cross-checks are in [Provider CLIs](docs/PROVIDER_CLIS.md).
 
 Portable desktop bundles are published for Windows, macOS, and Linux alongside
 the CLI. The app is optional. Windows signing and macOS Developer ID signing,
-notarization, and stapling are required 0.10.x release-readiness gates.
+notarization, and stapling remain required native trust gates before 1.0.
 The release workflow now supports Azure Artifact Signing and macOS Developer ID
 modes for both the CLI and desktop assets. Those modes fail closed when required
 identity, credential, signature, notarization, staple, or verification evidence
@@ -165,12 +164,13 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9)
-passed its 14-asset audit and cross-platform install and upgrade matrix. Every
-release candidate repeats native build, archive, checksum, provenance,
+The immutable [v0.10.0 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0)
+is the stable promotion of the fully verified rc.17 inventory. Every release
+repeats native build, archive, checksum, provenance,
 fresh-download, install, upgrade, source-setup, and desktop-run checks. Current
-published Windows and macOS artifacts remain unsigned, so 0.10.x must repeat
-that evidence with platform-signed artifacts before 1.0. See the [release
+Windows and macOS artifacts remain unsigned transition artifacts, so the
+focused 0.10.x line must repeat that evidence with platform-signed artifacts
+before 1.0. See the [release
 evidence](docs/BUILDING.md#baseline-release-evidence),
 [roadmap](ROADMAP.md), [documentation index](docs/README.md),
 [contributing guide](CONTRIBUTING.md), and [security policy](SECURITY.md).

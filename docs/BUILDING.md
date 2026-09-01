@@ -338,8 +338,8 @@ Until the owner completes Public Trust identity validation, the explicit
 `unsigned` transition mode packages the unchanged candidate only after its
 complete inventory matches. The release notes must disclose that Windows
 publisher identity is not established. The published v0.9.9 release artifacts
-remain unsigned. Ordinary CI packaging stays unsigned and cannot access the
-protected release environment.
+remain unsigned, as do the stable v0.10.0 transition artifacts. Ordinary CI
+packaging stays unsigned and cannot access the protected release environment.
 
 The manually dispatched `.github/workflows/windows-signing-rehearsal.yml`
 builds the CLI and desktop candidates outside `release-signing`, signs and
@@ -608,21 +608,22 @@ tray-readiness check remain separate release-candidate requirements.
 
 ### Baseline release evidence
 
-The 0.9.9 rehearsal published the immutable
+The current tagged rehearsal baseline is the immutable
+[v0.10.0 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0)
+with its exact 14-asset set. The native
+[release workflow](https://github.com/blisspixel/quotabot/actions/workflows/release.yml)
+builds, checksums, shape-checks, attests, freshly downloads, and reverifies every
+archive before publication. The separate
+[install smoke](https://github.com/blisspixel/quotabot/actions/workflows/install-smoke.yml)
+then covers the canonical unversioned Latest install, upgrade from the actual
+prior stable, exact-tag self-update, persistent state, source setup, and desktop
+run checks on Windows, macOS, and Ubuntu. Stable 0.10.0 promotes the fully
+verified rc.17 updater correction. The earlier
 [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9)
-with the exact 14-asset set. Its
-[release workflow](https://github.com/blisspixel/quotabot/actions/runs/32290931121)
-built, checksummed, and attested every archive. Linux desktop runtime verify
-stalled on a hosted apt mirror inside a 20-minute job budget; checksum,
-archive-shape, and attestation audit of those exact draft assets completed
-before publication. The immediately dispatched
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058)
-then passed clean install, upgrade from the actual prior stable v0.9.8,
-persistent-state, and source-setup checks on Windows, macOS, and Ubuntu. This is
-the tagged rehearsal baseline. The later
+and
 [0.10.0-rc.12 install smoke](https://github.com/blisspixel/quotabot/actions/runs/33312529854)
-passed cross-platform install, upgrade, source-setup, and desktop-run checks for
-the hardened lifecycle. Both runs used unsigned Windows and macOS artifacts.
+remain the preceding acquisition records. All used unsigned Windows and macOS
+artifacts.
 The complete checklist, successful protected signing rehearsals, signed
 fresh-download verification, and interactive evidence must run again on the
 signed 0.10.x rehearsal and exact 1.0 candidate.

@@ -134,6 +134,23 @@ void main() {
       expect(check.toJson()['selection'], 'channel');
     });
 
+    test('release candidate preview channel promotes to the final stable',
+        () async {
+      final check = await checkForQuotabotUpdate(
+        currentVersion: '0.10.0-rc.17',
+        channel: UpdateChannel.preview,
+        client: releasesClient([
+          release('v0.9.9'),
+          release('v0.10.0-rc.17'),
+          release('v0.10.0'),
+        ]),
+      );
+
+      expect(check.target.tag, 'v0.10.0');
+      expect(check.updateAvailable, isTrue);
+      expect(check.toJson()['selection'], 'channel');
+    });
+
     test('stable channel does not admit a preview', () async {
       final check = await checkForQuotabotUpdate(
         currentVersion: '0.9.8',

@@ -107,13 +107,12 @@ truer because the deeper layer exists, not harder to read.
 
 The CLI has a low-friction release path, and the desktop has a native
 portable-archive pipeline with checksums, attestations, and a draft-release
-barrier. v0.9.9 completed the exact release and three-OS install path; the
+barrier. Stable v0.10.0 completes the exact release, explicit GitHub Latest,
+self-update, and three-OS install path; the
 [baseline release evidence](BUILDING.md#baseline-release-evidence) records what it
-proved. The
-[rc.12 install smoke](https://github.com/blisspixel/quotabot/actions/runs/33312529854)
-also passed cross-platform install, upgrade, source-setup, and desktop-run
-checks. That evidence is not a substitute for the signed rehearsal or for
-rerunning the complete path on the exact 1.0 candidate. The repository signing
+proved. The earlier rc.12 and rc.17 lifecycle checks remain supporting
+acquisition evidence. That evidence is not a substitute for the signed rehearsal
+or for rerunning the complete path on the exact 1.0 candidate. The repository signing
 implementation is complete; owner identities, protected rehearsals, mode
 activation, and signed lifecycle evidence remain. Update, uninstall, data
 preservation, destructive reset, and rollback remain separate documented
@@ -145,11 +144,11 @@ turns into paid API spend.
 - The desktop and terminal surfaces are visually mature for a 0.x utility.
 - The core is deterministic and heavily tested, with dedicated verification,
   schema, security, drift, and release gates.
-- v0.9.9 completed the exact release and three-OS published-installer rehearsal,
-  so release mechanics now have current evidence rather than only a future plan.
-- rc.12 repeated cross-platform install, upgrade, source-setup, and desktop-run
-  evidence, and the repository now implements isolated, fail-closed Windows and
-  macOS signing paths around immutable candidate handoffs.
+- Stable v0.10.0 completes the exact release, GitHub Latest, self-update, and
+  three-OS published-installer rehearsal, so release mechanics have current
+  evidence rather than only a future plan.
+- The repository implements isolated, fail-closed Windows and macOS signing
+  paths around immutable candidate handoffs.
 - The advisor-not-proxy and zero-inference boundaries are meaningful product
   differences, not only marketing language.
 
@@ -321,9 +320,9 @@ rehearsals still require project-owner authority.
 The remaining gates are native macOS and Linux provider records, dated Claude
 and Codex idle-machine grant validation, native accessibility smoke, and the
 final exact-candidate rehearsal. v0.9.9 proves the tag, artifact, checksum,
-provenance, and lifecycle machinery, and rc.12 repeats the cross-platform
-acquisition matrix, but all evidence must be repeated against the frozen, signed
-1.0 candidate.
+provenance, and lifecycle foundation. Stable v0.10.0 adds explicit GitHub Latest,
+self-update, and canonical unversioned acquisition coverage, but all evidence
+must be repeated against the frozen, signed 1.0 candidate.
 
 ### After 1.0 stabilization: improve decision evidence
 

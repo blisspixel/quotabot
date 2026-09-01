@@ -42,6 +42,18 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertIn(r"^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$", resolver)
         self.assertIn('"$target" =~ -rc\\.', resolver)
         self.assertIn('"$tag" != "$target"', resolver)
+        self.assertIn('if [[ "$target" == "$latest" ]]', resolver)
+        self.assertIn('echo "target_is_latest=$target_is_latest"', resolver)
+
+        clean_install = smoke.split("  clean-install:\n", 1)[1].split(
+            "  upgrade-and-setup:\n", 1
+        )[0]
+        self.assertIn("Install Windows through the canonical latest URL", clean_install)
+        self.assertIn("Remove-Item Env:QUOTABOT_VERSION", clean_install)
+        self.assertIn(
+            "Install macOS or Linux through the canonical latest URL", clean_install
+        )
+        self.assertIn("env -u QUOTABOT_VERSION bash install.sh", clean_install)
 
     def test_install_smoke_pins_the_resolved_tag_during_install(self) -> None:
         smoke = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
