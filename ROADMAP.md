@@ -89,9 +89,9 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Next
 
-**Continue focused 0.10.x hardening, promote the implemented bounded provider-ID
-cache migration through clean three-OS evidence, activate the implemented
-platform-signing paths, and run one signed rehearsal before 1.0.**
+**Continue focused 0.10.x hardening, validate the 0.10.1-rc.1 provider-ID cache
+migration lifecycle, activate the implemented platform-signing paths, and run
+one signed rehearsal before 1.0.**
 Feature breadth is frozen. Completed candidate detail belongs in
 [CHANGELOG.md](CHANGELOG.md); this section records only the remaining dependency
 order.
@@ -119,17 +119,18 @@ order.
    current. Compatibility work for an already claimed provider may improve
    truthful detection, but must not invent quota or depend on an undocumented
    private endpoint.
-4. Promote the implemented provider-ID on-disk migration through clean hosted
-   Windows, macOS, and Linux CI. Its asynchronous, bounded, role-aware startup
-   coordinator now shares the rc.15 cross-process evidence locks, coordinates
-   released legacy writers, preserves analytics checkpoint digests, isolates
-   quarantine by identity and tier, and persists prepared and committed
-   partial-progress receipts. Mixed-version, killed-process crash recovery,
-   malformed root and evidence, corrupt receipt, coordinator contention, work
-   bound, and filename-boundary regressions pass locally on Windows with the
-   complete collector suite and coverage above the required 90 percent. Do not
-   register a real alias or claim durable continuity until the same ordinary
-   suite passes on all three hosted operating systems from clean `main`.
+4. The implemented provider-ID on-disk migration passed the ordinary hosted
+   Windows, macOS, and Linux matrix from the exact signed `main` commit in
+   [CI run 33542805801](https://github.com/blisspixel/quotabot/actions/runs/33542805801).
+   Its asynchronous, bounded, role-aware startup coordinator shares the rc.15
+   cross-process evidence locks, coordinates released legacy writers,
+   preserves analytics checkpoint digests, isolates quarantine by identity and
+   tier, and persists prepared and committed partial-progress receipts.
+   Mixed-version, killed-process crash recovery, malformed root and evidence,
+   corrupt receipt, coordinator contention, work-bound, and filename-boundary
+   regressions pass on all three hosted operating systems. 0.10.1-rc.1 carries
+   that unchanged candidate with the alias map still empty. Publish and pass its
+   complete release, install, and update lifecycle before stable promotion.
 5. The protected Windows and macOS signing environments are configured with
    maintainer review and exact `main` and `v*` deployment restrictions. The
    project owner still provisions the Windows Public Trust identity, Apple
@@ -297,7 +298,7 @@ implementation milestones are not the same as closing every 1.0 evidence gate.
 The core product surface exists: CLI, `top`, desktop, analytics, MCP, loopback
 HTTP, model registry, profiles, alerts, reports, leases, LiteLLM integration,
 verification commands, release automation, and cross-platform CI. New breadth
-is frozen until the remaining field validation, three-OS migration evidence,
+is frozen until the remaining field validation, candidate lifecycle,
 accessibility, signing, and native release evidence below are complete.
 The table is a status index; detailed scope and acceptance criteria live in the
 milestone sections below.
@@ -308,7 +309,7 @@ milestone sections below.
 | Integration trust boundary | Stable 0.10.0 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
 | Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
-| Provider-ID cache continuity | Implemented; awaiting hosted matrix | The bounded coordinator, exact role validation, mixed-version locks, durable prepared receipts, crash recovery, branch-conflict quarantine, and local Windows full-suite regressions are implemented with the shipped alias map still empty | Pass the unchanged suite on hosted Windows, macOS, and Linux from clean `main`, then close the gate without adding an artificial alias |
+| Provider-ID cache continuity | 0.10.1-rc.1 candidate | The bounded coordinator, exact role validation, mixed-version locks, durable prepared receipts, crash recovery, branch-conflict quarantine, and empty shipped alias map passed [ordinary hosted CI](https://github.com/blisspixel/quotabot/actions/runs/33542805801) on Windows, macOS, and Linux from signed `main` | Pass the candidate release, install, and update lifecycle, then promote it unchanged without adding an artificial alias |
 | Installation and update | Stable 0.10.0 | The immutable [v0.10.0 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0), [release run](https://github.com/blisspixel/quotabot/actions/runs/33466848719), and [published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33469407949) prove rc.17's bundled self-update correction, exact forced-update coverage, explicit GitHub Latest contract, canonical unversioned install, and cross-platform lifecycle after rc.16 exposed a Windows PowerShell compatibility defect | Retain the complete cross-platform evidence for each focused patch, then repeat on the signed rehearsal and frozen 1.0 candidate |
 | Native signing | Repository-ready; inactive | Exact Windows PE and macOS Mach-O inventories and deltas, isolated signer jobs, protected nonpublishing rehearsal workflows, reviewed `main` and `v*` environment policies, deterministic policy and failure tests, credential-free packaging, bounded receipts, and exact draft-asset re-verification are implemented for CLI and desktop; current published artifacts remain unsigned | Provision both owner identities and the exact protected-environment values and secrets, pass native protected rehearsals, activate both modes, and retain one signed 0.10.x lifecycle record |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
@@ -441,7 +442,7 @@ in the changelog.
 **Outcome:** every advertised route means exactly what it says, on every claimed
 provider, before a forecast is built on top of it.
 
-- Provider identity aliases for renames. **Implementation candidate:** a one-way
+- Provider identity aliases for renames. **0.10.1-rc.1 candidate:** a one-way
   `kProviderIdAliases` map plus `canonicalizeProviderId`, funnelled through every
   identity seam (profile/hidden/filter/manual normalization, adapter resolution,
   lease keys, cache filename stems), so registering a rename preserves the user's
@@ -450,8 +451,9 @@ provider, before a forecast is built on top of it.
   stop it shadowing a live provider. The rc.15 claim-backed cache evidence guard
   and the role-aware migration specified in [Next](#next) now carry validated
   cached snapshots, drift, history, buckets, and analytics checkpoints through
-  a rename. Remaining: clean hosted Windows, macOS, and Linux evidence from
-  `main` before this becomes a shipped continuity claim.
+  a rename. The unchanged suite passed ordinary hosted Windows, macOS, and
+  Linux CI from signed `main`; release, install, and update lifecycle validation
+  remains before stable promotion.
 - **Done:** new account-scoped snapshots, drift records, history, analytics
   buckets, evidence locks, and lease grouping use collision-resistant opaque
   account keys. During a one-way upgrade, exact-account legacy evidence remains
