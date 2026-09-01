@@ -8,6 +8,7 @@ import 'package:quotabot_collector/http_client.dart';
 import 'package:quotabot_collector/mcp.dart';
 import 'package:quotabot_collector/mcp_http.dart';
 import 'package:quotabot_collector/mcp_server_options.dart';
+import 'package:quotabot_collector/provider_id_migration.dart';
 import 'package:quotabot_collector/util.dart';
 
 /// MCP server exposing AI subscription quota as a primitive other agents can
@@ -64,6 +65,7 @@ Future<void> _runMain(List<String> args) async {
         source: 'memory',
       );
     }
+    await coordinateProviderIdCacheMigration();
     final disk = loadCachedSnapshots();
     return CachedQuotaSnapshot(
       providers: disk,

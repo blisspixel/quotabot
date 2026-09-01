@@ -40,9 +40,10 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 ## Project status and execution order
 
 The current verified stable release is 0.10.0. The shipped routing policies are
-`balanced`, `local_first`, and opt-in `quota_stretch`. The next work continues
-the focused 0.10.x hardening line: correctness, security, quality-of-life
-refinement, bounded provider-ID migration, and native field validation before
+`balanced`, `local_first`, and opt-in `quota_stretch`. The bounded provider-ID
+cache coordinator is implemented with the shipped alias map empty and awaits
+clean hosted Windows, macOS, and Linux evidence. The next work continues the
+focused 0.10.x hardening line with that promotion, native field validation, and
 signed 1.0 readiness, with no new product breadth. The
 [roadmap Next section](ROADMAP.md#next) is the sole source for its
 behavior, guardrails, completion criteria, and rationale.

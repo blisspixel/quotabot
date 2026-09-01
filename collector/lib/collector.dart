@@ -10,6 +10,7 @@ import 'manual_quota.dart';
 import 'models.dart';
 import 'profiles.dart';
 import 'provider_adapters.dart';
+import 'provider_id_migration.dart';
 import 'runtime_audit.dart';
 import 'util.dart';
 import 'verification.dart';
@@ -154,6 +155,7 @@ Future<ProviderDriftRecoveryReport> verifyAndRecoverProviderDriftBaseline({
   int? observedAtMicros,
   Duration deadline = kAdapterDeadline,
 }) async {
+  await coordinateProviderIdCacheMigration();
   final resolved = providerAdapterById(provider);
   final entry = registration ?? resolved;
   final wallClockAtStart = nowEpoch();
@@ -492,6 +494,7 @@ Future<List<ProviderQuota>> _collectAllProviders({
             )
             .toList();
   }
+  await coordinateProviderIdCacheMigration();
   if (!_sweptTemp) {
     _sweptTemp = true;
     sweepStaleTempFiles(); // once per process, clear any crash leftovers

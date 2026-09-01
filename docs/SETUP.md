@@ -443,6 +443,18 @@ an update. For a compatible rollback, keep the local metadata directory. If the
 target release may predate an analytics-storage migration, first stop every
 quotabot process and make a restorable copy of that directory.
 
+A future release that renames a provider id keeps validated quota snapshots,
+drift records, history, buckets, and analytics checkpoints through an automatic
+bounded startup migration. Before returning from an older release to that
+current release, stop every older `top`, desktop, MCP, and server process, then
+run `quotabot doctor`. The next live read waits for the coordinator and preserves
+both old and canonical files. Do not delete either branch or its
+`provider_id_migration_*` receipt. If an older and current process changed the
+same identity and tier independently, quotabot keeps both generations and fails
+that tier closed instead of guessing which branch to keep. Restore the backup if
+you need to discard the mixed-version interval. The current shipped alias map is
+empty, so this path remains inactive until an actual provider rename is released.
+
 Do not let a release from before the opaque account-key migration collect
 against the only copy of current metadata, even if the two releases never run
 at the same time. It can write recent history and hourly analytics to legacy

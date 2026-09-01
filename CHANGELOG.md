@@ -2,6 +2,40 @@
 
 Notable changes to quotabot. Newest first.
 
+## Unreleased
+
+### Added
+
+- Provider renames now have a bounded startup cache coordinator that preserves
+  validated snapshots, drift records, raw history, hourly buckets, analytics
+  checkpoints, and legacy bucket ownership byte for byte under the canonical
+  provider id. The shipped alias map remains empty until a real rename is
+  needed.
+- Durable per-alias receipts record only bounded roles, opaque account digests,
+  branch digests, and migration state. Process crash regressions cover every
+  prepared, target-install, and receipt-publication boundary.
+
+### Fixed
+
+- Mixed-version provider writers now share retired-then-canonical evidence lock
+  order across processes and isolates. A one-sided retired advance is carried
+  forward, independent branch advances quarantine only the affected identity
+  and tier, and canonical deletion cannot resurrect retired evidence or a raw
+  compatibility fallback. Proven legacy account files move into opaque
+  canonical account storage while retaining their released raw lock domain.
+- Cache-only reads, live admission, drift handling, analytics, CLI collection,
+  and MCP cache decisions fail closed when a provider-id receipt is missing,
+  malformed, partial, or contradicted by a later retired write.
+
+### Security
+
+- Provider-id migration rejects links, malformed roots, invalid source or
+  canonical evidence, unsafe filename components, future timestamps, impossible
+  bucket moments, and corrupt receipts before mutation. Alias count, root scan,
+  record count, record bytes, total evidence bytes, lock acquisition, and
+  receipt size are bounded, with cooperative wall-time checks between bounded
+  filesystem operations.
+
 ## 0.10.0 - 2026-08-31
 
 ### Added
