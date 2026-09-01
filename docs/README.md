@@ -5,10 +5,12 @@ Start with the shortest path for what you need.
 ## Project status
 
 The current verified stable release is 0.10.0. The bounded provider-ID cache
-coordinator is implemented with the shipped alias map still empty and awaits
-clean hosted Windows, macOS, and Linux evidence. The next work in the focused
-0.10.x hardening line is that promotion, native field validation, owner signing
-setup, and one signed lifecycle rehearsal before 1.0.
+coordinator passed ordinary hosted Windows, macOS, and Linux CI from signed
+`main`; the shipped alias map remains empty. The current release candidate is
+0.10.1-rc.1. The next work in the focused 0.10.x hardening line is complete
+candidate release and update validation, unchanged stable promotion, native
+field validation, owner signing setup, and one signed lifecycle rehearsal
+before 1.0.
 Stable 0.10.0 promotes the verified rc.17 updater correction. Its release
 discovery, exact-tag installation, transactional activation, installed-version
 verification, explicit GitHub Latest contract, and canonical Latest installer

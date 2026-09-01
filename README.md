@@ -10,10 +10,11 @@ and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
 > **Current stable:** 0.10.0. quotabot remains under active 0.x development.
-> **Next:** promote the implemented bounded provider-ID cache migration through
-> clean Windows, macOS, and Linux CI, then continue native field validation,
-> Windows and Apple publisher identity provisioning, and one signed lifecycle
-> rehearsal before 1.0. No new product breadth. See [roadmap
+> **Current release candidate:** 0.10.1-rc.1.
+> **Next:** validate the candidate's complete release and update lifecycle,
+> promote it unchanged when that evidence is green, then continue native field
+> validation, Windows and Apple publisher identity provisioning, and one signed
+> lifecycle rehearsal before 1.0. No new product breadth. See [roadmap
 > Next](ROADMAP.md#next) and the [documentation index](docs/README.md).
 
 Releases state Windows and macOS signing mode at the top of the
