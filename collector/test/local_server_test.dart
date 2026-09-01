@@ -490,7 +490,8 @@ void main() {
       now: () => _now,
     );
     final socket = await Socket.connect('127.0.0.1', server.port);
-    Timer? writer;
+    var stopWriter = false;
+    Future<void>? writer;
     try {
       socket.write(
         'POST /leases/reserve HTTP/1.1\r\n'
@@ -503,11 +504,20 @@ void main() {
         '{',
       );
       await socket.flush();
-      writer = Timer.periodic(const Duration(milliseconds: 40), (_) {
-        try {
-          socket.add(const [0x20]);
-        } catch (_) {}
-      });
+      writer = () async {
+        while (!stopWriter) {
+          await Future<void>.delayed(const Duration(milliseconds: 40));
+          if (stopWriter) return;
+          try {
+            socket.add(const [0x20]);
+            await socket.flush();
+          } on SocketException {
+            return;
+          } on StateError {
+            return;
+          }
+        }
+      }();
 
       final elapsed = Stopwatch()..start();
       String response;
@@ -533,7 +543,8 @@ void main() {
       expect(health.status, HttpStatus.ok);
       expect(health.body['ok'], isTrue);
     } finally {
-      writer?.cancel();
+      stopWriter = true;
+      await writer;
       socket.destroy();
       await server.close(force: true);
     }
