@@ -36,9 +36,9 @@ policy; v0.9.2 and earlier releases were not changed retroactively.
 The verified
 [v0.10.0 stable release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0)
 contains all three desktop bundles and sidecars inside the exact 14-asset set.
-The [release workflow](https://github.com/blisspixel/quotabot/actions/workflows/release.yml)
+The [v0.10.0 release run](https://github.com/blisspixel/quotabot/actions/runs/33466848719)
 built and attested those archives. The separate
-[install smoke](https://github.com/blisspixel/quotabot/actions/workflows/install-smoke.yml)
+[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33469407949)
 passed packaged desktop and source-setup checks on Windows, macOS, and Ubuntu.
 Application signing and notarization remain pre-1.0 native trust gates.
 Interactive native accessibility evidence remains a separate final 1.0 gate

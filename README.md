@@ -170,7 +170,9 @@ repeats native build, archive, checksum, provenance,
 fresh-download, install, upgrade, source-setup, and desktop-run checks. Current
 Windows and macOS artifacts remain unsigned transition artifacts, so the
 focused 0.10.x line must repeat that evidence with platform-signed artifacts
-before 1.0. See the [release
+before 1.0. The exact [v0.10.0 release run](https://github.com/blisspixel/quotabot/actions/runs/33466848719)
+and [published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33469407949)
+are green. See the [release
 evidence](docs/BUILDING.md#baseline-release-evidence),
 [roadmap](ROADMAP.md), [documentation index](docs/README.md),
 [contributing guide](CONTRIBUTING.md), and [security policy](SECURITY.md).

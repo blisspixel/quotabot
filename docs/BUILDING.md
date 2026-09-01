@@ -611,10 +611,10 @@ tray-readiness check remain separate release-candidate requirements.
 The current tagged rehearsal baseline is the immutable
 [v0.10.0 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0)
 with its exact 14-asset set. The native
-[release workflow](https://github.com/blisspixel/quotabot/actions/workflows/release.yml)
+[v0.10.0 release run](https://github.com/blisspixel/quotabot/actions/runs/33466848719)
 builds, checksums, shape-checks, attests, freshly downloads, and reverifies every
 archive before publication. The separate
-[install smoke](https://github.com/blisspixel/quotabot/actions/workflows/install-smoke.yml)
+[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33469407949)
 then covers the canonical unversioned Latest install, upgrade from the actual
 prior stable, exact-tag self-update, persistent state, source setup, and desktop
 run checks on Windows, macOS, and Ubuntu. Stable 0.10.0 promotes the fully
