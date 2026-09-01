@@ -166,11 +166,13 @@ release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` or
 `vMAJOR.MINOR.PATCH-rc.N` selects one exact tag for a reproducible rollback.
 
 The current stable release is
-[v0.10.0](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0). Its
-[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33469407949)
-covers the unversioned Latest install, upgrade from the actual prior stable,
-persistent state, source setup, and desktop-run matrix on Windows, macOS, and
-Ubuntu. Every patch release follows the same published-artifact path.
+[v0.10.1](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1). Its
+[published candidate install smoke](https://github.com/blisspixel/quotabot/actions/runs/33562140830)
+covers exact-tag installation, upgrade from the actual prior stable, persistent
+state, source setup, and the desktop-run matrix on Windows, macOS, and Ubuntu.
+Stable publication binds GitHub Latest and its follow-up smoke repeats the
+unversioned canonical install. Every patch release follows the same
+published-artifact path.
 
 For a one-line macOS or Linux fork install, pass the repository override to the
 installer process, not only to `curl`:

@@ -39,13 +39,13 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 
 ## Project status and execution order
 
-The current verified stable release is 0.10.0. The shipped routing policies are
-`balanced`, `local_first`, and opt-in `quota_stretch`. The current release
-candidate is 0.10.1-rc.1. Its bounded provider-ID cache coordinator passed the
-ordinary hosted Windows, macOS, and Linux matrix from signed `main`; the shipped
-alias map remains empty. The next work validates the candidate release and
-update lifecycle before stable promotion, then continues native field
-validation and signed 1.0 readiness, with no new product breadth. The
+The current verified stable release is 0.10.1. The shipped routing policies are
+`balanced`, `local_first`, and opt-in `quota_stretch`. Its bounded provider-ID
+cache coordinator passed the complete release, install, update, and source-setup
+lifecycle on Windows, macOS, and Linux; the shipped alias map remains empty. The
+next work continues native field validation and signed 1.0 readiness, with no
+new product breadth during stabilization. Bounded local-resource visibility is
+specified as the first post-stabilization track. The
 [roadmap Next section](ROADMAP.md#next) is the sole source for its
 behavior, guardrails, completion criteria, and rationale.
 
