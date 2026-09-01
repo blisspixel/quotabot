@@ -167,7 +167,7 @@ release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` or
 
 The current stable release is
 [v0.10.0](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0). Its
-[install smoke](https://github.com/blisspixel/quotabot/actions/workflows/install-smoke.yml)
+[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33469407949)
 covers the unversioned Latest install, upgrade from the actual prior stable,
 persistent state, source setup, and desktop-run matrix on Windows, macOS, and
 Ubuntu. Every patch release follows the same published-artifact path.
