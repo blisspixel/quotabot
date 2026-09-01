@@ -2162,15 +2162,15 @@ void main() {
     var checks = 0;
     final opened = <String>[];
     const latest = QuotabotRelease(
-      tag: 'v0.10.0-rc.18',
-      version: '0.10.0-rc.18',
-      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.0-rc.18',
-      prerelease: true,
+      tag: 'v0.10.1',
+      version: '0.10.1',
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.1',
+      prerelease: false,
     );
     const stable = QuotabotRelease(
-      tag: 'v0.9.9',
-      version: '0.9.9',
-      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.9.9',
+      tag: 'v0.10.1',
+      version: '0.10.1',
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.1',
       prerelease: false,
     );
     await tester.pumpWidget(
@@ -2209,7 +2209,7 @@ void main() {
     await tester.pump();
     expect(checks, 1);
     expect(find.text('Update available'), findsOneWidget);
-    expect(find.text('Latest preview: 0.10.0-rc.18'), findsOneWidget);
+    expect(find.text('Latest release: 0.10.1'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byType(AlertDialog).last,
@@ -2217,9 +2217,9 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Latest stable: 0.9.9'), findsOneWidget);
+    expect(find.text('Latest stable: 0.10.0'), findsNothing);
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Open preview update'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Open stable update'));
     await tester.pumpAndSettle();
     expect(opened, [latest.url]);
     expect(tester.takeException(), isNull);
@@ -2330,7 +2330,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.widgetWithText(FilledButton, 'Open preview release'),
+      find.widgetWithText(FilledButton, 'Open stable release'),
       findsOneWidget,
     );
     expect(find.text('Open preview update'), findsNothing);

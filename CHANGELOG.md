@@ -2,6 +2,66 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.10.0 - 2026-08-31
+
+### Added
+
+- `quotabot update` provides checksum-verified, transactional self-update from
+  the CLI with stable and preview channels, exact-tag installs, read-only
+  checks, forced reinstalls, machine-readable results, rollback protection, and
+  installed-version verification. Release candidates follow the preview
+  channel and promote naturally to their final stable release.
+- Per-request routing now includes cache-only decisions, deterministic receipts,
+  active quota leases, provider and account filters, named profile preferences,
+  local-first and quota-stretch policies, and bounded alert subscriptions across
+  CLI, MCP, and loopback HTTP surfaces.
+- Model routing includes capability and budget filters, spend classification,
+  local readiness, hardware-fit guidance, cloud-offload detection, and optional
+  use of included quota projected to expire unused.
+- The optional desktop app includes the current build, explicit stable and
+  preview update discovery, grouped provider and display settings, analytics,
+  routing explanations, and portable bundles for Windows, macOS, and Linux.
+
+### Fixed
+
+- Windows self-update works from Windows PowerShell 5.1 by using the .NET
+  cryptography API and preserving the downloaded archive's `.zip` suffix.
+  Affected rc.16 installations can recover once with the exact v0.10.0
+  installer, after which normal self-update resumes.
+- Cache evidence transactions serialize across processes and isolates, recover
+  abandoned claims only behind the native lock, preserve bounded acquisition
+  time, and reject unsafe or malformed cache roots before mutation.
+- Claude authorization, account cleanup, explicit disconnect, partial-cache
+  recovery, drift quarantine, loopback request completion, MCP capacity
+  recovery, and provider-specific parsing retain focused regression coverage.
+
+### Security
+
+- Release archives include the exact updater scripts they execute. Each archive
+  and required SHA-256 sidecar is shape-checked, attested, freshly downloaded,
+  and reverified before an immutable draft can publish.
+- Authenticated loopback routing proves the exact server connection before
+  disclosing its bearer. Unauthenticated account labels are pseudonymized, HTTP
+  and MCP bodies are bounded by size and wall-clock deadlines, and secret-capable
+  local files retain checked owner-only protection.
+- Runtime policy continues to reject direct paid model, chat, image, and content
+  generation endpoints. Quota and routing reads make no model calls and never
+  read prompts or source code.
+
+### Changed
+
+- Stable publication now explicitly requests GitHub Latest and fails if the
+  canonical Latest pointer does not match the audited stable tag. Hosted install
+  smoke exercises both exact-tag acquisition and the unversioned
+  `releases/latest/download` path on Windows, macOS, and Linux.
+- GitHub metadata reads use an explicit existing `GH_TOKEN` or `GITHUB_TOKEN`
+  when present without including that credential in output or errors.
+- Stable 0.10.0 promotes the fully verified rc.17 stabilization inventory and
+  becomes the default installer release. Windows and macOS artifacts remain
+  explicitly disclosed unsigned transition artifacts until owner identities and
+  protected signing rehearsals are complete. Checksums and GitHub provenance
+  remain required, and platform protections must not be bypassed.
+
 ## 0.10.0-rc.17 - 2026-08-31
 
 ### Fixed

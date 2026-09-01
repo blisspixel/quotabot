@@ -34,15 +34,15 @@ it was enabled on July 18, 2026. v0.9.4 and later releases are locked under that
 policy; v0.9.2 and earlier releases were not changed retroactively.
 
 The verified
-[v0.9.9 rehearsal release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9)
+[v0.10.0 stable release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0)
 contains all three desktop bundles and sidecars inside the exact 14-asset set.
-The [release workflow](https://github.com/blisspixel/quotabot/actions/runs/32290931121)
+The [release workflow](https://github.com/blisspixel/quotabot/actions/workflows/release.yml)
 built and attested those archives. The separate
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058)
+[install smoke](https://github.com/blisspixel/quotabot/actions/workflows/install-smoke.yml)
 passed packaged desktop and source-setup checks on Windows, macOS, and Ubuntu.
-Application signing and notarization are 0.10.x exit gates. Interactive native
-accessibility evidence remains a separate final 1.0 gate and must run again on
-the exact signed candidate.
+Application signing and notarization remain pre-1.0 native trust gates.
+Interactive native accessibility evidence remains a separate final 1.0 gate
+and must run again on the exact signed candidate.
 
 The bundles are portable applications, not system installers. They do not
 replace the separately installed `quotabot` CLI and do not move or delete local
@@ -127,7 +127,7 @@ Expand-Archive -LiteralPath $asset -DestinationPath $destination
 Start-Process (Join-Path $destination 'quotabot.exe')
 ```
 
-The published v0.9.9 Windows packages are not Authenticode-signed. Each newer
+The published v0.10.0 Windows packages are not Authenticode-signed. Each newer
 release begins with a mandatory native signing status in its GitHub release
 notes. `Windows: unsigned transition artifact` means SmartScreen publisher
 identity is not established. Checksums and GitHub provenance do not establish
@@ -154,7 +154,7 @@ open "$destination"
 The release notes also state the macOS signing mode. Current transition bundles
 are not Developer ID-signed or notarized, so Gatekeeper may refuse a normal
 launch. Do not remove quarantine metadata merely to silence that warning. A
-signed, notarized bundle remains a 0.10.x exit criterion.
+signed, notarized bundle remains a pre-1.0 completion criterion.
 
 ### Linux
 

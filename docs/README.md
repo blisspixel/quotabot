@@ -4,13 +4,13 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.9.9. The current release candidate is
-0.10.0-rc.17. The next work in the focused 0.10.x stabilization train is the
-bounded provider-ID cache migration, owner signing setup, and one signed
-lifecycle rehearsal. rc.17 hardens the checksum-verified `quotabot update` command
-whose release discovery, exact-tag installation, transactional activation, and
-installed-version verification join the existing cross-platform lifecycle
-gate. The repository now
+The current verified stable release is 0.10.0. The next work in the focused
+0.10.x hardening line is the bounded provider-ID cache migration, native field
+validation, owner signing setup, and one signed lifecycle rehearsal before 1.0.
+Stable 0.10.0 promotes the verified rc.17 updater correction. Its release
+discovery, exact-tag installation, transactional activation, installed-version
+verification, explicit GitHub Latest contract, and canonical Latest installer
+smoke join the existing cross-platform lifecycle gate. The repository now
 contains fail-closed Windows and macOS signing paths for CLI and desktop assets.
 They capture one signing policy per release, pin the Apple build toolchain,
 enforce exact unsigned-to-signed tree deltas, and bind signed native-verification

@@ -36,12 +36,13 @@ def release_versions(root: Path) -> tuple[dict[str, str], str]:
 
     collector = root / "collector"
     app = root / "app"
+    source_version = _required_match(
+        collector / "pubspec.yaml",
+        rf"^version:\s*({VERSION})\s*$",
+        "collector pubspec",
+    )
     versions = {
-        "collector pubspec": _required_match(
-            collector / "pubspec.yaml",
-            rf"^version:\s*({VERSION})\s*$",
-            "collector pubspec",
-        ),
+        "collector pubspec": source_version,
         "CLI": _required_match(
             collector / "bin" / "collect.dart",
             rf"^const _version = '({VERSION})';$",
@@ -73,11 +74,6 @@ def release_versions(root: Path) -> tuple[dict[str, str], str]:
             rf"^> \*\*Current stable:\*\* ({VERSION})\.",
             "README current stable",
         ),
-        "README current candidate": _required_match(
-            root / "README.md",
-            rf"^> \*\*Current release candidate:\*\* ({VERSION})\.",
-            "README current candidate",
-        ),
         "SECURITY current audited release": _required_match(
             root / "SECURITY.md",
             (
@@ -95,11 +91,6 @@ def release_versions(root: Path) -> tuple[dict[str, str], str]:
             root / "docs" / "README.md",
             rf"^The current verified stable release is ({VERSION})\.",
             "docs index current stable",
-        ),
-        "docs index current candidate": _required_match(
-            root / "docs" / "README.md",
-            rf"^({VERSION})\. The next work in the focused 0\.10\.x",
-            "docs index current candidate",
         ),
         "setup current stable": _required_match(
             root / "docs" / "SETUP.md",
@@ -120,6 +111,27 @@ def release_versions(root: Path) -> tuple[dict[str, str], str]:
             "CHANGELOG latest release",
         ),
     }
+    candidate_markers = (
+        (
+            root / "README.md",
+            rf"^> \*\*Current release candidate:\*\* ({VERSION})\.",
+            "README current candidate",
+        ),
+        (
+            root / "docs" / "README.md",
+            rf"^({VERSION})\. The next work in the focused 0\.10\.x",
+            "docs index current candidate",
+        ),
+    )
+    if "-" in source_version:
+        for path, pattern, label in candidate_markers:
+            versions[label] = _required_match(path, pattern, label)
+    else:
+        for path, pattern, label in candidate_markers:
+            if re.search(pattern, path.read_text(encoding="utf-8"), re.MULTILINE):
+                raise VersionCheckError(
+                    f"{label}: stable source must not retain a candidate marker"
+                )
     build = _required_match(
         app / "pubspec.yaml",
         rf"^version:\s*{VERSION}\+([0-9]+)\s*$",

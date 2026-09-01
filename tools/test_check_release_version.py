@@ -61,14 +61,26 @@ class ReleaseVersionCheckTests(unittest.TestCase):
             root = Path(directory)
             self._write_fixture(root)
             (root / "README.md").write_text(
-                "> **Current stable:** 1.2.2. Release notes.\n"
-                "> **Current release candidate:** 1.2.3.\n",
+                "> **Current stable:** 1.2.2. Release notes.\n",
                 encoding="utf-8",
             )
 
             with self.assertRaisesRegex(
                 VersionCheckError,
                 r"expected 1\.2\.3; mismatched README current stable=1\.2\.2",
+            ):
+                check_release_versions(root)
+
+    def test_stable_source_rejects_lingering_candidate_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(root)
+            with (root / "README.md").open("a", encoding="utf-8") as readme:
+                readme.write("> **Current release candidate:** 1.2.3.\n")
+
+            with self.assertRaisesRegex(
+                VersionCheckError,
+                r"README current candidate: stable source must not retain",
             ):
                 check_release_versions(root)
 
@@ -199,7 +211,11 @@ class ReleaseVersionCheckTests(unittest.TestCase):
             ),
             "README.md": (
                 f"> **Current stable:** {stable_version}. Release notes.\n"
-                f"> **Current release candidate:** {source_version}.\n"
+                + (
+                    f"> **Current release candidate:** {source_version}.\n"
+                    if "-" in source_version
+                    else ""
+                )
             ),
             "SECURITY.md": (
                 "  The current audited release is "
@@ -212,8 +228,13 @@ class ReleaseVersionCheckTests(unittest.TestCase):
             ),
             "docs/README.md": (
                 "The current verified stable release is "
-                f"{stable_version}. The current release candidate is\n"
-                f"{source_version}. The next work in the focused 0.10.x train.\n"
+                f"{stable_version}. "
+                + (
+                    f"The current release candidate is\n{source_version}. "
+                    if "-" in source_version
+                    else ""
+                )
+                + "The next work in the focused 0.10.x train.\n"
             ),
             "docs/SETUP.md": (
                 "The current stable release is\n"

@@ -31,6 +31,7 @@ jobs:
       target_sha: ${{ steps.releases.outputs.target_sha }}
       previous_sha: ${{ steps.releases.outputs.previous_sha }}
       supports_self_update: ${{ steps.releases.outputs.supports_self_update }}
+      target_is_latest: ${{ steps.releases.outputs.target_is_latest }}
     steps:
       - name: Resolve latest and previous releases
         id: releases
@@ -102,6 +103,10 @@ jobs:
           }
           target_sha="$(resolve_tag_commit "$target")"
           previous_sha="$(resolve_tag_commit "$previous")"
+          target_is_latest=false
+          if [[ "$target" == "$latest" ]]; then
+            target_is_latest=true
+          fi
 
           supports_self_update=false
           if [[ "$target" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-rc\.([0-9]+))?$ ]]; then
@@ -122,12 +127,14 @@ jobs:
             echo "target_sha=$target_sha"
             echo "previous_sha=$previous_sha"
             echo "supports_self_update=$supports_self_update"
+            echo "target_is_latest=$target_is_latest"
           } >> "$GITHUB_OUTPUT"
           echo "Target: $target"
           echo "Target commit: $target_sha"
           echo "Upgrade from: $previous"
           echo "Previous commit: $previous_sha"
           echo "Self-update smoke: $supports_self_update"
+          echo "Canonical latest install smoke: $target_is_latest"
 
   clean-install:
     needs: resolve-releases
@@ -327,6 +334,28 @@ jobs:
             exit "$update_status"
           fi
           python -c 'import json, sys; value = json.loads(sys.argv[1]); assert value["schema"] == "quotabot.update.v1" and value["selection"] == "exact" and value["target_tag"] == sys.argv[2] and value["installed"] is True' "$update_json" "$TARGET_TAG"
+          [[ "$("$executable" --version)" == "quotabot ${TARGET_TAG#v}" ]]
+
+      - name: Install Windows through the canonical latest URL
+        if: runner.os == 'Windows' && needs.resolve-releases.outputs.target_is_latest == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item Env:QUOTABOT_VERSION -ErrorAction SilentlyContinue
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File install.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Latest installer exited $LASTEXITCODE" }
+          $installed = Join-Path $env:LOCALAPPDATA 'quotabot/bin/quotabot.exe'
+          $expectedVersion = 'quotabot ' + $env:TARGET_TAG.TrimStart('v')
+          $actualVersion = & $installed --version
+          if ($actualVersion -ne $expectedVersion) { throw "Expected $expectedVersion, got $actualVersion" }
+
+      - name: Install macOS or Linux through the canonical latest URL
+        if: runner.os != 'Windows' && needs.resolve-releases.outputs.target_is_latest == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u QUOTABOT_VERSION bash install.sh
+          executable="$HOME/.local/bin/quotabot"
           [[ "$("$executable" --version)" == "quotabot ${TARGET_TAG#v}" ]]
 
       - name: Preserve verified current release archive
