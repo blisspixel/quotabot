@@ -29,6 +29,10 @@ void main() {
   group('kProviderIdAliases invariants', () {
     final registered = kProviderAdapterRegistry.map((e) => e.id).toSet();
 
+    test('current provider id inventory matches the adapter registry', () {
+      expect(kCurrentProviderIds, registered);
+    });
+
     test('every alias key is a retired id, never a live registered provider',
         () {
       for (final key in kProviderIdAliases.keys) {

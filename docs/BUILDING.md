@@ -543,25 +543,32 @@ maintainer will consume it:
    directory.
 5. Commit the release metadata on `main`, push it, and wait for hosted Windows,
    macOS, and Ubuntu CI plus CodeQL and secret scanning to pass before tagging.
-6. Before tagging, repeat the package and execution smoke on each claimed native
+6. For a release that changes provider-ID continuity, require the ordinary
+   three-OS collector suite to exercise a synthetic alias without adding one to
+   the shipped map. The matrix must cover a released older writer, coordinator
+   contention, killed-process recovery at prepared, target, and receipt
+   boundaries, malformed roots, records, targets, and receipts, bounded partial
+   resume, filename limits, and cache reads that fail closed after a late
+   retired write.
+7. Before tagging, repeat the package and execution smoke on each claimed native
    host. Retain the bounded readiness report, then complete the Narrator,
    keyboard-only focus-order, visible-focus, launcher, and tray checks that it
    does not prove. Complete equivalent native interactive checks on macOS and
    Linux. Record an unavailable cell explicitly rather than treating a
    shared-code test as native evidence.
-7. Verify the official repository still has the active `v*` tag ruleset that
+8. Verify the official repository still has the active `v*` tag ruleset that
    blocks updates and deletion, plus GitHub release immutability. Immutability
    applies only to releases published after the setting was enabled on July 18,
    2026. v0.9.4 and later releases are locked under that policy; v0.9.2 and
    earlier releases were not changed retroactively.
-8. Push an annotated `vX.Y.Z` or `vX.Y.Z-rc.N` tag. Wait for every `Release` workflow job,
+9. Push an annotated `vX.Y.Z` or `vX.Y.Z-rc.N` tag. Wait for every `Release` workflow job,
    including its reusable CI quality gate, four CLI builds, four clean CLI
    execution legs, three desktop builds, and three clean desktop
    archive-verification legs, to pass.
-9. Confirm that every CLI archive contains `lib/install.ps1` and
+10. Confirm that every CLI archive contains `lib/install.ps1` and
    `lib/install.sh`, so `quotabot update` uses an installer authenticated by the
    archive checksum and provenance rather than a mutable branch copy.
-10. Confirm that a stable tag is published as neither draft nor prerelease, or
+11. Confirm that a stable tag is published as neither draft nor prerelease, or
    that an RC tag is published as a prerelease and does not replace the latest
    stable release. Confirm it is marked immutable and has
    these CLI archive and `.sha256` sidecar pairs:
@@ -571,7 +578,7 @@ maintainer will consume it:
    `quotabot-windows-x64-desktop.zip`,
    `quotabot-darwin-arm64-desktop.zip`, and
    `quotabot-linux-x64-desktop.tar.gz`.
-11. Download every archive, compare it with its SHA-256 sidecar, and verify its
+12. Download every archive, compare it with its SHA-256 sidecar, and verify its
     exact repository provenance. Resolve the protected tag commit, then require
     the release workflow, exact tag, exact commit, and GitHub-hosted runner:
 
@@ -587,12 +594,12 @@ maintainer will consume it:
     ```
 
     The release workflow creates the attestation before uploading each pair.
-12. After publication, dispatch `Install smoke` immediately. For an RC, set the
+13. After publication, dispatch `Install smoke` immediately. For an RC, set the
     `target_tag` input to the exact `vX.Y.Z-rc.N` tag; leaving it blank resolves
     the latest stable release instead. Require the clean install, prior-version
     upgrade, persistent-state, and source-setup matrix to pass on Windows,
     macOS, and Linux.
-13. Confirm GitHub security signals are clear: CI, CodeQL, secret scanning,
+14. Confirm GitHub security signals are clear: CI, CodeQL, secret scanning,
     Dependabot alerts, and the dependency-review PR gate.
 
 The `Install smoke` workflow automates the post-release clean-host portion of

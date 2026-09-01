@@ -9,6 +9,7 @@ import 'file_guard.dart';
 import 'insights.dart';
 import 'models.dart';
 import 'provider_adapters.dart';
+import 'provider_id_migration.dart';
 import 'provider_ids.dart';
 import 'schema_contracts.dart';
 import 'storage_keys.dart';
@@ -29,12 +30,31 @@ Directory cacheDir() {
   return dir;
 }
 
+String _rawProviderStem(String provider) {
+  final safe = provider.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+  return safe.isEmpty ? 'unknown' : safe;
+}
+
+String _boundedLegacyAccountStem(String account) {
+  final raw = _rawProviderStem(account);
+  if (utf8.encode(raw).length <= 220) return raw;
+  return 'oversize_${sha256.convert(utf8.encode(account))}';
+}
+
 String _safeProviderStem(String provider) {
   // Canonicalize first so cache/history/bucket filenames stay consistent under a
   // provider rename. Identity until a rename is registered.
   final canonical = canonicalizeProviderId(provider);
-  final safe = canonical.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-  return safe.isEmpty ? 'unknown' : safe;
+  return _rawProviderStem(canonical);
+}
+
+List<String> _providerEvidenceStems(String provider) {
+  final canonical = canonicalizeProviderId(provider);
+  return [
+    for (final retired in retiredProviderIdsFor(canonical))
+      _rawProviderStem(retired),
+    _rawProviderStem(canonical),
+  ];
 }
 
 File _file(String provider) =>
@@ -355,7 +375,7 @@ class _AnalyticsRecoveryMergePlan {
 String _accountStem(String account) => accountStorageStem(account);
 
 File _legacyDriftFile(String provider, String account) => File(
-    '${cacheDir().path}/drift_${_safeProviderStem(provider)}_${_safeProviderStem(account)}.json');
+    '${cacheDir().path}/drift_${_safeProviderStem(provider)}_${_boundedLegacyAccountStem(account)}.json');
 
 File _driftFile(String provider, String account) => File(
     '${cacheDir().path}/drift_${_safeProviderStem(provider)}_${_accountStem(account)}.json');
@@ -373,20 +393,19 @@ List<File> _evidenceLockFiles(
 }) {
   final accountScoped =
       _accountScopedProviders.contains(provider) && _hasAccount(account);
-  final scope = accountScoped ? _accountStem(account) : 'provider';
   final dir = cacheDir().path;
-  final canonical = File(
-    '$dir/evidence_${_safeProviderStem(provider)}_$scope.lock',
-  );
-  if (!accountScoped ||
-      (!includeLegacy &&
-          !_legacyAccountArtifactsExist(provider, account, dir))) {
-    return [canonical];
+  final includeLegacyAccount = accountScoped &&
+      (includeLegacy || _legacyAccountArtifactsExist(provider, account, dir));
+  final accountScope = accountScoped ? _accountStem(account) : 'provider';
+  final legacyAccountScope = _boundedLegacyAccountStem(account);
+  final files = <File>[];
+  for (final providerStem in _providerEvidenceStems(provider)) {
+    if (includeLegacyAccount) {
+      files.add(File('$dir/evidence_${providerStem}_$legacyAccountScope.lock'));
+    }
+    files.add(File('$dir/evidence_${providerStem}_$accountScope.lock'));
   }
-  final legacy = File(
-    '$dir/evidence_${_safeProviderStem(provider)}_${_safeProviderStem(account)}.lock',
-  );
-  return legacy.path == canonical.path ? [canonical] : [legacy, canonical];
+  return files;
 }
 
 bool _legacyAccountArtifactsExist(
@@ -394,15 +413,19 @@ bool _legacyAccountArtifactsExist(
   String account,
   String dir,
 ) {
-  final providerStem = _safeProviderStem(provider);
-  final accountStem = _safeProviderStem(account);
-  return [
-    File('$dir/${providerStem}_$accountStem.json'),
-    File('$dir/drift_${providerStem}_$accountStem.json'),
-    File('$dir/history_${providerStem}_$accountStem.jsonl'),
-    File('$dir/buckets_${providerStem}_$accountStem.json'),
-    File('$dir/evidence_${providerStem}_$accountStem.lock'),
-  ].any((file) => file.existsSync());
+  final accountStem = _boundedLegacyAccountStem(account);
+  for (final providerStem in _providerEvidenceStems(provider)) {
+    if ([
+      File('$dir/${providerStem}_$accountStem.json'),
+      File('$dir/drift_${providerStem}_$accountStem.json'),
+      File('$dir/history_${providerStem}_$accountStem.jsonl'),
+      File('$dir/buckets_${providerStem}_$accountStem.json'),
+      File('$dir/evidence_${providerStem}_$accountStem.lock'),
+    ].any((file) => file.existsSync())) {
+      return true;
+    }
+  }
+  return false;
 }
 
 typedef _EvidenceGuardObserver = void Function(
@@ -483,6 +506,7 @@ T _withEvidenceLock<T>(
   String account,
   T Function() run, {
   bool includeLegacy = false,
+  Set<String> migrationTiers = const {'quota', 'history', 'buckets'},
   Duration operationTimeout = defaultFileGuardAcquisitionTimeout,
 }) {
   final byPath = <String, File>{};
@@ -546,6 +570,15 @@ T _withEvidenceLock<T>(
               FileSystemEntityType.file) {
         throw FileSystemException('evidence lock changed', file.path);
       }
+    }
+    if (providerIdMigrationIdentityChanged(
+      provider,
+      account,
+      tiers: migrationTiers,
+    )) {
+      throw FileSystemException(
+        'retired provider evidence changed during migration',
+      );
     }
     return run();
   } finally {
@@ -624,7 +657,7 @@ void saveSnapshot(
           existing == null ? null : _cacheFileObservationMicros(evidence!.file);
       if (existingMicros != null && existingMicros >= admittedMicros) return;
       _writeTrustedSnapshotUnlocked(q, admittedMicros);
-    });
+    }, migrationTiers: const {'quota'});
   } catch (_) {
     // Cache is best-effort; ignore write failures.
   }
@@ -640,6 +673,13 @@ Map<String, dynamic> _persistedSnapshotJson(ProviderQuota quota) =>
     quota.toJson()..remove('reset_credits_available');
 
 void _writeTrustedSnapshotUnlocked(ProviderQuota quota, int observedMicros) {
+  if (providerIdMigrationTierQuarantined(
+    quota.provider,
+    quota.account,
+    'quota',
+  )) {
+    return;
+  }
   _atomicWrite(
     _accountedFile(quota),
     jsonEncode({
@@ -785,7 +825,7 @@ ProviderDriftBaselineRecoveryResult recoverProviderDriftBaseline(
         detail: 'fresh verified quota is now the exact account baseline',
         snapshot: fresh,
       );
-    });
+    }, migrationTiers: const {'quota'});
   } catch (_) {
     return _baselineRecoveryFailure(
       'storage_unavailable',
@@ -822,6 +862,17 @@ ProviderQuota admitAndCacheQuotaEvidence(
   required int observedAtMicros,
   String? rejectionReason,
 }) {
+  if (providerIdMigrationTierQuarantined(
+    fresh.provider,
+    fresh.account,
+    'quota',
+  )) {
+    return quarantineUnusableQuotaEvidence(
+      fresh,
+      'provider identity cache migration is incomplete',
+      observedAt,
+    );
+  }
   final unusableReason = rejectionReason == null
       ? unusableQuotaEvidenceDriftReason(
           fresh,
@@ -887,7 +938,7 @@ ProviderQuota admitAndCacheQuotaEvidence(
         );
       }
       return admission.snapshot;
-    });
+    }, migrationTiers: const {'quota'});
   } catch (_) {
     // Lock failure means the read cannot be ordered against concurrent
     // collectors. Never expose the fresh observation as current capacity.
@@ -971,6 +1022,13 @@ const _historyCap = 200;
 
 void saveHistory(ProviderQuota q) {
   if (!isTrustedQuotaEvidenceAt(q, nowEpoch())) return;
+  if (providerIdMigrationTierQuarantined(
+    q.provider,
+    q.account,
+    'history',
+  )) {
+    return;
+  }
   try {
     final f = _historyFile(q.provider, account: q.account);
     if (_hasAccount(q.account) &&
@@ -1010,7 +1068,7 @@ File _accountedPath(String provider, String account) => File(
     '${cacheDir().path}/${_safeProviderStem(provider)}_${_accountStem(account)}.json');
 
 File _legacyAccountedPath(String provider, String account) => File(
-    '${cacheDir().path}/${_safeProviderStem(provider)}_${_safeProviderStem(account)}.json');
+    '${cacheDir().path}/${_safeProviderStem(provider)}_${_boundedLegacyAccountStem(account)}.json');
 
 File _accountedFile(ProviderQuota q) {
   if (_accountScopedProviders.contains(q.provider) && _hasAccount(q.account)) {
@@ -1022,12 +1080,23 @@ File _accountedFile(ProviderQuota q) {
 ProviderQuota? _readSnapshotEvidence(File file) {
   if (!file.existsSync() || file.lengthSync() > _maxJsonBytes) return null;
   try {
-    return ProviderQuota.fromJson(
+    return _persistedQuotaFromJson(
       jsonDecode(file.readAsStringSync()) as Map<String, dynamic>,
     );
   } catch (_) {
     return null;
   }
+}
+
+bool _persistedProviderMatches(Object? value, String canonicalProvider) =>
+    value is String && canonicalizeProviderId(value) == canonicalProvider;
+
+ProviderQuota _persistedQuotaFromJson(Map<String, dynamic> source) {
+  final rawProvider = source['provider'];
+  if (rawProvider is! String) return ProviderQuota.fromJson(source);
+  final canonical = canonicalizeProviderId(rawProvider);
+  if (canonical == rawProvider) return ProviderQuota.fromJson(source);
+  return ProviderQuota.fromJson({...source, 'provider': canonical});
 }
 
 ProviderQuota? _readCanonicalSnapshotEvidence(
@@ -1043,6 +1112,13 @@ ProviderQuota? _readCanonicalSnapshotEvidence(
       !_isRegisteredCacheEvidence(quota) ||
       quota.asOf <= 0 ||
       quota.asOf > newestAllowedAsOf) {
+    return null;
+  }
+  if (providerIdMigrationTierQuarantined(
+    provider,
+    quota.account,
+    'quota',
+  )) {
     return null;
   }
   final accountScoped =
@@ -1187,10 +1263,15 @@ List<ProviderQuota> loadAccountSnapshots(String provider) {
       if (!entity.uri.pathSegments.last.startsWith('${stem}_')) continue;
       try {
         if (entity.lengthSync() > _maxJsonBytes) continue;
-        final q = ProviderQuota.fromJson(
+        final q = _persistedQuotaFromJson(
           jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>,
         );
         if (q.provider == provider &&
+            !providerIdMigrationTierQuarantined(
+              q.provider,
+              q.account,
+              'quota',
+            ) &&
             _isRegisteredCacheEvidence(q) &&
             q.asOf > 0 &&
             q.asOf <= nowEpoch() + kQuotaEvidenceClockSkewSeconds &&
@@ -1249,16 +1330,24 @@ List<ProviderQuota> loadCachedSnapshots({
             name.startsWith('buckets_') ||
             name.startsWith('drift_') ||
             name.startsWith('analytics_migration_') ||
+            name.startsWith('provider_id_migration_') ||
             name.startsWith('legacy_bucket_owner_')) {
           continue;
         }
         final bytes =
             measureFileBytesForTesting?.call(entity) ?? entity.lengthSync();
         if (bytes > _maxJsonBytes) continue;
-        final q = ProviderQuota.fromJson(
+        final q = _persistedQuotaFromJson(
           jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>,
         );
         if (!_isRegisteredCacheEvidence(q)) continue;
+        if (providerIdMigrationTierQuarantined(
+          q.provider,
+          q.account,
+          'quota',
+        )) {
+          continue;
+        }
         final trusted = isTrustedQuotaEvidence(q);
         final legacySuspect = isLegacySuspectQuotaEvidence(q);
         if (!trusted && !legacySuspect) continue;
@@ -1331,7 +1420,7 @@ void saveProviderDriftObservation(
         observedAt,
         observedMicros,
       );
-    });
+    }, migrationTiers: const {'quota'});
   } catch (_) {
     // Diagnostics are best-effort. The in-memory result still fails closed.
   }
@@ -1344,16 +1433,29 @@ ProviderQuota attachProviderDriftObservation(
   int? now,
 }) {
   if (!isTrustedQuotaEvidence(trusted)) return trusted;
+  final observedAt = now ?? nowEpoch();
+  if (providerIdMigrationTierQuarantined(
+    trusted.provider,
+    trusted.account,
+    'quota',
+  )) {
+    return quarantineUnusableQuotaEvidence(
+      trusted,
+      'provider identity cache migration is incomplete',
+      observedAt,
+    );
+  }
   try {
     return _withEvidenceLock(
       trusted.provider,
       trusted.account,
-      () => _attachProviderDriftObservationUnlocked(trusted, now: now),
+      () => _attachProviderDriftObservationUnlocked(trusted, now: observedAt),
+      migrationTiers: const {'quota'},
     );
   } catch (_) {
     // If lock creation itself is unavailable, a best-effort read is safer than
     // silently dropping an existing fail-closed diagnostic.
-    return _attachProviderDriftObservationUnlocked(trusted, now: now);
+    return _attachProviderDriftObservationUnlocked(trusted, now: observedAt);
   }
 }
 
@@ -1427,7 +1529,7 @@ bool _isDriftRecordForIdentity(
 ) =>
     record != null &&
     record['schema'] == _driftSchema &&
-    record['provider'] == provider &&
+    _persistedProviderMatches(record['provider'], provider) &&
     record['account'] == account;
 
 Map<String, dynamic>? _latestDriftRecord(
@@ -1454,6 +1556,13 @@ void _saveProviderDriftObservationUnlocked(
   int observedAt,
   int observedMicros,
 ) {
+  if (providerIdMigrationTierQuarantined(
+    trusted.provider,
+    trusted.account,
+    'quota',
+  )) {
+    return;
+  }
   final cacheMicros = _cacheObservationMicros(trusted);
   if (cacheMicros != null && cacheMicros > observedMicros) return;
   final driftFile = _driftFile(trusted.provider, trusted.account);
@@ -1519,7 +1628,7 @@ int? _cacheObservationMicros(ProviderQuota trusted) {
     final decoded = jsonDecode(file.readAsStringSync());
     if (decoded is! Map) return null;
     final record = decoded.cast<String, dynamic>();
-    if (record['provider'] != trusted.provider ||
+    if (!_persistedProviderMatches(record['provider'], trusted.provider) ||
         record['account'] != trusted.account ||
         record['as_of'] != trusted.asOf) {
       return _asOfObservationMicros(trusted.asOf);
@@ -1604,7 +1713,7 @@ File _historyFile(String provider, {String? account}) {
 
 File _legacyHistoryFile(String provider, {String? account}) {
   final suffix = account != null && _hasAccount(account)
-      ? '_${_safeProviderStem(account)}'
+      ? '_${_boundedLegacyAccountStem(account)}'
       : '';
   return File(
     '${cacheDir().path}/history_${_safeProviderStem(provider)}$suffix.jsonl',
@@ -1622,7 +1731,7 @@ File _bucketsFile(String provider, {String? account}) {
 
 File _legacyBucketsFile(String provider, {String? account}) {
   final suffix = account != null && _hasAccount(account)
-      ? '_${_safeProviderStem(account)}'
+      ? '_${_boundedLegacyAccountStem(account)}'
       : '';
   return File(
     '${cacheDir().path}/buckets_${_safeProviderStem(provider)}$suffix.json',
@@ -1737,10 +1846,11 @@ Map<String, dynamic>? _readAnalyticsMigrationRecord(
     if (decoded is! Map) return null;
     final record = decoded.cast<String, dynamic>();
     if (record['schema'] != _analyticsMigrationSchema ||
-        record['provider'] != provider ||
+        !_persistedProviderMatches(record['provider'], provider) ||
         record['account_digest'] != accountIdentityDigest(account)) {
       return null;
     }
+    if (record['provider'] != provider) record['provider'] = provider;
     return record;
   } catch (_) {
     return null;
@@ -1830,7 +1940,7 @@ List<({int asOf, String digest})> _historyCheckpointRows(
     try {
       final decoded = jsonDecode(line);
       if (decoded is! Map) continue;
-      final quota = ProviderQuota.fromJson(decoded.cast<String, dynamic>());
+      final quota = _persistedQuotaFromJson(decoded.cast<String, dynamic>());
       rows.add((asOf: quota.asOf, digest: _lineDigest(line)));
     } catch (_) {}
   }
@@ -2350,7 +2460,7 @@ List<_AnalyticsHistoryRow>? _strictAnalyticsHistoryRows(
       if (line.isEmpty) continue;
       final decoded = jsonDecode(line);
       if (decoded is! Map) return null;
-      final quota = ProviderQuota.fromJson(decoded.cast<String, dynamic>());
+      final quota = _persistedQuotaFromJson(decoded.cast<String, dynamic>());
       if (quota.provider != provider ||
           quota.account != account ||
           !_isRegisteredCacheEvidence(quota) ||
@@ -2415,7 +2525,7 @@ _AnalyticsRecoveryMergePlan? _exactAnalyticsHistoryMergePlan(
     if (markerDecoded is! Map) return null;
     final record = markerDecoded.cast<String, dynamic>();
     if (record['schema'] != _analyticsMigrationSchema ||
-        record['provider'] != provider ||
+        !_persistedProviderMatches(record['provider'], provider) ||
         record['account_digest'] != accountIdentityDigest(account)) {
       return null;
     }
@@ -2841,7 +2951,7 @@ _AnalyticsRecoveryMergePlan? _exactAnalyticsBucketMergePlan(
     if (markerDecoded is! Map) return null;
     final record = markerDecoded.cast<String, dynamic>();
     if (record['schema'] != _analyticsMigrationSchema ||
-        record['provider'] != provider ||
+        !_persistedProviderMatches(record['provider'], provider) ||
         record['account_digest'] != accountIdentityDigest(account)) {
       return null;
     }
@@ -3321,7 +3431,7 @@ AnalyticsStorageRecoveryResult? _completedAnalyticsStorageRecovery(
             decoded['state'] != 'checkpoint_admitted' &&
             decoded['state'] != 'checkpoint_pending' &&
             decoded['state'] != 'archiving') ||
-        decoded['provider'] != provider ||
+        !_persistedProviderMatches(decoded['provider'], provider) ||
         decoded['account_digest'] != accountIdentityDigest(account) ||
         decoded['tier'] != tier ||
         decoded['files'] is! List) {
@@ -3874,7 +3984,7 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
           archivedRoles: archivedRoles.toList(),
         );
       }
-    }, includeLegacy: true);
+    }, includeLegacy: true, migrationTiers: {selectedTier});
   } catch (_) {
     return _analyticsRecoveryResult(
       mode: 'recover',
@@ -3944,12 +4054,13 @@ bool _validAnalyticsIncidentMarkerRecord(
   Map<String, dynamic> record,
   int now,
 ) {
-  final provider = record['provider'];
+  final rawProvider = record['provider'];
+  final provider =
+      rawProvider is String ? canonicalizeProviderId(rawProvider) : rawProvider;
   final digest = record['account_digest'];
   final observedAt = record['observed_at'];
   return record['schema'] == _analyticsMigrationSchema &&
       provider is String &&
-      provider == canonicalizeProviderId(provider) &&
       providerAdapterById(provider) != null &&
       digest is String &&
       RegExp(r'^[a-f0-9]{64}$').hasMatch(digest) &&
@@ -3973,9 +4084,12 @@ Map<String, dynamic>? _readAnalyticsIncidentMarkerSync(
     final decoded = jsonDecode(marker.readAsStringSync());
     if (decoded is! Map) return null;
     final record = decoded.cast<String, dynamic>();
-    return _validAnalyticsIncidentMarkerRecord(marker, record, now)
-        ? record
-        : null;
+    if (!_validAnalyticsIncidentMarkerRecord(marker, record, now)) return null;
+    final provider = record['provider'];
+    if (provider is String) {
+      record['provider'] = canonicalizeProviderId(provider);
+    }
+    return record;
   } catch (_) {
     return null;
   }
@@ -4449,7 +4563,7 @@ Future<AnalyticsIncidentInventory> analyticsStorageIncidentInventory(
 }
 
 File _legacyBucketOwnerFile(String provider, String account) => File(
-    '${cacheDir().path}/legacy_bucket_owner_${_safeProviderStem(provider)}_${accountStorageStem(_safeProviderStem(account))}.json');
+    '${cacheDir().path}/legacy_bucket_owner_${_safeProviderStem(provider)}_${accountStorageStem(_rawProviderStem(account))}.json');
 
 Set<String> _legacyHistoryAccounts(String provider, String account) {
   final file = _legacyHistoryFile(provider, account: account);
@@ -4463,7 +4577,7 @@ Set<String> _legacyHistoryAccounts(String provider, String account) {
       try {
         final decoded = jsonDecode(line);
         if (decoded is Map &&
-            decoded['provider'] == provider &&
+            _persistedProviderMatches(decoded['provider'], provider) &&
             decoded['account'] is String) {
           accounts.add(decoded['account'] as String);
         }
@@ -4508,7 +4622,7 @@ bool _legacyBucketOwnerAllows(
       final decoded = jsonDecode(marker.readAsStringSync());
       return decoded is Map &&
           decoded['schema'] == _legacyBucketOwnerSchema &&
-          decoded['provider'] == provider &&
+          _persistedProviderMatches(decoded['provider'], provider) &&
           decoded['account_digest'] == digest;
     } catch (_) {
       return false;
@@ -4543,6 +4657,14 @@ void recordHeadroomSample(
   int now, {
   String? account,
 }) {
+  if (account != null &&
+      providerIdMigrationTierQuarantined(
+        provider,
+        account,
+        'buckets',
+      )) {
+    return;
+  }
   try {
     // Serialize the read-modify-write under the same interprocess lock the
     // snapshot/history paths use, keyed by provider/account. Without it, the app
@@ -4582,7 +4704,7 @@ void recordHeadroomSample(
         _bucketsFile(provider, account: account),
         jsonEncode(buckets.map((b) => b.toJson()).toList()),
       );
-    });
+    }, migrationTiers: const {'buckets'});
   } catch (_) {
     // Analytics are best-effort; never let a write failure affect collection.
   }
@@ -4719,6 +4841,13 @@ List<HeadroomBucket> _loadBuckets(
   try {
     final exactAccount =
         account != null && _hasAccount(account) ? account : null;
+    if (providerIdMigrationTierQuarantined(
+      provider,
+      exactAccount ?? '',
+      'buckets',
+    )) {
+      return [];
+    }
     if (exactAccount != null &&
         _bucketMigrationConflict(provider, exactAccount)) {
       return [];
@@ -4734,6 +4863,9 @@ List<HeadroomBucket> _loadBuckets(
           )) {
         f = legacy;
       } else if (fallbackToProvider) {
+        if (providerIdMigrationTierQuarantined(provider, '', 'buckets')) {
+          return [];
+        }
         f = _bucketsFile(provider);
       }
     }
@@ -4755,7 +4887,7 @@ List<String> _historyLinesForIdentity(
     for (final line in file.readAsLinesSync()) {
       if (line.trim().isEmpty) continue;
       try {
-        final quota = ProviderQuota.fromJson(
+        final quota = _persistedQuotaFromJson(
           jsonDecode(line) as Map<String, dynamic>,
         );
         if (quota.provider == provider &&
@@ -4795,7 +4927,7 @@ List<ProviderQuota> _loadHistoryFile(
     for (final line in lines.reversed.take(48)) {
       if (line.trim().isEmpty) continue;
       final content = jsonDecode(line) as Map<String, dynamic>;
-      final quota = ProviderQuota.fromJson(content);
+      final quota = _persistedQuotaFromJson(content);
       if (quota.provider == provider &&
           (exactAccount == null || quota.account == exactAccount) &&
           _isRegisteredCacheEvidence(quota) &&
@@ -4810,6 +4942,13 @@ List<ProviderQuota> _loadHistoryFile(
 
 List<ProviderQuota> loadHistory(String provider, {String? account}) {
   final exactAccount = account != null && _hasAccount(account) ? account : null;
+  if (providerIdMigrationTierQuarantined(
+    provider,
+    exactAccount ?? '',
+    'history',
+  )) {
+    return [];
+  }
   if (exactAccount != null &&
       _historyMigrationConflict(provider, exactAccount)) {
     return [];
@@ -4830,6 +4969,9 @@ List<ProviderQuota> loadHistory(String provider, {String? account}) {
       exactAccount: exactAccount,
     );
     if (legacyRows.isNotEmpty) return legacyRows;
+    if (providerIdMigrationTierQuarantined(provider, '', 'history')) {
+      return [];
+    }
     return _loadHistoryFile(
       _historyFile(provider),
       provider,
