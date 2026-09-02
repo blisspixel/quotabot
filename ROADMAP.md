@@ -95,19 +95,18 @@ Feature breadth is frozen. Completed candidate detail belongs in
 [CHANGELOG.md](CHANGELOG.md); this section records only the remaining dependency
 order.
 
-1. Stable 0.10.1 is the current hardening baseline. It promotes the exact
-   `0.10.1-rc.1` provider-ID continuity runtime after the immutable candidate,
-   the audited stable
-   [release run](https://github.com/blisspixel/quotabot/actions/runs/33572003688),
-   all 14 archives and sidecars, and the three-OS unpinned Latest
-   [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33575042208)
-   passed. A separate real installed RC-to-stable check after publication found
-   that channel discovery could exceed its per-response bound as GitHub release
-   notes and asset inventories grew. Candidate 0.10.2-rc.1 uses the dedicated
-   Latest endpoint for stable selection, shrinks bounded preview pages, and adds
-   a three-OS installed stable-channel assertion. Do not close this corrective
-   gate until the candidate lifecycle, stable lifecycle, unpinned Latest smoke,
-   and one real installed RC-to-stable update all pass. The shipped alias map
+1. Stable 0.10.2 is the current hardening version. It promotes the exact
+   `0.10.2-rc.1` updater runtime after its immutable 14-asset
+   [release run](https://github.com/blisspixel/quotabot/actions/runs/33584103523)
+   and complete three-OS
+   [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33586821262)
+   passed. A real installed 0.10.1 stable-channel check had found that discovery
+   could exceed its per-response bound as GitHub release notes and asset
+   inventories grew. The corrected runtime uses the dedicated Latest endpoint
+   for stable selection, shrinks bounded preview pages, and verifies the
+   installed stable channel on Windows, macOS, and Linux. Do not close this
+   corrective gate until the stable lifecycle, unpinned Latest smoke, and one
+   real installed RC-to-stable update also pass. The shipped alias map
    remains empty until a real provider rename exists. Stable 0.10.0 remains the
    one-time recovery bootstrap for the immutable rc.16 Windows updater defect.
    Unsigned transition status remains explicit until the signed lifecycle
@@ -314,7 +313,7 @@ claiming each metric on that platform.
 
 ## Current state
 
-The current line, **0.10.1**, is the tagged default installer version and carries
+The current line, **0.10.2**, is the stable release version and carries
 the latest hardening inventory described in [Next](#next). The stable line
 contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
@@ -331,16 +330,16 @@ milestone sections below.
 
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
-| Core contracts and automated quality | Corrective 0.10.2-rc.1 in progress | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the release-response growth defect has deterministic coverage | Pass the complete candidate and stable lifecycle for the corrected updater, then keep every 0.10.x patch green and resolve any new reproducible defect before signing activation |
-| Integration trust boundary | Stable 0.10.1 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
+| Core contracts and automated quality | Stable 0.10.2 promotion in progress | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the corrected candidate release and three-OS lifecycle passed | Complete the stable lifecycle and installed RC-to-stable update, then keep every 0.10.x patch green and resolve any new reproducible defect before signing activation |
+| Integration trust boundary | Stable 0.10.2 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
 | Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
 | Provider-ID cache continuity | Stable 0.10.1 | The bounded coordinator, exact role validation, mixed-version locks, durable prepared receipts, crash recovery, branch-conflict quarantine, and empty shipped alias map passed [ordinary hosted CI](https://github.com/blisspixel/quotabot/actions/runs/33542805801), the immutable [candidate release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1-rc.1), and the complete [three-OS lifecycle](https://github.com/blisspixel/quotabot/actions/runs/33562140830) | Add an alias only for a real provider rename and retain the same fail-closed migration evidence when one exists |
-| Installation and update | Corrective 0.10.2-rc.1 in progress | Stable 0.10.1 proved the exact 14-asset set, exact forced update, canonical acquisition, upgrade from v0.10.0, persistent state, source setup, and cross-platform lifecycle; a real post-publication stable-channel check exposed oversized list discovery, now fixed through the dedicated Latest endpoint with a three-OS regression | Publish and smoke the corrected candidate, promote the exact runtime to stable, prove one installed RC-to-stable update, then repeat on the signed rehearsal and frozen 1.0 candidate |
+| Installation and update | Stable 0.10.2 promotion in progress | Stable 0.10.1 proved the prior lifecycle; its post-publication stable-channel check exposed oversized list discovery. The corrected 0.10.2 candidate passed an immutable 14-asset release and three-OS stable-channel, install, upgrade, persistence, source-setup, and desktop-run smoke | Publish and smoke stable 0.10.2, prove one installed RC-to-stable update, then repeat on the signed rehearsal and frozen 1.0 candidate |
 | Native signing | Repository-ready; inactive | Exact Windows PE and macOS Mach-O inventories and deltas, isolated signer jobs, protected nonpublishing rehearsal workflows, reviewed `main` and `v*` environment policies, deterministic policy and failure tests, credential-free packaging, bounded receipts, and exact draft-asset re-verification are implemented for CLI and desktop; current published artifacts remain unsigned | Provision both owner identities and the exact protected-environment values and secrets, pass native protected rehearsals, activate both modes, and retain one signed 0.10.x lifecycle record |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Corrective unsigned lifecycle in progress | Stable 0.10.1 completed the tag, exact 14-asset set, checksum, provenance, install, upgrade, state, exact self-update, source-setup, and immutable-publication lifecycle; 0.10.2 adds the previously missing installed stable-channel assertion | Complete the corrected candidate and stable lifecycles, then run a signed 0.10.x rehearsal and repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Stable 0.10.2 promotion in progress | The corrected candidate completed the tag, exact 14-asset set, checksum, provenance, install, upgrade, state, exact self-update, source setup, immutable publication, and installed stable-channel assertion | Complete the corrected stable lifecycle, then run a signed 0.10.x rehearsal and repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Run focused 0.10.x stabilization
@@ -788,8 +787,9 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   native Windows/Linux readiness checks, build-provenance attestations, and a
   draft-release barrier. Clean native runners also re-download the draft assets
   and exercise side-by-side update, rollback, and data-preserving uninstall
-  mechanics. Stable v0.10.1 supplies the current green tagged acquisition,
-  explicit GitHub Latest, self-update, and canonical unversioned install record.
+  mechanics. Stable v0.10.2 supplies the current tagged acquisition, explicit
+  GitHub Latest, bounded stable-channel discovery, self-update, and canonical
+  unversioned install record.
   Signed platform-identity evidence and the same record on the exact 1.0 candidate
   remain required before this gate is closed. The credential-free Windows
   verifier covers an exact post-signing inventory, every shipped PE module,
@@ -828,11 +828,12 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   attestation, persistent-state, and source-setup matrix; exercise the
   inspect-before-run, update, data-preserving uninstall, destructive reset, and
   rollback paths, automating what can run safely on hosted clean machines.
-  **Done for stable v0.10.1:** the published candidate matrix covers Windows,
-  macOS, and Ubuntu, including upgrade from stable v0.10.0, exact-tag
-  self-update, persistent state, source setup, and desktop-run checks. Stable
-  publication repeats the canonical Latest acquisition proof. Repeat the full
-  lifecycle on the exact signed 1.0 candidate.
+  **Done for the stable v0.10.2 candidate:** the published matrix covers
+  Windows, macOS, and Ubuntu, including stable-channel discovery, upgrade from
+  stable v0.10.1, exact-tag self-update, persistent state, source setup, and
+  desktop-run checks. Stable publication must repeat the canonical Latest
+  acquisition proof. Repeat the full lifecycle on the exact signed 1.0
+  candidate.
 - Rehearse and cut: freeze the exact candidate from a clean main worktree; run all
   local and hosted gates; build the tag artifacts and verify checksums and
   attestations; install and smoke on clean native Windows, macOS, and Linux; repeat

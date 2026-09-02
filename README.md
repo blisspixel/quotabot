@@ -9,8 +9,7 @@ quotabot shows how much included quota remains across AI coding subscriptions
 and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
-> **Current stable:** 0.10.1. quotabot remains under active 0.x development.
-> **Current release candidate:** 0.10.2-rc.1.
+> **Current stable:** 0.10.2. quotabot remains under active 0.x development.
 > **Next:** continue native field validation, Windows and Apple publisher
 > identity provisioning, and one signed lifecycle rehearsal before 1.0. Product
 > breadth remains frozen; bounded local-resource visibility is specified as the
@@ -73,11 +72,11 @@ available. The `quotabot update` command begins with release candidate 16; an
 older install can bootstrap it by running the one-line installer with the exact
 stable `v0.10.0` tag. Windows rc.16 users should use that same exact stable
 bootstrap once because the immutable rc.16 Windows bundle has a PowerShell
-self-update compatibility defect. Stable 0.10.1 can also report that GitHub
-release discovery exceeded its response bound as the public asset inventory
-grows. The 0.10.2 candidate fixes stable discovery through GitHub's dedicated
-Latest endpoint; an affected older install can bootstrap the next release with
-the one-line installer or one exact `--target` update. For inspect-before-run
+self-update compatibility defect. Updater-capable releases through 0.10.1 can
+also report that GitHub release discovery exceeded its response bound as the
+public asset inventory grows. Stable 0.10.2 fixes discovery through GitHub's
+dedicated Latest endpoint; an affected older install can bootstrap it with the
+one-line installer or one exact `--target` update. For inspect-before-run
 installation, login, updates, rollback, and uninstall, use the [setup
 guide](docs/SETUP.md).
 
@@ -169,21 +168,19 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Stable 0.10.1 promotes the exact provider-ID continuity runtime proven by the
-immutable [v0.10.1-rc.1 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1-rc.1)
-and the audited stable
-[release run](https://github.com/blisspixel/quotabot/actions/runs/33572003688)
-plus three-OS unpinned Latest
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33575042208).
-The focused 0.10.2 candidate corrects a post-publication stable-channel
-discovery failure caused by the growing GitHub release-list response and adds a
-three-OS Latest-channel regression before stable promotion.
-Every release
+Stable 0.10.2 promotes the exact updater correction proven by the immutable
+[v0.10.2-rc.1 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.2-rc.1),
+its audited
+[release run](https://github.com/blisspixel/quotabot/actions/runs/33584103523),
+and complete three-OS
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33586821262).
+The release uses GitHub's dedicated Latest endpoint for stable discovery and
+keeps preview discovery within smaller bounded pages. Every release
 repeats native build, archive, checksum, provenance,
 fresh-download, install, upgrade, source-setup, and desktop-run checks. Current
 Windows and macOS artifacts remain unsigned transition artifacts, so the
 focused 0.10.x line must repeat that evidence with platform-signed artifacts
-before 1.0. The exact stable release run is green. See the [release
+before 1.0. See the [release
 evidence](docs/BUILDING.md#baseline-release-evidence),
 [roadmap](ROADMAP.md), [documentation index](docs/README.md),
 [contributing guide](CONTRIBUTING.md), and [security policy](SECURITY.md).
