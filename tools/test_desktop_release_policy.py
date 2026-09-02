@@ -439,7 +439,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("timeout 90s sudo apt-get", helper)
-        self.assertIn("timeout 180s sudo apt-get install", helper)
+        self.assertIn("timeout 300s sudo apt-get -o Acquire::Retries=3 install", helper)
+        self.assertIn("apt-get install failed after three bounded attempts", helper)
         self.assertIn("three bounded attempts", helper)
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("tools/install-linux-desktop-prereqs.sh", ci)

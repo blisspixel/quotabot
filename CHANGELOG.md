@@ -2,6 +2,14 @@
 
 Notable changes to quotabot. Newest first.
 
+## Unreleased
+
+### Changed
+
+- Linux desktop prerequisite installation now retries both bounded package-index
+  and package-download operations, so a transient Ubuntu mirror slowdown does
+  not abort an otherwise healthy CI or release run.
+
 ## 0.10.2 - 2026-09-01
 
 ### Fixed

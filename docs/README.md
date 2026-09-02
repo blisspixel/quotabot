@@ -11,13 +11,15 @@ provider-ID cache coordinator passed ordinary hosted CI plus the complete
 release, install, update, and source-setup lifecycle on Windows, macOS, and
 Linux; the shipped alias map remains empty. Bounded local-resource visibility
 is specified as the first post-stabilization product track.
-Stable 0.10.2 retains the verified 0.10.0 updater foundation. Its release
-discovery, exact-tag installation, transactional activation, installed-version
-verification, explicit GitHub Latest contract, and canonical Latest installer
-smoke join the existing cross-platform lifecycle gate. It replaces oversized
-stable release-list discovery with GitHub's dedicated Latest
-endpoint, shrinks preview pages, and makes stable-channel discovery part of the
-three-OS Latest smoke. The repository now
+Stable 0.10.2 retains the verified 0.10.0 updater foundation. Its immutable
+[release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
+and unpinned GitHub Latest
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
+cover exact-tag installation, transactional activation, installed-version
+verification, stable-channel discovery, canonical acquisition, and the existing
+cross-platform lifecycle gate. It replaces oversized stable release-list
+discovery with GitHub's dedicated Latest endpoint and shrinks preview pages. The
+repository now
 contains fail-closed Windows and macOS signing paths for CLI and desktop assets.
 They capture one signing policy per release, pin the Apple build toolchain,
 enforce exact unsigned-to-signed tree deltas, and bind signed native-verification
