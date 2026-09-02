@@ -861,6 +861,45 @@ void main() {
     expect(spark.tier, isNull);
   });
 
+  test('production catalog matches the dated supported provider lineups', () {
+    expect(kCatalogUpdated, '2026-09-02');
+    expect(
+      kModelCatalog[claudeProviderId]!.map((model) => model.id),
+      [
+        'claude-fable-5-1',
+        'claude-opus-5',
+        'claude-sonnet-5',
+        'claude-haiku-4-5',
+      ],
+    );
+    expect(
+      kModelCatalog[codexProviderId]!.map((model) => model.id),
+      [
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
+        'gpt-5.3-codex-spark',
+        'gpt-5.5',
+      ],
+    );
+    expect(
+      kModelCatalog[grokProviderId]!.map((model) => model.id),
+      ['grok-4.6', 'grok-4.5'],
+    );
+    expect(
+      kModelCatalog[antigravityProviderId]!.map((model) => model.id),
+      [
+        'gemini-3.7-flash',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-3.1-pro',
+        'claude-sonnet-4.6-thinking',
+        'claude-opus-4.6-thinking',
+        'gpt-oss-120b',
+      ],
+    );
+  });
+
   test('Claude Fable uses the tighter shared or scoped quota gate', () {
     const catalog = {
       claudeProviderId: [
@@ -1085,9 +1124,9 @@ void main() {
       catalog: kModelCatalog,
     );
     final fable = withScopedQuota.singleWhere(
-      (entry) => entry.model.id == 'claude-fable-5',
+      (entry) => entry.model.id == 'claude-fable-5-1',
     );
-    expect(fable.model.displayName, 'Claude Fable 5');
+    expect(fable.model.displayName, 'Claude Fable 5.1');
     expect(fable.model.contextTokens, 1000000);
     expect(fable.model.maxOutputTokens, 128000);
     expect(fable.model.toJson().containsKey('quota_included_until'), isFalse);
@@ -1105,7 +1144,7 @@ void main() {
     );
     expect(
       withoutScopedQuota.map((entry) => entry.model.id),
-      isNot(contains('claude-fable-5')),
+      isNot(contains('claude-fable-5-1')),
     );
     expect(
       withoutScopedQuota.map((entry) => entry.model.id),
@@ -1116,7 +1155,7 @@ void main() {
       [_cloud(claudeProviderId, 20)],
       _now,
       catalog: kModelCatalog,
-    ).singleWhere((entry) => entry.model.id == 'claude-fable-5');
+    ).singleWhere((entry) => entry.model.id == 'claude-fable-5-1');
     expect(fableWithoutEvidence.quotaBacked, isFalse);
     expect(fableWithoutEvidence.available, isFalse);
     expect(fableWithoutEvidence.headroomPercent, isNull);
@@ -1157,7 +1196,7 @@ void main() {
         catalog: kModelCatalog,
       );
       final fable = allBudgets.singleWhere(
-        (candidate) => candidate.model.id == 'claude-fable-5',
+        (candidate) => candidate.model.id == 'claude-fable-5-1',
       );
       expect(
         fable.quotaBacked,
@@ -1185,7 +1224,9 @@ void main() {
         ),
       );
       expect(
-        quotaBudget.any((candidate) => candidate.model.id == 'claude-fable-5'),
+        quotaBudget.any(
+          (candidate) => candidate.model.id == 'claude-fable-5-1',
+        ),
         entry.value,
       );
     }
@@ -1208,7 +1249,7 @@ void main() {
         _now,
         catalog: kModelCatalog,
       ).singleWhere(
-        (candidate) => candidate.model.id == 'claude-fable-5',
+        (candidate) => candidate.model.id == 'claude-fable-5-1',
       );
       expect(fable.available, isTrue);
       expect(fable.quotaBacked, isFalse);
@@ -1227,7 +1268,7 @@ void main() {
       ],
       _now,
       catalog: kModelCatalog,
-    ).singleWhere((candidate) => candidate.model.id == 'claude-fable-5');
+    ).singleWhere((candidate) => candidate.model.id == 'claude-fable-5-1');
     expect(mismatchedCapture.quotaBacked, isFalse);
   });
 
@@ -1252,7 +1293,7 @@ void main() {
       catalog: kModelCatalog,
     );
     final fable = allBudgets.singleWhere(
-      (candidate) => candidate.model.id == 'claude-fable-5',
+      (candidate) => candidate.model.id == 'claude-fable-5-1',
     );
     expect(fable.available, isTrue);
     expect(fable.quotaBacked, isFalse);
@@ -1276,7 +1317,9 @@ void main() {
       ),
     );
     expect(
-      safeBudget.any((candidate) => candidate.model.id == 'claude-fable-5'),
+      safeBudget.any(
+        (candidate) => candidate.model.id == 'claude-fable-5-1',
+      ),
       isFalse,
     );
   });
@@ -1862,8 +1905,8 @@ void main() {
       );
       expect(s.recommended?.model.id, 'a-loaded');
       expect(s.reason, contains('loaded and ready now'));
-      expect(s.reason, contains('4.0 GB VRAM'));
-      expect(s.reason, contains('32K ctx'));
+      expect(s.reason, contains('4.0 GB GPU resident'));
+      expect(s.reason, contains('32K running context'));
       expect(s.reason, contains('Q4_K_M'));
     });
 

@@ -244,6 +244,11 @@ const quotabotV1JsonSchema = <String, Object?>{
         'system_memory_available_bytes': {'type': 'integer', 'minimum': 0},
         'gpu_memory_total_bytes': {'type': 'integer', 'minimum': 1},
         'gpu_memory_available_bytes': {'type': 'integer', 'minimum': 0},
+        'gpu_utilization_percent': {
+          'type': 'integer',
+          'minimum': 0,
+          'maximum': 100,
+        },
         'gpu_count': {'type': 'integer', 'minimum': 0, 'maximum': 64},
         'gpu_name': {'type': 'string', 'minLength': 1},
       },
@@ -801,6 +806,15 @@ void _validateLocalHardware(
     'gpu_memory_available_bytes',
     path,
     errors,
+    required: false,
+  );
+  _checkIntRange(
+    hardware,
+    'gpu_utilization_percent',
+    path,
+    errors,
+    min: 0,
+    max: 100,
     required: false,
   );
   _checkIntRange(

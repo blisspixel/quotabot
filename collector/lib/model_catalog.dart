@@ -17,7 +17,7 @@ import 'provider_ids.dart';
 
 /// The date the catalog was last refreshed (YYYY-MM-DD). Surfaced so consumers
 /// can see how fresh the capability hints are.
-const String kCatalogUpdated = '2026-07-18';
+const String kCatalogUpdated = '2026-09-02';
 
 /// Providers whose windows are true rolling included-quota plans. Only these
 /// can ever mark a model quota-backed for the no-surprise `--budget=quota`
@@ -36,8 +36,8 @@ const Set<String> kQuotaPlanProviders = {
 const Map<String, List<ModelInfo>> kModelCatalog = {
   claudeProviderId: [
     ModelInfo(
-      id: 'claude-fable-5',
-      displayName: 'Claude Fable 5',
+      id: 'claude-fable-5-1',
+      displayName: 'Claude Fable 5.1',
       contextTokens: 1000000,
       maxOutputTokens: 128000,
       tools: true,
@@ -46,8 +46,8 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tier: 'flagship',
     ),
     ModelInfo(
-      id: 'claude-opus-4-8',
-      displayName: 'Claude Opus 4.8',
+      id: 'claude-opus-5',
+      displayName: 'Claude Opus 5',
       contextTokens: 1000000,
       maxOutputTokens: 128000,
       tools: true,
@@ -77,6 +77,36 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
   ],
   'codex': [
     ModelInfo(
+      id: 'gpt-5.6-sol',
+      displayName: 'GPT-5.6 Sol',
+      contextTokens: 1050000,
+      maxOutputTokens: 128000,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'flagship',
+    ),
+    ModelInfo(
+      id: 'gpt-5.6-terra',
+      displayName: 'GPT-5.6 Terra',
+      contextTokens: 1050000,
+      maxOutputTokens: 128000,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'standard',
+    ),
+    ModelInfo(
+      id: 'gpt-5.6-luna',
+      displayName: 'GPT-5.6 Luna',
+      contextTokens: 1050000,
+      maxOutputTokens: 128000,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'light',
+    ),
+    ModelInfo(
       id: 'gpt-5.3-codex-spark',
       displayName: 'GPT-5.3-Codex-Spark',
     ),
@@ -89,36 +119,49 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       reasoning: 'reasoning',
       tier: 'flagship',
     ),
-    ModelInfo(
-      id: 'gpt-5.1-codex',
-      displayName: 'GPT-5.1-Codex',
-      contextTokens: 400000,
-      tools: true,
-      reasoning: 'reasoning',
-      tier: 'standard',
-    ),
   ],
   'grok': [
     ModelInfo(
-      id: 'grok-4.3',
-      displayName: 'Grok 4.3',
-      contextTokens: 1000000,
-      tools: true,
-      vision: true,
-      reasoning: 'reasoning',
-      tier: 'standard',
-    ),
-    ModelInfo(
-      id: 'grok-4.20',
-      displayName: 'Grok 4.20 (Heavy)',
-      contextTokens: 2000000,
+      id: 'grok-4.6',
+      displayName: 'Grok 4.6',
+      contextTokens: 500000,
       tools: true,
       vision: true,
       reasoning: 'reasoning',
       tier: 'flagship',
     ),
+    ModelInfo(
+      id: 'grok-4.5',
+      displayName: 'Grok 4.5',
+      contextTokens: 500000,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'standard',
+    ),
   ],
   'antigravity': [
+    ModelInfo(
+      id: 'gemini-3.7-flash',
+      displayName: 'Gemini 3.7 Flash',
+      tools: true,
+      vision: true,
+      tier: 'standard',
+    ),
+    ModelInfo(
+      id: 'gemini-3.6-flash',
+      displayName: 'Gemini 3.6 Flash',
+      tools: true,
+      vision: true,
+      tier: 'standard',
+    ),
+    ModelInfo(
+      id: 'gemini-3.5-flash',
+      displayName: 'Gemini 3.5 Flash',
+      tools: true,
+      vision: true,
+      tier: 'standard',
+    ),
     ModelInfo(
       id: 'gemini-3.1-pro',
       displayName: 'Gemini 3.1 Pro',
@@ -130,11 +173,18 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tier: 'flagship',
     ),
     ModelInfo(
-      id: 'gemini-3-flash',
-      displayName: 'Gemini 3 Flash',
-      contextTokens: 1000000,
-      tools: true,
-      vision: true,
+      id: 'claude-sonnet-4.6-thinking',
+      displayName: 'Claude Sonnet 4.6 (thinking)',
+      tier: 'standard',
+    ),
+    ModelInfo(
+      id: 'claude-opus-4.6-thinking',
+      displayName: 'Claude Opus 4.6 (thinking)',
+      tier: 'flagship',
+    ),
+    ModelInfo(
+      id: 'gpt-oss-120b',
+      displayName: 'GPT-OSS-120B',
       tier: 'standard',
     ),
   ],

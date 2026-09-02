@@ -9,11 +9,11 @@ quotabot shows how much included quota remains across AI coding subscriptions
 and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
-> **Current stable:** 0.10.2. quotabot remains under active 0.x development.
+> **Current stable:** 0.10.3. quotabot remains under active 0.x development.
 > **Next:** continue native field validation, Windows and Apple publisher
 > identity provisioning, and one signed lifecycle rehearsal before 1.0. Product
-> breadth remains frozen; bounded local-resource visibility is specified as the
-> first post-stabilization track. See [roadmap
+> breadth remains frozen; the next post-stabilization product candidates are
+> documented without widening default paid routing. See [roadmap
 > Next](ROADMAP.md#next) and the [documentation index](docs/README.md).
 
 Releases state Windows and macOS signing mode at the top of the
@@ -107,11 +107,14 @@ filters, alerts, analytics, drift recovery, routing receipts, and every command.
 ## Supported sources
 
 Supported cloud and application sources include Claude, Codex, Antigravity /
-Gemini, Grok, Cursor, Windsurf, Kiro, and optional NVIDIA NIM discovery. Cursor
+Gemini, Grok, Cursor, Windsurf / Devin, Kiro, and optional NVIDIA NIM discovery. Cursor
 3.x support passively detects an owner-bound local plan, but Cursor does not
-persist its current quota
-pools in the supported local state, so quotabot cannot yet route on Cursor
-headroom. Local sources are Ollama, LM Studio, and Lemonade. Manual entries
+persist its current quota pools in the supported local state, so quotabot cannot
+yet route on Cursor headroom. Local sources are Ollama, LM Studio, and Lemonade. Their summaries
+lead with what is loaded now, the active context limit, and runtime-reported GPU
+residency when available; installed count and disk size remain secondary
+inventory detail. Bounded host evidence can add RAM, VRAM, and supported GPU
+activity without attributing shared machine load to a model. Manual entries
 remain explicitly self-reported. Exact endpoints, evidence classes, credential
 behavior, and limitations are in [Data sources](docs/DATA_SOURCES.md);
 provider-owned cross-checks are in [Provider CLIs](docs/PROVIDER_CLIS.md).
@@ -168,14 +171,17 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Stable 0.10.2 is the current verified release. Its audited
+Stable 0.10.3 is the current verified release. It refreshes provider and model
+semantics as of 2026-09-02 and makes local-runtime readiness substantially more
+useful without changing routing safety. The preceding audited 0.10.2
 [release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
 published an immutable 14-asset set, and its unpinned GitHub Latest
 [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
 passed clean install, prior-stable upgrade, source setup, stable-channel
 resolution, and desktop-run checks on Windows, macOS, and Ubuntu. A live Windows
 installation also updated from 0.10.2-rc.1 to 0.10.2 and then reported no newer
-stable release.
+stable release. The 0.10.3 release repeats the same three-platform quality,
+packaging, provenance, and install gates.
 The release uses GitHub's dedicated Latest endpoint for stable discovery and
 keeps preview discovery within smaller bounded pages. Every release
 repeats native build, archive, checksum, provenance,

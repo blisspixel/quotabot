@@ -129,8 +129,10 @@ Window objects keep:
 - Optional `resets_at` Unix epoch seconds.
 
 `model_quotas` is present when a provider exposes a model-specific pool or cap.
-For Antigravity the list is exhaustive and each model family has an independent
-pool. Claude and Codex lists are sparse overlays on the shared `windows`, so an
+For Antigravity the list is exhaustive across its model-facing gates. Those
+gates can refer to the shared Gemini or shared Claude/GPT pool, so rows must not
+be added together or described as independent balances. Claude and Codex lists
+are sparse overlays on the shared `windows`, so an
 unmatched ordinary model still uses the provider binding window and a spent
 scoped cap blocks only its matching model. Fable is a fail-closed scoped family:
 its catalog entry becomes quota-backed only with a current matching row and an
@@ -370,9 +372,12 @@ when known, `estimated_memory_bytes`, `fit_available_bytes`, `fit_total_bytes`,
 and `hardware_observed_at`. Fit is a metadata-only ranking signal, not an
 availability gate or performance claim. A local provider snapshot can carry the
 underlying `local_hardware` object with `as_of`, system-memory total/available
-bytes, largest-single-GPU total/available bytes, `gpu_count`, and optional
-`gpu_name`. Separate GPU pools are not summed. On Windows, an AMD or Intel GPU
-is named from `Win32_VideoController` when `nvidia-smi` is not installed. Capacity evidence is absent on subscription providers.
+bytes, largest-single-GPU total/available bytes, optional host-scoped
+`gpu_utilization_percent`, `gpu_count`, and optional `gpu_name`. Separate GPU
+pools and GPU engine counters are not summed. On Windows, an AMD or Intel GPU is
+named from `Win32_VideoController` when `nvidia-smi` is not installed, and a
+supported GPU Engine counter can provide the optional utilization value.
+Capacity evidence is absent on subscription providers.
 `budget_policy` is `any`, `quota`, or `local`. A local-runtime model that the
 runtime executes in a cloud rather than on-device carries
 `cloud_offloaded: true`. Current evidence is an Ollama `-cloud` tag or a

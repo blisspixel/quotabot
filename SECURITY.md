@@ -31,13 +31,14 @@ reads and writes helps scope any report:
   provenance. Repository rules block updates and deletion of `v*` tags, and
   GitHub release immutability locks an audited release's tag and assets when the
   draft is published.
-  The current audited release is [v0.10.2](https://github.com/blisspixel/quotabot/releases/tag/v0.10.2).
-  Its exact immutable 14-asset
+  The current audited release is [v0.10.3](https://github.com/blisspixel/quotabot/releases/tag/v0.10.3).
+  Its release workflow enforces the exact immutable 14-asset contract, and its
+  unpinned three-OS GitHub Latest smoke covers exact-tag installation, upgrade
+  from the actual prior stable, stable-channel resolution, and the canonical
+  unversioned install. The preceding v0.10.2
   [release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
-  and unpinned three-OS GitHub Latest
-  [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
-  passed, including exact-tag installation, upgrade from the actual prior
-  stable, stable-channel resolution, and the canonical unversioned install.
+  and [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
+  remain the prior audited lifecycle record.
   Immutability is prospective from July 18, 2026; v0.9.2 and earlier releases
   were not changed retroactively.
 - Any OAuth grant you create with `quotabot login` is stored separately from the
