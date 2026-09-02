@@ -309,9 +309,13 @@ List<_Cell> _bar(
 }
 
 /// Compact trust annotation for a provider row. It stays on the first row only
-/// and is included in width planning, so spend class, stale age, and local scope
-/// are visible without wrapping the dashboard.
+/// and is included in width planning, so spend class and stale state are visible
+/// without wrapping the dashboard. A local headline already states loaded or
+/// ready, so its tag names only the evidence class instead of repeating state.
 String _topTrustTag(ProviderQuota q, int now) {
+  if (q.isLocal) {
+    return ' (${q.sourceClass.label})';
+  }
   final parts = <String>[_topReadState(q, now), q.sourceClass.label];
   final spendClass = providerSpendClass(q);
   if (spendClass != null) parts.add(spendClass);
@@ -348,8 +352,13 @@ String _topReadState(ProviderQuota q, int now) {
     if (q.asOf <= 0 || q.asOf > now + kQuotaEvidenceClockSkewSeconds) {
       return 'unverified';
     }
-    if (!isLocalRuntimeAvailableAt(q, now)) return 'unavailable';
-    return q.active ? 'in use' : 'available';
+    if (!isLocalRuntimeReachableAt(q, now) || q.error != null) {
+      return 'unavailable';
+    }
+    if (q.active) return 'loaded';
+    return q.models.any((model) => !model.cloudOffloaded)
+        ? 'ready'
+        : 'reachable';
   }
   if (q.stale) {
     return _cachedTopState(q, now);
@@ -745,7 +754,8 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
 }
 
 /// The rows for one local runtime: a headline (what is loaded, always-on) and any
-/// detail lines (VRAM, context, disk) the adapter provides, indented under it -
+/// detail lines (GPU residency, running context, disk) the adapter provides,
+/// indented under it -
 /// the same detail the desktop app shows. The trust tag yields on
 /// narrow terminals so the status itself never clips.
 List<String> _localRows(
@@ -756,10 +766,11 @@ List<String> _localRows(
   Palette p, {
   bool selected = false,
 }) {
+  final reachable = isLocalRuntimeReachableAt(q, now) && q.error == null;
   final available = isLocalRuntimeAvailableAt(q, now);
-  final status = available
+  final status = reachable
       ? (q.status?.isNotEmpty == true ? q.status! : 'ready')
-      : (q.error?.isNotEmpty == true ? q.error! : 'local runtime unavailable');
+      : (q.error?.isNotEmpty == true ? q.error! : 'unreachable');
   // The trust tag renders only when the whole row fits, so a long model list on
   // a narrow terminal keeps its status text intact instead of clipping the tag.
   const head = 2 + _nameW + _labelW;

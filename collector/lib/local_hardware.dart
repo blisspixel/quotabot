@@ -18,6 +18,7 @@ typedef MemoryPoolSample = ({int totalBytes, int? availableBytes});
 typedef GpuMemorySample = ({
   int? totalBytes,
   int? availableBytes,
+  int? utilizationPercent,
   int count,
   String? name,
 });
@@ -61,6 +62,7 @@ Future<LocalHardwareInfo?> _readLocalHardwareUncached(DateTime captured) async {
           systemMemoryAvailableBytes: system?.availableBytes,
           gpuMemoryTotalBytes: gpu?.totalBytes,
           gpuMemoryAvailableBytes: gpu?.availableBytes,
+          gpuUtilizationPercent: gpu?.utilizationPercent,
           gpuCount: gpu?.count ?? 0,
           gpuName: gpu?.name,
         );
@@ -149,7 +151,7 @@ Future<GpuMemorySample?> _readGpuMemory() async {
   final executable = _nvidiaSmiPath();
   if (executable != null) {
     final output = await _runBounded(executable, const [
-      '--query-gpu=name,memory.total,memory.free',
+      '--query-gpu=name,memory.total,memory.free,utilization.gpu',
       '--format=csv,noheader,nounits',
     ]);
     final nvidia = output == null ? null : parseNvidiaSmiMemory(output);
@@ -167,14 +169,26 @@ Future<GpuMemorySample?> _readWindowsGpu() async {
   const command = r'$ErrorActionPreference="Stop"; '
       r'$rows=Get-CimInstance -ClassName Win32_VideoController '
       r'-Property Name,AdapterRAM -ErrorAction Stop; '
+      r'$culture=[Globalization.CultureInfo]::InvariantCulture; '
       r'foreach ($g in @($rows)) { '
       r'$n=[string]$g.Name; '
       r'if ([string]::IsNullOrWhiteSpace($n)) { continue } '
       r'if ($n -match "(?i)basic display|microsoft basic") { continue } '
       r'$ram=0; if ($null -ne $g.AdapterRAM) { $ram=[uint64]$g.AdapterRAM } '
-      r'$culture=[Globalization.CultureInfo]::InvariantCulture; '
       r'[Console]::Out.WriteLine($n + "`t" + $ram.ToString($culture)) '
-      r'}';
+      r'}; '
+      r'try { '
+      r'$samples=(Get-Counter "\GPU Engine(*)\Utilization Percentage" '
+      r'-ErrorAction Stop).CounterSamples; '
+      r'$values=@($samples | ForEach-Object { [double]$_.CookedValue } | '
+      r'Where-Object { -not [double]::IsNaN($_) -and '
+      r'-not [double]::IsInfinity($_) -and $_ -ge 0 -and $_ -le 100 }); '
+      r'if ($values.Count -gt 0) { '
+      r'$max=[Math]::Round(($values | Measure-Object -Maximum).Maximum); '
+      r'[Console]::Out.WriteLine("__utilization__`t" + '
+      r'([int]$max).ToString($culture)) '
+      r'} '
+      r'} catch {}';
   try {
     final output = await _runBounded(executable, const [
       '-NoLogo',
@@ -273,24 +287,43 @@ MemoryPoolSample? parseMacMemoryInfo(String totalOutput, String? vmOutput) {
   );
 }
 
-/// Parses one `total MiB, free MiB` row per NVIDIA GPU and returns the largest
-/// single device. Separate GPU pools are deliberately never summed.
+/// Parses one `name, total MiB, free MiB, utilization percent` row per NVIDIA
+/// GPU and returns the largest single device. The older two- and three-column
+/// forms remain accepted for cache and test compatibility. Separate GPU pools
+/// are deliberately never summed.
 GpuMemorySample? parseNvidiaSmiMemory(String input) {
-  final pools = <({int total, int available, String? name})>[];
+  final pools = <({
+    int total,
+    int available,
+    int? utilization,
+    String? name,
+  })>[];
   for (final line in input.split(RegExp(r'[\r\n]+'))) {
     if (line.trim().isEmpty) continue;
     final parts = line.split(',');
     if (parts.length < 2) continue;
-    final memory = parts.length >= 3
-        ? (total: parts[parts.length - 2], free: parts[parts.length - 1])
-        : (total: parts[0], free: parts[1]);
+    final hasUtilization = parts.length >= 4;
+    final memoryOffset = hasUtilization ? 3 : 2;
+    final memory = (
+      total: parts[parts.length - memoryOffset],
+      free: parts[parts.length - memoryOffset + 1],
+    );
     final total = _scaledBytes(memory.total, _mib);
     final available = _scaledBytes(memory.free, _mib, allowZero: true);
     if (total == null || available == null || available > total) continue;
+    final utilization = hasUtilization ? int.tryParse(parts.last.trim()) : null;
+    if (utilization != null && (utilization < 0 || utilization > 100)) continue;
     final name = parts.length >= 3
-        ? _gpuDisplayName(parts.sublist(0, parts.length - 2).join(','))
+        ? _gpuDisplayName(
+            parts.sublist(0, parts.length - memoryOffset).join(','),
+          )
         : null;
-    pools.add((total: total, available: available, name: name));
+    pools.add((
+      total: total,
+      available: available,
+      utilization: utilization,
+      name: name,
+    ));
   }
   if (pools.isEmpty) return null;
   pools.sort((a, b) {
@@ -301,21 +334,31 @@ GpuMemorySample? parseNvidiaSmiMemory(String input) {
   return (
     totalBytes: largest.total,
     availableBytes: largest.available,
+    utilizationPercent: largest.utilization,
     count: pools.length,
     name: largest.name,
   );
 }
 
-/// Parses Windows `Win32_VideoController` rows as `Name<TAB>AdapterRAM`.
+/// Parses Windows `Win32_VideoController` rows as `Name<TAB>AdapterRAM` plus an
+/// optional `__utilization__<TAB>percent` row from the busiest GPU engine.
 /// AdapterRAM is dedicated bytes when the driver reports it; 0 still keeps
 /// the GPU name so an iGPU without a useful carve-out is visible.
 GpuMemorySample? parseWindowsGpuInfo(String input) {
   final pools = <({int total, String name})>[];
+  int? utilization;
   for (final line in input.split(RegExp(r'[\r\n]+'))) {
     final trimmed = line.trim();
     if (trimmed.isEmpty) continue;
     final tab = trimmed.indexOf('\t');
     if (tab <= 0) continue;
+    if (trimmed.substring(0, tab) == '__utilization__') {
+      final parsed = int.tryParse(trimmed.substring(tab + 1).trim());
+      if (parsed != null && parsed >= 0 && parsed <= 100) {
+        utilization = parsed;
+      }
+      continue;
+    }
     final name = _gpuDisplayName(trimmed.substring(0, tab));
     if (name == null) continue;
     final ram = int.tryParse(trimmed.substring(tab + 1).trim());
@@ -328,6 +371,7 @@ GpuMemorySample? parseWindowsGpuInfo(String input) {
   return (
     totalBytes: largest.total > 0 ? largest.total : null,
     availableBytes: null,
+    utilizationPercent: utilization,
     count: pools.length,
     name: largest.name,
   );

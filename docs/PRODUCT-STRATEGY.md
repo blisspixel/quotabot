@@ -179,24 +179,27 @@ turns into paid API spend.
 
 ## Current external evidence
 
-Research was refreshed through 2026-07-18. External material is evidence, not
+Research was refreshed through 2026-09-02. External material is evidence, not
 product policy.
 
 ### Included-model entitlements can change faster than quota shapes
 
-Anthropic announced that beginning July 20, 2026, Fable 5 is included for Max
-and Team Premium at 50% of limits. Pro and Team Standard retain access through
-usage credits and receive a one-time $100 credit.
+Anthropic's current plan guide says that beginning July 20, 2026, Fable 5 and
+Fable 5.1 use up to 50% of the regular shared weekly limit for Max, Team
+Premium, and premium legacy seat-based Enterprise. Pro, Team Standard,
+Enterprise Standard, and usage-based Enterprise use pay-as-you-go credits.
 
-Source: [Anthropic's July 17 Fable plan
-announcement](https://x.com/claudeai/status/2078302415804379218).
+Source: [Anthropic's current Fable plan
+guide](https://support.claude.com/en/articles/15424964-claude-fable-models-on-your-plan).
 
 The product implication is to keep entitlement policy separate from measured
 capacity. Fable carries no calendar cutoff or hardcoded 50% balance in quotabot.
 It becomes quota-backed only when the current provider response contains a
 scoped Fable pool and current provider usage or profile metadata read with the
-same credential confirms a Max or Team Premium entitlement at or after the July
-20, 2026 UTC policy boundary. A host
+same credential confirms a supported exact entitlement at or after the July
+20, 2026 UTC policy boundary. Max and Team Premium are supported today. Generic
+Enterprise remains fail-closed until provider metadata distinguishes premium
+from standard. A host
 credential's plan label is diagnostic context, not
 current included or credit-backed entitlement proof. Pro, Team Standard,
 host-label-only, and plan-unknown

@@ -100,9 +100,11 @@ List<ProviderQuota> demoData() => [
     '3 models',
     'qwen2.5-coder 7B Q4 loaded',
     const [
-      '4.4 GB VRAM . 32K ctx',
+      '4.4 GB GPU resident . 32K running context',
       '3 installed . 18.6 GB on disk',
-      '48.0 GB of 64.0 GB RAM available . GeForce RTX 4070 . 12.0 GB GPU',
+      'Local host RAM 16.0 GB of 64.0 GB used (25%) . '
+          'Local host VRAM 4.0 GB of 12.0 GB used (33%) . '
+          'GeForce RTX 4070 . Local host GPU utilization 27%',
     ],
     active: true,
     models: const [
@@ -121,7 +123,10 @@ List<ProviderQuota> demoData() => [
     'LM Studio',
     '2 models',
     'llama-3.1-8B loaded',
-    const ['5.1 GB VRAM . 16K ctx', '2 installed . 12.0 GB on disk'],
+    const [
+      '5.1 GB GPU resident . 16K running context',
+      '2 installed . 12.0 GB on disk',
+    ],
     active: true,
     models: const [
       ModelInfo(

@@ -433,7 +433,7 @@ String _trustReadState(QuotaHealthProviderLine provider) {
   if (provider.state == 'provider drift') return 'provider drift';
   if (provider.state == 'unavailable') return 'error';
   if (provider.kind.isLocal) {
-    return provider.state == 'local active' ? 'in use' : 'available';
+    return provider.state == 'local active' ? 'loaded' : 'ready';
   }
   return switch (provider.state) {
     'cached' => 'cached',

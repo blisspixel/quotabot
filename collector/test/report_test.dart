@@ -283,8 +283,10 @@ void main() {
       ),
     );
     expect(markdown, contains('live, manual, captured just now'));
-    expect(markdown,
-        contains('available, local runtime, cold, captured just now'));
+    expect(
+      markdown,
+      contains('ready, local runtime, cold, captured just now'),
+    );
     expect(markdown, contains('| 3d usable |'));
     expect(markdown, contains('Manual entries are self-reported'));
     expect(markdown, contains('Local runtimes are fallback capacity'));

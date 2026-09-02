@@ -4,8 +4,39 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.10.3 - 2026-09-02
+
+### Added
+
+- Reachable local runtimes now include bounded, passive host RAM and GPU memory
+  pressure. Supported NVIDIA drivers also report device utilization, while
+  Windows can use the busiest supported GPU Engine counter for NVIDIA, AMD, or
+  Intel hardware. Every value is labeled as local-host evidence and never
+  attributed to one model.
+
+### Fixed
+
+- Local runtime summaries now lead with the model actually loaded, its running
+  context, and GPU-resident bytes. A loaded model is called `loaded`, not `in
+  use`, because residency alone does not prove active computation.
+- Healthy idle runtimes now distinguish `ready - no model loaded`, `reachable -
+  no local models installed`, and `reachable - cloud routes only` from a truly
+  unreachable daemon. Installed model count and disk size remain secondary
+  inventory detail.
+- Cloud-offloaded Ollama entries can no longer inherit a locally loaded state
+  from the daemon inventory.
+
 ### Changed
 
+- The curated model catalog and provider cross-check guidance are current as of
+  2026-09-02. Claude now includes Fable 5.1, Opus 5, Sonnet 5, and Haiku 4.5;
+  Codex includes GPT-5.6 Sol, Terra, and Luna plus the current Spark preview and
+  GPT-5.5; Grok includes 4.6 and 4.5; and Antigravity reflects its current
+  Gemini, Claude, and GPT-OSS lineup.
+- Anthropic's current five-hour and Fable plan semantics, Codex banked resets,
+  Antigravity's two shared model groups, and the current Cursor, Windsurf,
+  Devin, and Kiro limit shapes are documented without treating repeated model
+  gates as independent spendable pools.
 - Linux desktop prerequisite installation now retries both bounded package-index
   and package-download operations, so a transient Ubuntu mirror slowdown does
   not abort an otherwise healthy CI or release run.

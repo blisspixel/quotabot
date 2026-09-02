@@ -438,8 +438,10 @@ confidence is lower than for live provider telemetry.
 `quotabot top` is the htop view of your plans: one bar per rolling window for
 every provider, each colored on the headroom scale (green healthy, amber
 tightening, orange low, red spent) with a live reset countdown, your local
-runtimes as reachable fallback candidates (with their VRAM, context, installed
-models, and disk detail), and a route line that names where to send the next
+runtimes as reachable fallback candidates (leading with loaded model, running
+context, and GPU-resident bytes, then host RAM, VRAM, optional host GPU
+utilization, installed inventory, and disk detail), and a route line that names
+where to send the next
 request. When
 recent history shows a window being drawn down, the binding window also carries a
 forward-looking note:
@@ -744,14 +746,17 @@ status views but do not become `models` candidates. If a provider model is only
 temporarily included in a plan, quotabot marks it quota-backed only until the
 documented cutoff; after that point `--budget=quota` excludes it rather than
 drifting into credit-backed usage.
-Fable 5 has no temporary catalog cutoff. Beginning July 20, 2026, Anthropic says
-it is included for Max and Team Premium at 50% of limits; Pro and Team Standard
-retain access through usage credits and receive a one-time $100 credit. That
+Fable 5 and 5.1 have no temporary catalog cutoff. Beginning July 20, 2026,
+Anthropic says they use up to 50% of the regular shared weekly limit for Max,
+Team Premium, and premium legacy seat-based Enterprise; Pro, Team Standard,
+Enterprise Standard, and usage-based Enterprise use pay-as-you-go credits. That
 dated policy does not reveal a current balance. quotabot admits Fable as
 quota-backed only when the provider response contains a current scoped Fable row
 and current provider metadata from `/api/oauth/usage` or the same-credential
 companion `/api/oauth/profile` read, captured on or after July 20, 2026 UTC,
-confirms a Max or Team Premium entitlement. The profile call is zero-token
+confirms a supported exact entitlement. Max and Team Premium are supported
+today; generic Enterprise remains fail-closed because the profile metadata does
+not reliably distinguish premium from standard. The profile call is zero-token
 metadata, not a model request. Before that effective boundary, the row remains
 available for inspection but included quota is not proven.
 The Max or Team Premium label in a local Claude credential can outlive a plan

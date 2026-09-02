@@ -617,17 +617,18 @@ check remain separate release-candidate requirements.
 ### Baseline release evidence
 
 The current corrected rehearsal baseline is the exact runtime promoted by the
-[v0.10.2 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.2).
-Its immutable 14-asset stable
+[v0.10.3 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.3).
+Its release workflow builds, checksums, shape-checks, attests, freshly downloads,
+and reverifies the immutable 14-asset set before publication. The separate
+unpinned GitHub Latest smoke covers canonical unversioned acquisition, exact-tag
+installation and self-update, upgrade from the actual prior stable, persistent
+state, source setup, installed stable-channel discovery, and desktop run checks
+on Windows, macOS, and Ubuntu. The preceding v0.10.2
 [release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
-builds, checksums, shape-checks, attests, freshly downloads, and reverifies every
-archive before publication. The separate
-[unpinned GitHub Latest install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
-covers canonical unversioned acquisition, exact-tag installation and self-update,
-upgrade from the actual prior stable, persistent state, source setup, installed
-stable-channel discovery, and desktop run checks on Windows, macOS, and Ubuntu.
-A live Windows installation also completed the 0.10.2-rc.1 to 0.10.2 update and
-then reported no newer stable release.
+and [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
+remain the prior audited lifecycle record. A live Windows installation also
+completed the 0.10.2-rc.1 to 0.10.2 update and then reported no newer stable
+release.
 The
 [stable v0.10.0 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0),
 the earlier

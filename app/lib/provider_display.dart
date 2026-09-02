@@ -253,8 +253,13 @@ String _desktopProviderReadState(ProviderQuota quota, int now) {
     if (quota.asOf <= 0 || quota.asOf > now + kQuotaEvidenceClockSkewSeconds) {
       return 'unverified';
     }
-    if (!isLocalRuntimeAvailableAt(quota, now)) return 'unavailable';
-    return quota.active ? 'in use' : 'available';
+    if (!isLocalRuntimeReachableAt(quota, now) || quota.error != null) {
+      return 'unavailable';
+    }
+    if (quota.active) return 'loaded';
+    return quota.models.any((model) => !model.cloudOffloaded)
+        ? 'ready'
+        : 'reachable';
   }
   if (quota.driftReason != null) return 'provider drift';
   if (!quota.ok) return 'error';

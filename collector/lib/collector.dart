@@ -628,30 +628,43 @@ String _localHardwareDetail(LocalHardwareInfo hardware) {
   final systemAvailable = hardware.systemMemoryAvailableBytes;
   if (systemTotal != null) {
     parts.add(systemAvailable == null
-        ? '${formatCompactBytes(systemTotal)} RAM total'
-        : '${formatCompactBytes(systemAvailable)} of '
-            '${formatCompactBytes(systemTotal)} RAM available');
+        ? 'Local host RAM ${formatCompactBytes(systemTotal)} total'
+        : 'Local host RAM '
+            '${formatCompactBytes(systemTotal - systemAvailable)} of '
+            '${formatCompactBytes(systemTotal)} used '
+            '(${_usedPercent(systemTotal, systemAvailable)}%)');
   }
   final gpuName = hardware.gpuName?.trim();
   final gpuTotal = hardware.gpuMemoryTotalBytes;
   final gpuAvailable = hardware.gpuMemoryAvailableBytes;
+  final gpuUtilization = hardware.gpuUtilizationPercent;
   if (gpuName != null && gpuName.isNotEmpty) {
     if (gpuTotal != null) {
       parts.add(gpuAvailable == null
-          ? '$gpuName . ${formatCompactBytes(gpuTotal)} GPU'
-          : '$gpuName . ${formatCompactBytes(gpuAvailable)} of '
-              '${formatCompactBytes(gpuTotal)} GPU free');
+          ? 'Local host GPU $gpuName . ${formatCompactBytes(gpuTotal)} memory'
+          : 'Local host VRAM '
+              '${formatCompactBytes(gpuTotal - gpuAvailable)} of '
+              '${formatCompactBytes(gpuTotal)} used '
+              '(${_usedPercent(gpuTotal, gpuAvailable)}%) . $gpuName');
     } else {
-      parts.add(gpuName);
+      parts.add('Local host GPU $gpuName');
     }
   } else if (gpuTotal != null) {
     parts.add(gpuAvailable == null
-        ? '${formatCompactBytes(gpuTotal)} largest GPU'
-        : '${formatCompactBytes(gpuAvailable)} of '
-            '${formatCompactBytes(gpuTotal)} GPU free');
+        ? 'Local host GPU memory ${formatCompactBytes(gpuTotal)} total'
+        : 'Local host VRAM '
+            '${formatCompactBytes(gpuTotal - gpuAvailable)} of '
+            '${formatCompactBytes(gpuTotal)} used '
+            '(${_usedPercent(gpuTotal, gpuAvailable)}%)');
+  }
+  if (gpuUtilization != null) {
+    parts.add('Local host GPU utilization $gpuUtilization%');
   }
   return parts.join(' . ');
 }
+
+int _usedPercent(int total, int available) =>
+    (((total - available) * 100) / total).round().clamp(0, 100).toInt();
 
 /// Folds the current binding headroom of each live subscription into the
 /// long-term analytics buckets. Local runtimes are skipped (their headroom is a

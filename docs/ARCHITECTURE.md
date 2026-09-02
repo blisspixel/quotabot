@@ -909,12 +909,11 @@ attestations, clean-runner lifecycle checks, and a draft-release publication
 barrier. Source setup remains available when a launcher or shortcut is wanted.
 The official repository also blocks `v*` tag updates and deletion. GitHub
 release immutability locks the tag and assets when a draft is published after
-the setting activation. Stable v0.10.2 promotes the exact 14 expected assets
-verified through the native
-[stable release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014),
-then exercises canonical unversioned acquisition, exact-tag installation, and
-installed stable-channel discovery through the three-OS GitHub Latest
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949).
+the setting activation. Stable v0.10.3 follows the same exact 14-asset release
+and three-OS GitHub Latest lifecycle contracts. Stable v0.10.2 established the
+preceding audited record through its native
+[release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
+and [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949).
 Releases published before the July 18, 2026 activation were not changed
 retroactively.
 Application signing and notarization are pre-1.0 completion gates. Interactive

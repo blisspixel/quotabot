@@ -214,24 +214,24 @@ void main() {
     final row = lines.firstWhere((l) => _plain(l).contains('ollama'));
     expect(_plain(row), contains('local'));
     expect(_plain(row), contains('llama3'));
-    expect(_plain(row), contains('(in use, local runtime, loaded)'));
+    expect(_plain(row), contains('(local runtime)'));
     expect(_plain(row), isNot(contains('this machine')));
   });
 
-  test('an idle local runtime uses available without repeating local', () {
+  test('an unloaded local runtime uses ready without repeating local', () {
     final lines = _frame([
       _q(
         'lemonade',
         const [],
         kind: ProviderQuotaKind.local,
-        status: '1 installed, idle',
+        status: 'ready - no model loaded',
         models: const [ModelInfo(id: 'lemonade-local', local: true)],
       ),
     ], width: 100);
     final row =
         _plain(lines.firstWhere((line) => _plain(line).contains('lemonade')));
 
-    expect(row, contains('(available, local runtime, cold)'));
+    expect(row, contains('(local runtime)'));
     expect(row, isNot(contains('(local, local runtime')));
   });
 
@@ -245,7 +245,7 @@ void main() {
     ], width: 100);
     final row = _plain(lines.firstWhere((l) => _plain(l).contains('ollama')));
     expect(row, contains('runtime offline'));
-    expect(row, contains('(error, local runtime, cold)'));
+    expect(row, contains('(local runtime)'));
     expect(row, isNot(contains('this machine')));
   });
 
@@ -470,7 +470,7 @@ void main() {
     );
     expect(
       lines.any(
-        (l) => _plain(l).contains('(in use, local runtime, loaded)'),
+        (l) => _plain(l).contains('(local runtime)'),
       ),
       isTrue,
     );
@@ -643,10 +643,13 @@ void main() {
       kind: ProviderQuotaKind.local,
       status: 'qwen loaded',
       active: true,
-      details: const ['4 GB VRAM . 32K ctx', '3 installed . 18 GB on disk'],
+      details: const [
+        '4 GB GPU resident . 32K running context',
+        '3 installed . 18 GB on disk',
+      ],
     );
     final lines = _frame([q]);
-    expect(lines.any((l) => _plain(l).contains('VRAM')), isTrue);
+    expect(lines.any((l) => _plain(l).contains('GPU resident')), isTrue);
     expect(lines.any((l) => _plain(l).contains('on disk')), isTrue);
   });
 
@@ -1097,7 +1100,7 @@ void main() {
     final wide = _frame([q], width: 110);
     final narrow = _frame([q], width: 60);
     expect(
-      wide.any((l) => _plain(l).contains('(in use, local runtime, loaded)')),
+      wide.any((l) => _plain(l).contains('(local runtime)')),
       isTrue,
     );
     final row =

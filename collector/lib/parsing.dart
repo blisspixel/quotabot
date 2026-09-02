@@ -310,7 +310,7 @@ ModelQuota _conservativeCodexModelQuota(
       : current;
 }
 
-/// The number of rate-limit reset credits Codex reports as available to redeem,
+/// The number of banked resets Codex reports as available to redeem,
 /// or null when the field is absent. Codex exposes these under
 /// `rate_limit_reset_credits.available_count`; each one lets the account refresh
 /// its rate limit early, out of the normal cycle. Returning null (rather than 0)
