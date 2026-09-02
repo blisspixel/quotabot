@@ -107,8 +107,8 @@ truer because the deeper layer exists, not harder to read.
 
 The CLI has a low-friction release path, and the desktop has a native
 portable-archive pipeline with checksums, attestations, and a draft-release
-barrier. Stable v0.10.1 completes the exact release, explicit GitHub Latest,
-self-update, and three-OS install path; the
+barrier. Stable v0.10.2 completes the exact release, explicit GitHub Latest,
+bounded stable-channel discovery, self-update, and three-OS install path; the
 [baseline release evidence](BUILDING.md#baseline-release-evidence) records what it
 proved. The earlier rc.12 and rc.17 lifecycle checks remain supporting
 acquisition evidence. That evidence is not a substitute for the signed rehearsal
@@ -144,8 +144,9 @@ turns into paid API spend.
 - The desktop and terminal surfaces are visually mature for a 0.x utility.
 - The core is deterministic and heavily tested, with dedicated verification,
   schema, security, drift, and release gates.
-- Stable v0.10.1 completes the exact release, GitHub Latest, self-update, and
-  three-OS published-installer rehearsal, so release mechanics have current
+- Stable v0.10.2 completes the exact release, GitHub Latest, bounded
+  stable-channel discovery, self-update, and three-OS published-installer
+  rehearsal, so release mechanics have current
   evidence rather than only a future plan.
 - The repository implements isolated, fail-closed Windows and macOS signing
   paths around immutable candidate handoffs.
@@ -320,8 +321,9 @@ rehearsals still require project-owner authority.
 The remaining gates are native macOS and Linux provider records, dated Claude
 and Codex idle-machine grant validation, native accessibility smoke, and the
 final exact-candidate rehearsal. v0.9.9 proves the tag, artifact, checksum,
-provenance, and lifecycle foundation. Stable v0.10.1 adds explicit GitHub Latest,
-self-update, and canonical unversioned acquisition coverage, but all evidence
+provenance, and lifecycle foundation. Stable v0.10.2 adds explicit GitHub Latest,
+bounded stable-channel discovery, self-update, and canonical unversioned
+acquisition coverage, but all evidence
 must be repeated against the frozen, signed 1.0 candidate.
 
 ### After 1.0 stabilization: improve decision evidence
