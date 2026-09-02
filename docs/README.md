@@ -4,19 +4,18 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.10.1. The current release candidate is
-0.10.2-rc.1. The next work in the focused 0.10.x hardening line is to complete
-its corrected stable-update lifecycle, then continue native field validation,
-owner signing setup, and one signed lifecycle rehearsal before 1.0. The bounded
+The current verified stable release is 0.10.2. The next work in the focused
+0.10.x hardening line is native field validation, owner signing setup, and one
+signed lifecycle rehearsal before 1.0. The bounded
 provider-ID cache coordinator passed ordinary hosted CI plus the complete
 release, install, update, and source-setup lifecycle on Windows, macOS, and
 Linux; the shipped alias map remains empty. Bounded local-resource visibility
 is specified as the first post-stabilization product track.
-Stable 0.10.1 retains the verified 0.10.0 updater foundation. Its release
+Stable 0.10.2 retains the verified 0.10.0 updater foundation. Its release
 discovery, exact-tag installation, transactional activation, installed-version
 verification, explicit GitHub Latest contract, and canonical Latest installer
-smoke join the existing cross-platform lifecycle gate. The 0.10.2 candidate
-replaces oversized stable release-list discovery with GitHub's dedicated Latest
+smoke join the existing cross-platform lifecycle gate. It replaces oversized
+stable release-list discovery with GitHub's dedicated Latest
 endpoint, shrinks preview pages, and makes stable-channel discovery part of the
 three-OS Latest smoke. The repository now
 contains fail-closed Windows and macOS signing paths for CLI and desktop assets.

@@ -39,9 +39,9 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 
 ## Project status and execution order
 
-The current verified stable release is 0.10.1. The current release candidate is
-0.10.2-rc.1, which corrects bounded GitHub stable-release discovery and adds a
-Latest-channel install regression. The shipped routing policies are `balanced`,
+The current verified stable release is 0.10.2. It corrects bounded GitHub
+stable-release discovery and adds a Latest-channel install regression. The
+shipped routing policies are `balanced`,
 `local_first`, and opt-in `quota_stretch`. The bounded provider-ID cache
 coordinator passed the complete release, install, update, and source-setup
 lifecycle on Windows, macOS, and Linux; the shipped alias map remains empty. The

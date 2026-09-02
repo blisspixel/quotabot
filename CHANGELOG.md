@@ -2,6 +2,25 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.10.2 - 2026-09-01
+
+### Fixed
+
+- Stable CLI and desktop update discovery now use GitHub's dedicated
+  latest-release endpoint instead of deriving the current stable from large
+  release-list pages. Growth across historical release metadata can no longer
+  exhaust discovery or hide the stable release.
+- Preview CLI and desktop discovery now read smaller bounded release pages while
+  retaining the whole-request byte and time limits.
+
+### Changed
+
+- Stable 0.10.2 promotes the exact `0.10.2-rc.1` runtime after its immutable
+  14-asset release and complete Windows, macOS, and Linux install lifecycle
+  passed. The installed stable-channel regression now resolves GitHub Latest
+  directly and verifies the exact target and update state on every supported
+  operating system.
+
 ## 0.10.2-rc.1 - 2026-09-01
 
 ### Fixed
