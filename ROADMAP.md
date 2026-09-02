@@ -96,11 +96,18 @@ Feature breadth is frozen. Completed candidate detail belongs in
 order.
 
 1. Stable 0.10.1 is the current hardening baseline. It promotes the exact
-   `0.10.1-rc.1` provider-ID continuity runtime after the immutable
-   [candidate release run](https://github.com/blisspixel/quotabot/actions/runs/33557788567),
-   all 14 archives and sidecars, the three-OS
-   [published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33562140830),
-   and a real installed Windows self-update all passed. The shipped alias map
+   `0.10.1-rc.1` provider-ID continuity runtime after the immutable candidate,
+   the audited stable
+   [release run](https://github.com/blisspixel/quotabot/actions/runs/33572003688),
+   all 14 archives and sidecars, and the three-OS unpinned Latest
+   [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33575042208)
+   passed. A separate real installed RC-to-stable check after publication found
+   that channel discovery could exceed its per-response bound as GitHub release
+   notes and asset inventories grew. Candidate 0.10.2-rc.1 uses the dedicated
+   Latest endpoint for stable selection, shrinks bounded preview pages, and adds
+   a three-OS installed stable-channel assertion. Do not close this corrective
+   gate until the candidate lifecycle, stable lifecycle, unpinned Latest smoke,
+   and one real installed RC-to-stable update all pass. The shipped alias map
    remains empty until a real provider rename exists. Stable 0.10.0 remains the
    one-time recovery bootstrap for the immutable rc.16 Windows updater defect.
    Unsigned transition status remains explicit until the signed lifecycle
@@ -324,16 +331,16 @@ milestone sections below.
 
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
-| Core contracts and automated quality | Stable 0.10.1 baseline | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered | Keep every 0.10.x patch green across the full matrix and resolve any new reproducible defect before signing activation |
+| Core contracts and automated quality | Corrective 0.10.2-rc.1 in progress | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the release-response growth defect has deterministic coverage | Pass the complete candidate and stable lifecycle for the corrected updater, then keep every 0.10.x patch green and resolve any new reproducible defect before signing activation |
 | Integration trust boundary | Stable 0.10.1 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
 | Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
 | Provider-ID cache continuity | Stable 0.10.1 | The bounded coordinator, exact role validation, mixed-version locks, durable prepared receipts, crash recovery, branch-conflict quarantine, and empty shipped alias map passed [ordinary hosted CI](https://github.com/blisspixel/quotabot/actions/runs/33542805801), the immutable [candidate release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1-rc.1), and the complete [three-OS lifecycle](https://github.com/blisspixel/quotabot/actions/runs/33562140830) | Add an alias only for a real provider rename and retain the same fail-closed migration evidence when one exists |
-| Installation and update | Stable 0.10.1 | The immutable candidate [release run](https://github.com/blisspixel/quotabot/actions/runs/33557788567) and [published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33562140830) prove the exact 14-asset set, exact forced update, canonical acquisition, upgrade from v0.10.0, persistent state, source setup, and cross-platform lifecycle | Retain the complete cross-platform evidence for each focused patch, then repeat on the signed rehearsal and frozen 1.0 candidate |
+| Installation and update | Corrective 0.10.2-rc.1 in progress | Stable 0.10.1 proved the exact 14-asset set, exact forced update, canonical acquisition, upgrade from v0.10.0, persistent state, source setup, and cross-platform lifecycle; a real post-publication stable-channel check exposed oversized list discovery, now fixed through the dedicated Latest endpoint with a three-OS regression | Publish and smoke the corrected candidate, promote the exact runtime to stable, prove one installed RC-to-stable update, then repeat on the signed rehearsal and frozen 1.0 candidate |
 | Native signing | Repository-ready; inactive | Exact Windows PE and macOS Mach-O inventories and deltas, isolated signer jobs, protected nonpublishing rehearsal workflows, reviewed `main` and `v*` environment policies, deterministic policy and failure tests, credential-free packaging, bounded receipts, and exact draft-asset re-verification are implemented for CLI and desktop; current published artifacts remain unsigned | Provision both owner identities and the exact protected-environment values and secrets, pass native protected rehearsals, activate both modes, and retain one signed 0.10.x lifecycle record |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Stable unsigned lifecycle complete | The 0.10.1 candidate [release run](https://github.com/blisspixel/quotabot/actions/runs/33557788567) and [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33562140830) complete the tag, exact 14-asset set, checksum, provenance, install, upgrade, state, self-update, source-setup, and immutable-publication lifecycle as an explicitly unsigned transition release | Run a signed 0.10.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Corrective unsigned lifecycle in progress | Stable 0.10.1 completed the tag, exact 14-asset set, checksum, provenance, install, upgrade, state, exact self-update, source-setup, and immutable-publication lifecycle; 0.10.2 adds the previously missing installed stable-channel assertion | Complete the corrected candidate and stable lifecycles, then run a signed 0.10.x rehearsal and repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Run focused 0.10.x stabilization

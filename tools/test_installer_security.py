@@ -55,6 +55,33 @@ class InstallerSecurityTests(unittest.TestCase):
         )
         self.assertIn("env -u QUOTABOT_VERSION bash install.sh", clean_install)
 
+    def test_install_smoke_checks_the_installed_stable_channel(self) -> None:
+        smoke = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
+            encoding="utf-8"
+        )
+        resolver = smoke.split("  resolve-releases:\n", 1)[1].split(
+            "  clean-install:\n", 1
+        )[0]
+        clean_install = smoke.split("  clean-install:\n", 1)[1].split(
+            "  upgrade-and-setup:\n", 1
+        )[0]
+
+        self.assertIn("stable_tag: ${{ steps.releases.outputs.stable_tag }}", resolver)
+        self.assertIn('echo "stable_tag=$latest"', resolver)
+        self.assertIn(
+            "STABLE_TAG: ${{ needs.resolve-releases.outputs.stable_tag }}",
+            clean_install,
+        )
+        self.assertEqual(clean_install.count("update --check --stable --json"), 2)
+        self.assertEqual(
+            clean_install.count(
+                "needs.resolve-releases.outputs.supports_self_update == 'true'"
+            ),
+            4,
+        )
+        self.assertIn("$check.target_tag -ne $env:STABLE_TAG", clean_install)
+        self.assertIn('value["target_tag"] == sys.argv[3]', clean_install)
+
     def test_install_smoke_pins_the_resolved_tag_during_install(self) -> None:
         smoke = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
             encoding="utf-8"

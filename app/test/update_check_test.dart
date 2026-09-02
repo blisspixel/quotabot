@@ -170,10 +170,11 @@ void main() {
     server.listen((request) async {
       request.response.headers.contentType = ContentType.json;
       request.response.write(
-        jsonEncode([
-          release('v0.10.0-rc.6', prerelease: true),
-          release('v0.9.9'),
-        ]),
+        jsonEncode(
+          request.uri.path.endsWith('/latest')
+              ? release('v0.9.9')
+              : [release('v0.10.0-rc.6', prerelease: true), release('v0.9.9')],
+        ),
       );
       await request.response.close();
     });
@@ -195,7 +196,13 @@ void main() {
       addTearDown(() => server.close(force: true));
       server.listen((request) async {
         request.response.headers.contentType = ContentType.json;
-        request.response.write(jsonEncode([release('v0.9.9')]));
+        request.response.write(
+          jsonEncode(
+            request.uri.path.endsWith('/latest')
+                ? release('v0.9.9')
+                : [release('v0.9.9')],
+          ),
+        );
         await request.response.close();
       });
 
@@ -209,40 +216,114 @@ void main() {
     },
   );
 
-  test('release endpoint uses bounded pages for the stable channel', () {
+  test('release endpoint uses small bounded pages', () {
     final uri = Uri.parse(quotabotReleasesApi);
 
-    expect(uri.queryParameters['per_page'], '20');
+    expect(uri.queryParameters['per_page'], '5');
     expect(uri.queryParameters['page'], '1');
+    expect(
+      Uri.parse(quotabotLatestReleaseApi).path,
+      '/repos/blisspixel/quotabot/releases/latest',
+    );
   });
 
-  test('live checker follows bounded pagination to find stable', () async {
+  test(
+    'live checker gets stable directly beyond the preview page cap',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      var latestRequests = 0;
+      var listRequests = 0;
+      server.listen((request) async {
+        request.response.headers.contentType = ContentType.json;
+        if (request.uri.path.endsWith('/latest')) {
+          latestRequests++;
+          request.response.write(jsonEncode(release('v0.9.9')));
+        } else {
+          listRequests++;
+          final page = int.parse(request.uri.queryParameters['page']!);
+          final newest = 100 - ((page - 1) * 5);
+          request.response.write(
+            jsonEncode([
+              for (var offset = 0; offset < 5; offset++)
+                release('v0.10.0-rc.${newest - offset}', prerelease: true),
+            ]),
+          );
+        }
+        await request.response.close();
+      });
+
+      final status = await checkQuotabotUpdates(
+        releasesApi: Uri.parse('http://127.0.0.1:${server.port}/releases'),
+        timeout: const Duration(seconds: 2),
+      );
+
+      expect(status.latest.version, '0.10.0-rc.100');
+      expect(status.stable?.version, '0.9.9');
+      expect(latestRequests, 1);
+      expect(listRequests, 4);
+    },
+  );
+
+  test('live checker never replaces invalid Latest with a list row', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() => server.close(force: true));
     server.listen((request) async {
       request.response.headers.contentType = ContentType.json;
-      final page = request.uri.queryParameters['page'];
       request.response.write(
         jsonEncode(
-          page == '1'
-              ? [
-                  for (var rc = 40; rc >= 21; rc--)
-                    release('v0.10.0-rc.$rc', prerelease: true),
-                ]
+          request.uri.path.endsWith('/latest')
+              ? release('v0.10.0-rc.1', prerelease: true)
               : [release('v0.9.9')],
         ),
       );
       await request.response.close();
     });
 
-    final status = await checkQuotabotUpdates(
-      releasesApi: Uri.parse('http://127.0.0.1:${server.port}/releases'),
-      timeout: const Duration(seconds: 2),
+    await expectLater(
+      checkQuotabotUpdates(
+        releasesApi: Uri.parse('http://127.0.0.1:${server.port}/releases'),
+        timeout: const Duration(seconds: 2),
+      ),
+      throwsA(
+        isA<UpdateCheckException>().having(
+          (error) => error.message,
+          'message',
+          'GitHub returned an invalid latest release',
+        ),
+      ),
     );
-
-    expect(status.latest.version, '0.10.0-rc.40');
-    expect(status.stable?.version, '0.9.9');
   });
+
+  test(
+    'live checker keeps GitHub Latest authoritative over list stable',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode(
+            request.uri.path.endsWith('/latest')
+                ? release('v0.10.1')
+                : [
+                    release('v0.11.0'),
+                    release('v0.10.2-rc.1', prerelease: true),
+                  ],
+          ),
+        );
+        await request.response.close();
+      });
+
+      final status = await checkQuotabotUpdates(
+        releasesApi: Uri.parse('http://127.0.0.1:${server.port}/releases'),
+        timeout: const Duration(seconds: 2),
+      );
+
+      expect(status.stable?.version, '0.10.1');
+      expect(status.latest.version, '0.10.2-rc.1');
+    },
+  );
 
   test('live checker does not follow release endpoint redirects', () async {
     final redirectTarget = await HttpServer.bind(

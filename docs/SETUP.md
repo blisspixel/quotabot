@@ -167,7 +167,7 @@ release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` or
 
 The current stable release is
 [v0.10.1](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1). Its
-[published candidate install smoke](https://github.com/blisspixel/quotabot/actions/runs/33562140830)
+[published Latest install smoke](https://github.com/blisspixel/quotabot/actions/runs/33575042208)
 covers exact-tag installation, upgrade from the actual prior stable, persistent
 state, source setup, and the desktop-run matrix on Windows, macOS, and Ubuntu.
 Stable publication binds GitHub Latest and its follow-up smoke repeats the
@@ -390,6 +390,15 @@ versioned payload, switches the stable entry only after validation, and executes
 the installed binary to confirm the selected version. If activation fails, the
 previous entry is restored. Config, history, grants, profiles, and manual entries
 remain separate and are preserved.
+
+Updater-capable releases from 0.10.0-rc.16 through 0.10.1 can report that GitHub
+release discovery exceeded its response bound after the repository's historical
+release metadata grows. That affects channel discovery, not exact-tag download
+verification. During 0.10.2 candidate validation, an affected install can use
+the exact published candidate tag. After stable 0.10.2 publishes, either rerun
+the unpinned one-line installer or select that exact tag once. Version 0.10.2
+and later use GitHub's dedicated Latest endpoint for stable discovery and retain
+smaller bounded pages for preview discovery.
 
 A long-running process can continue using its previous generation, so close and
 restart `quotabot top`, MCP, and other servers after an update. A release older

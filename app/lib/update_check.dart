@@ -3,16 +3,18 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-const String quotabotAppVersion = '0.10.1';
-const String quotabotAppBuild = '0.10.1+51';
+const String quotabotAppVersion = '0.10.2-rc.1';
+const String quotabotAppBuild = '0.10.2-rc.1+52';
 const String quotabotReleasesUrl =
     'https://github.com/blisspixel/quotabot/releases';
 const String quotabotReleasesApi =
-    'https://api.github.com/repos/blisspixel/quotabot/releases?per_page=20&page=1';
+    'https://api.github.com/repos/blisspixel/quotabot/releases?per_page=5&page=1';
+const String quotabotLatestReleaseApi =
+    'https://api.github.com/repos/blisspixel/quotabot/releases/latest';
 const int _maxReleaseResponseBytes = 512 * 1024;
 const int _maxReleaseDiscoveryBytes = 2 * 1024 * 1024;
-const int _releasePageSize = 20;
-const int _maxReleasePages = 5;
+const int _releasePageSize = 5;
+const int _maxReleasePages = 4;
 
 class QuotabotRelease {
   final String tag;
@@ -251,12 +253,78 @@ Future<void> _cancelReleaseResponse(HttpClientResponse response) async {
   await subscription.cancel();
 }
 
+Future<({Object? decoded, int bytesRead})> _readReleaseDocument({
+  required HttpClient http,
+  required Uri uri,
+  required String currentVersion,
+  required Stopwatch clock,
+  required Duration timeout,
+  required int remainingByteBudget,
+}) async {
+  if (remainingByteBudget <= 0) {
+    throw const UpdateCheckException(
+      'GitHub release discovery exceeded its response limit',
+    );
+  }
+  final request = await http.getUrl(uri).timeout(_remaining(clock, timeout));
+  request.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
+  request.headers.set(HttpHeaders.userAgentHeader, 'quotabot/$currentVersion');
+  request.followRedirects = false;
+  late HttpClientResponse response;
+  try {
+    response = await request.close().timeout(_remaining(clock, timeout));
+  } on TimeoutException {
+    request.abort();
+    rethrow;
+  }
+  if (response.statusCode != HttpStatus.ok) {
+    await _cancelReleaseResponse(response).timeout(_remaining(clock, timeout));
+    throw UpdateCheckException(
+      'GitHub release check returned HTTP ${response.statusCode}',
+    );
+  }
+  final responseLimit = remainingByteBudget < _maxReleaseResponseBytes
+      ? remainingByteBudget
+      : _maxReleaseResponseBytes;
+  final declaredLength = response.contentLength;
+  if (declaredLength > responseLimit) {
+    await _cancelReleaseResponse(response).timeout(_remaining(clock, timeout));
+    throw const UpdateCheckException('GitHub release response was too large');
+  }
+  final bytes = await _readReleaseBytes(
+    response,
+    _remaining(clock, timeout),
+    maxBytes: responseLimit,
+  );
+  try {
+    return (
+      decoded: jsonDecode(utf8.decode(bytes, allowMalformed: false)),
+      bytesRead: bytes.length,
+    );
+  } catch (_) {
+    throw const UpdateCheckException(
+      'GitHub returned an invalid release response',
+    );
+  }
+}
+
+Uri _latestReleaseUri(Uri releasesUri) {
+  final path = releasesUri.path.endsWith('/')
+      ? releasesUri.path.substring(0, releasesUri.path.length - 1)
+      : releasesUri.path;
+  return releasesUri.replace(
+    path: '$path/latest',
+    queryParameters: const <String, String>{},
+  );
+}
+
 /// Checks GitHub only after a user explicitly invokes the update action.
 Future<QuotabotUpdateStatus> checkQuotabotUpdates({
   String currentVersion = quotabotAppVersion,
   String? currentBuild,
   HttpClient? client,
   Uri? releasesApi,
+  Uri? latestReleaseApi,
   Duration timeout = const Duration(seconds: 10),
 }) async {
   final ownsClient = client == null;
@@ -266,6 +334,31 @@ Future<QuotabotUpdateStatus> checkQuotabotUpdates({
     final baseUri = releasesApi ?? Uri.parse(quotabotReleasesApi);
     final rows = <Object?>[];
     var totalBytes = 0;
+    final stableDocument = await _readReleaseDocument(
+      http: http,
+      uri:
+          latestReleaseApi ??
+          (releasesApi == null
+              ? Uri.parse(quotabotLatestReleaseApi)
+              : _latestReleaseUri(baseUri)),
+      currentVersion: currentVersion,
+      clock: clock,
+      timeout: timeout,
+      remainingByteBudget: _maxReleaseDiscoveryBytes,
+    );
+    if (stableDocument.decoded is! Map) {
+      throw const UpdateCheckException(
+        'GitHub returned an invalid latest release',
+      );
+    }
+    final parsedStable = parseQuotabotReleases([stableDocument.decoded]);
+    if (parsedStable.stable == null || parsedStable.latest.prerelease) {
+      throw const UpdateCheckException(
+        'GitHub returned an invalid latest release',
+      );
+    }
+    rows.add(stableDocument.decoded);
+    totalBytes += stableDocument.bytesRead;
     for (var page = 1; page <= _maxReleasePages; page++) {
       final pageUri = baseUri.replace(
         queryParameters: {
@@ -274,66 +367,24 @@ Future<QuotabotUpdateStatus> checkQuotabotUpdates({
           'page': '$page',
         },
       );
-      final request = await http
-          .getUrl(pageUri)
-          .timeout(_remaining(clock, timeout));
-      request.headers.set(
-        HttpHeaders.acceptHeader,
-        'application/vnd.github+json',
+      final pageDocument = await _readReleaseDocument(
+        http: http,
+        uri: pageUri,
+        currentVersion: currentVersion,
+        clock: clock,
+        timeout: timeout,
+        remainingByteBudget: _maxReleaseDiscoveryBytes - totalBytes,
       );
-      request.headers.set(
-        HttpHeaders.userAgentHeader,
-        'quotabot/$currentVersion',
-      );
-      request.followRedirects = false;
-      late HttpClientResponse response;
-      try {
-        response = await request.close().timeout(_remaining(clock, timeout));
-      } on TimeoutException {
-        request.abort();
-        rethrow;
-      }
-      if (response.statusCode != HttpStatus.ok) {
-        await _cancelReleaseResponse(
-          response,
-        ).timeout(_remaining(clock, timeout));
-        throw UpdateCheckException(
-          'GitHub release check returned HTTP ${response.statusCode}',
-        );
-      }
-      final remainingBytes = _maxReleaseDiscoveryBytes - totalBytes;
-      final pageLimit = remainingBytes < _maxReleaseResponseBytes
-          ? remainingBytes
-          : _maxReleaseResponseBytes;
-      final declaredLength = response.contentLength;
-      if (declaredLength > pageLimit) {
-        await _cancelReleaseResponse(
-          response,
-        ).timeout(_remaining(clock, timeout));
-        throw const UpdateCheckException(
-          'GitHub release response was too large',
-        );
-      }
-      final bytes = await _readReleaseBytes(
-        response,
-        _remaining(clock, timeout),
-        maxBytes: pageLimit,
-      );
-      totalBytes += bytes.length;
-      final Object? decoded;
-      try {
-        decoded = jsonDecode(utf8.decode(bytes, allowMalformed: false));
-      } catch (_) {
-        throw const UpdateCheckException(
-          'GitHub returned an invalid release response',
-        );
-      }
+      totalBytes += pageDocument.bytesRead;
+      final decoded = pageDocument.decoded;
       if (decoded is! List) {
         throw const UpdateCheckException(
           'GitHub returned an invalid release list',
         );
       }
-      rows.addAll(decoded);
+      rows.addAll(
+        decoded.where((row) => row is Map && row['prerelease'] == true),
+      );
       if (decoded.length < _releasePageSize) break;
     }
     return parseQuotabotReleases(

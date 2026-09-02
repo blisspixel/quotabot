@@ -32,8 +32,16 @@ MockClient releasesClient(List<Object?> releases) =>
         if (matching.isEmpty) return http.Response('', 404);
         return http.Response(jsonEncode(matching.first), 200);
       }
+      if (request.url.path == '/repos/blisspixel/quotabot/releases/latest') {
+        final matching = releases.where(
+          (row) =>
+              row is Map && row['draft'] == false && row['prerelease'] == false,
+        );
+        if (matching.isEmpty) return http.Response('', 404);
+        return http.Response(jsonEncode(matching.first), 200);
+      }
       expect(request.url.path, '/repos/blisspixel/quotabot/releases');
-      expect(request.url.queryParameters['per_page'], '20');
+      expect(request.url.queryParameters['per_page'], '5');
       expect(request.url.queryParameters['page'], '1');
       return http.Response(jsonEncode(releases), 200);
     });
@@ -73,7 +81,7 @@ void main() {
       const token = 'github-test-token';
       final authenticated = MockClient((request) async {
         expect(request.headers['authorization'], 'Bearer $token');
-        return http.Response(jsonEncode([release('v0.9.9')]), 200);
+        return http.Response(jsonEncode(release('v0.9.9')), 200);
       });
       final check = await checkForQuotabotUpdate(
         currentVersion: '0.9.8',
@@ -85,7 +93,7 @@ void main() {
 
       final unauthenticated = MockClient((request) async {
         expect(request.headers, isNot(contains('authorization')));
-        return http.Response(jsonEncode([release('v0.9.9')]), 200);
+        return http.Response(jsonEncode(release('v0.9.9')), 200);
       });
       await checkForQuotabotUpdate(
         currentVersion: '0.9.8',
@@ -165,28 +173,56 @@ void main() {
       expect(check.updateAvailable, isTrue);
     });
 
-    test('stable discovery follows bounded release pagination', () async {
+    test('stable discovery uses GitHub latest without listing releases',
+        () async {
       final client = MockClient((request) async {
+        expect(
+          request.url.path,
+          '/repos/blisspixel/quotabot/releases/latest',
+        );
+        expect(request.url.query, isEmpty);
+        return http.Response(jsonEncode(release('v0.10.1')), 200);
+      });
+
+      final check = await checkForQuotabotUpdate(
+        currentVersion: '0.10.0',
+        channel: UpdateChannel.stable,
+        client: client,
+      );
+
+      expect(check.target.tag, 'v0.10.1');
+      expect(check.updateAvailable, isTrue);
+    });
+
+    test('preview discovery follows bounded small-page pagination', () async {
+      final client = MockClient((request) async {
+        expect(request.url.queryParameters['per_page'], '5');
         final page = request.url.queryParameters['page'];
         if (page == '1') {
           return http.Response(
             jsonEncode([
-              for (var rc = 40; rc >= 21; rc--) release('v0.10.0-rc.$rc'),
+              for (var rc = 20; rc >= 16; rc--) release('v0.10.0-rc.$rc'),
             ]),
             200,
           );
         }
         expect(page, '2');
-        return http.Response(jsonEncode([release('v0.9.9')]), 200);
+        return http.Response(
+          jsonEncode([
+            release('v0.10.0-rc.21'),
+            release('v0.9.9'),
+          ]),
+          200,
+        );
       });
 
       final check = await checkForQuotabotUpdate(
-        currentVersion: '0.9.8',
-        channel: UpdateChannel.stable,
+        currentVersion: '0.10.0-rc.15',
+        channel: UpdateChannel.preview,
         client: client,
       );
 
-      expect(check.target.tag, 'v0.9.9');
+      expect(check.target.tag, 'v0.10.0-rc.21');
     });
 
     test('exact target must be a published matching release', () async {
@@ -258,7 +294,7 @@ void main() {
           message: 'HTTP 503',
         ),
         (
-          client: MockClient((_) async => http.Response('{}', 200)),
+          client: MockClient((_) async => http.Response('[]', 200)),
           message: 'unexpected document',
         ),
         (

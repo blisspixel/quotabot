@@ -2,6 +2,24 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.10.2-rc.1 - 2026-09-01
+
+### Fixed
+
+- Stable CLI and desktop update discovery now use GitHub's dedicated
+  latest-release endpoint instead of deriving the current stable from large
+  release-list pages. Growth across historical release metadata can no longer
+  exhaust discovery or hide the stable release.
+- Preview CLI and desktop discovery now read smaller bounded release pages while
+  retaining the whole-request byte and time limits.
+
+### Changed
+
+- The three-OS install smoke now calls the installed binary's stable channel and
+  requires the `quotabot.update.v1` response to resolve the exact GitHub stable
+  Latest tag with the correct update state. This covers channel discovery in
+  addition to exact-tag self-update and canonical installer acquisition.
+
 ## 0.10.1 - 2026-09-01
 
 ### Added

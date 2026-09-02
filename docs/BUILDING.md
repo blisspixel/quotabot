@@ -608,20 +608,21 @@ latest published release and prior 0.x release, pins checkout to the release-tag
 commit, verifies checksums and provenance, exercises a clean one-line install,
 then tests the prior-release upgrade plus CLI-only and full source setup with a
 persistent-state sentinel. Its final checks cover the packaged CLI, demo doctor
-schema, Windows shortcut target, macOS app bundle, and Linux desktop entry. It
-runs weekly and can be dispatched with explicit tags for repeatable published
-release regression evidence. A pre-publication candidate dry run and interactive
-tray-readiness check remain separate release-candidate requirements.
+schema, installed stable-channel discovery against GitHub Latest, Windows
+shortcut target, macOS app bundle, and Linux desktop entry. It runs weekly and
+can be dispatched with explicit tags for repeatable published release regression
+evidence. A pre-publication candidate dry run and interactive tray-readiness
+check remain separate release-candidate requirements.
 
 ### Baseline release evidence
 
 The current tagged rehearsal baseline is the immutable
 [v0.10.1 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1)
 with its exact 14-asset set. The native
-[candidate release run](https://github.com/blisspixel/quotabot/actions/runs/33557788567)
+[stable release run](https://github.com/blisspixel/quotabot/actions/runs/33572003688)
 builds, checksums, shape-checks, attests, freshly downloads, and reverifies every
 archive before publication. The separate
-[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33562140830)
+[published Latest install smoke](https://github.com/blisspixel/quotabot/actions/runs/33575042208)
 then covers exact-tag installation and self-update, upgrade from the actual prior
 stable, persistent state, source setup, and desktop run checks on Windows,
 macOS, and Ubuntu. Stable publication binds GitHub Latest and its follow-up

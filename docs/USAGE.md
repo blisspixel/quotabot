@@ -637,12 +637,14 @@ and is not rewritten by this display preference.
 
 ## Updating the CLI
 
-`quotabot update --check` reads the bounded public GitHub release list and
-reports the selected channel without changing the installation. `quotabot
-update` then invokes the installer carried inside the current verified archive,
-downloads one exact published tag and checksum sidecar, activates it
-transactionally, and verifies the new stable executable's version. Stable
-builds follow stable releases; release candidates follow previews. Use
+`quotabot update --check` reads bounded public GitHub release metadata and
+reports the selected channel without changing the installation. Stable
+selection uses GitHub's dedicated Latest endpoint; preview selection uses small
+bounded release pages. `quotabot update` then invokes the installer carried
+inside the current verified archive, downloads one exact published tag and
+checksum sidecar, activates it transactionally, and verifies the new stable
+executable's version. Stable builds follow stable releases; release candidates
+follow previews. Use
 `--preview` or `--stable` to change channel, or `--target=TAG` to select one
 exact published tag. A newer exact target installs without `--force`; add
 `--force` only to reinstall the current target or roll back. `--json` emits
