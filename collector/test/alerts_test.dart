@@ -54,7 +54,7 @@ void main() {
       final first = computeResetSignals(snapshot: snap);
       expect(first.fired, hasLength(1));
       expect(first.fired.single.provider, 'codex');
-      expect(first.fired.single.message, contains('2 resets available'));
+      expect(first.fired.single.message, contains('2 banked resets available'));
       expect(first.armed, contains('codex'));
 
       // Same reset still present: armed, no re-fire.

@@ -1128,7 +1128,7 @@ void main() {
         now,
       );
 
-      expect(line, 'in use | local runtime | captured just now');
+      expect(line, 'loaded | local runtime | captured just now');
     });
 
     test('labels an idle local runtime without claiming it is active', () {
@@ -1146,7 +1146,7 @@ void main() {
         now,
       );
 
-      expect(line, 'available | local runtime | captured just now');
+      expect(line, 'ready | local runtime | captured just now');
     });
 
     test('labels a rejected local configuration as an error', () {

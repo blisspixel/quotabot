@@ -135,11 +135,14 @@ List<ProviderQuota> demoProviders(int now) {
         systemMemoryTotalBytes: 64 * gb,
         systemMemoryAvailableBytes: 48 * gb,
         gpuMemoryTotalBytes: 12 * gb,
+        gpuMemoryAvailableBytes: 8 * gb,
+        gpuUtilizationPercent: 27,
         gpuCount: 1,
         gpuName: 'GeForce RTX 4070',
       ),
-      detail:
-          '48.0 GB of 64.0 GB RAM available . GeForce RTX 4070 . 12.0 GB GPU',
+      detail: 'Local host RAM 16.0 GB of 64.0 GB used (25%) . '
+          'Local host VRAM 4.0 GB of 12.0 GB used (33%) . '
+          'GeForce RTX 4070 . Local host GPU utilization 27%',
     ),
     localRuntimeQuota(
       id: 'lmstudio',

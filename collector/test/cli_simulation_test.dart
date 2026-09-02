@@ -873,8 +873,8 @@ void main() {
       contains('[live, authoritative, quota plan, you@example.com'),
     );
     expect(out, contains('[live, passive local, metered plan, captured'));
-    expect(out, contains('[in use, local runtime, loaded, captured'));
-    expect(out, contains('[available, local runtime, cold, captured'));
+    expect(out, contains('[loaded, local runtime, loaded, captured'));
+    expect(out, contains('[ready, local runtime, cold, captured'));
     expect(out, isNot(contains('note: this machine only')));
     expect(out, isNot(contains('local fallback; other devices may differ')));
     expect(out, isNot(contains('local runtime, loaded, this machine')));

@@ -1868,7 +1868,7 @@ void main() {
           10,
           modelQuotas: const [
             ModelQuota(model: 'gemini', usedPercent: 100),
-            ModelQuota(model: 'Gemini 3 Flash', usedPercent: 0),
+            ModelQuota(model: 'Gemini 3.7 Flash', usedPercent: 0),
           ],
         ),
       ],

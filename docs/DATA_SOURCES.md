@@ -158,11 +158,13 @@ PROV-DM conformance.
   account window. The list is admitted atomically: if a present container or any
   row, name, flag, duration, reset, or percentage is malformed, quotabot rejects
   the fresh observation and serves trusted cache evidence when available.
-- Reset credits: the same response carries
-  `rate_limit_reset_credits.available_count` - redeemable off-cycle resets that
-  refresh the rate limit early. quotabot exposes this as the structured
+- Banked resets: the same response carries
+  `rate_limit_reset_credits.available_count` - promotional off-cycle full
+  resets that refresh the active windows and weekly reset date. They are not
+  cash, purchased credit, or API credit. quotabot exposes the count under the
+  stable structured
   `reset_credits_available` field and surfaces it prominently: a green
-  "N resets available ... redeem now" line in `doctor` and `top`, a green banner
+  "N banked resets available ... redeem now" line in `doctor` and `top`, a green banner
   on the desktop card, and a "Reset available" notification. It is a fresh-read
   signal (never asserted from stale or drifted evidence), and it is display only;
   quotabot never redeems one.
@@ -224,7 +226,7 @@ PROV-DM conformance.
   consistently by cache, drift, leases, and routing. A credential fingerprint
   is the fail-closed account-key fallback only when profile identity is
   unavailable.
-- Fable 5 is admitted to the model registry as quota-backed only when the current
+- Fable 5 and 5.1 are admitted to the model registry as quota-backed only when the current
   usage response contains a live scoped Fable row and current provider metadata
   from that usage read or its same-credential companion profile read, captured
   on or after July 20, 2026 UTC, carries an explicit Max or Team Premium
@@ -241,12 +243,14 @@ PROV-DM conformance.
   Standard, host-label-only, and plan-unknown rows remain visible under the
   unrestricted budget; the catalog never invents a balance or spend class from
   plan policy.
-- Beginning July 20, 2026, Anthropic says Fable 5 is included for Max and Team
-  Premium at 50% of limits. Pro and Team Standard retain access through usage
-  credits and receive a one-time $100 credit. This dated entitlement policy is
-  not a hardcoded quota value or expiry; runtime balance still comes only from
-  the live scoped row. See Anthropic's
-  [July 17 announcement](https://x.com/claudeai/status/2078302415804379218).
+- Beginning July 20, 2026, Anthropic says Fable 5 and Fable 5.1 use up to 50%
+  of the regular shared weekly limit for Max, Team Premium, and premium legacy
+  seat-based Enterprise. Pro, Team Standard, Enterprise Standard, and
+  usage-based Enterprise use pay-as-you-go credits. This dated entitlement
+  policy is not a hardcoded quota value or expiry; runtime balance still comes
+  only from the live scoped row. Generic Enterprise stays outside the quota
+  budget until provider metadata can distinguish its seat type. See Anthropic's
+  [current Fable plan guide](https://support.claude.com/en/articles/15424964-claude-fable-models-on-your-plan).
 - This live response supplies the current-window bars and reset times shown by
   the in-CLI `/usage` command. Additive extras on that same response (`extra_usage`,
   usage-credit `spend`) can appear as display-only detail lines; they are not
@@ -343,7 +347,12 @@ State lives in the Antigravity globalStorage SQLite database at
   rejects the live table. `isExhausted: true` on a row with a reset is 100%
   used, even when `remainingFraction` still reads full. These are quota metadata
   calls, not generation,
-  so they cost no tokens. The per-model quotas are bucketed into windows by reset.
+  so they cost no tokens. Antigravity's product surface currently describes two
+  shared pools, one for Gemini models and one for Claude/GPT models, each with a
+  weekly limit and a five-hour limit. The endpoint exposes only model-facing
+  binding fractions and resets, without pool identity or window type. quotabot
+  therefore preserves the model gates but never sums them or describes them as
+  independent balances.
   Non-metered helper models the endpoint lists alongside real ones - tab-completion
   and chat models that carry no reset window - are skipped rather than rejecting
   the whole table. A metered row (one that carries a reset window) whose fraction
@@ -368,15 +377,16 @@ State lives in the Antigravity globalStorage SQLite database at
   not used as a plan signal; when the quota endpoint returns nothing the adapter
   says so honestly rather than mislabeling the account as free.
 - Antigravity's Cloud Code endpoint reports each model's single binding limit -
-  `{remainingFraction, resetTime}`, its tightest cap across the plan's weekly
-  allowance and its short-term burst limit - with no field naming which window
-  that is. quotabot surfaces the account's most-constrained binding limit as a
-  single weekly window (the cap a subscription user tracks) with its true reset,
+  `{remainingFraction, resetTime}` - with no field naming its Gemini or
+  Claude/GPT shared pool or whether the binding cap is weekly or five-hour.
+  quotabot surfaces the account's most-constrained binding limit as a single
+  conservative weekly headline with its true reset,
   rather than guessing the window type from the reset delta, which mislabeled a
   weekly whose reset happened to fall within a few hours as a "5h" window. The
-  separate burst limit and the per-model-group breakdown that Antigravity's own
-  CLI shows are not exposed by this endpoint; per-model detail is carried by the
-  model quotas. A reset beyond eight days out (a week plus a day of buffer) is
+  separate five-hour limit and explicit shared-pool breakdown that Antigravity's
+  own UI shows are not exposed by this endpoint; per-model detail is carried by
+  model-facing gates. These gates may repeat one shared balance and are never
+  added together. A reset beyond eight days out (a week plus a day of buffer) is
   treated as an indeterminate balance and not asserted as a window.
 - The adapter constructs the SQLite path cross-platform (Windows APPDATA, macOS
   Library, Linux XDG) and scans Antigravity profile directories. Each active
@@ -435,10 +445,17 @@ unreadable or non-regular marker entry fails closed without trying credentials.
 ## Kiro (agentic CLI + IDE)
 
 - Source class: `passive_local_evidence`.
-- Credit-based (interactions/credits). Local state in ~/.kiro or platform
-  globalStorage (state.vscdb / data.sqlite3 like other VS Code forks).
-- Opportunistic read of local credits/usage. Passive "installed" report even
-  after subscription cancel (e.g. Kiro CLI left behind).
+- Credit-based (interactions/credits). Individual client displays can combine
+  monthly plan credits with prepaid add-on credits, so a local aggregate is not
+  assumed to be included quota or decomposed without provider field evidence.
+  Add-on credits roll over and have their own expiry semantics. See Kiro's
+  [add-on credit documentation](https://kiro.dev/docs/billing/add-on-credits/).
+  Local state is under ~/.kiro or platform globalStorage (state.vscdb /
+  data.sqlite3 like other VS Code forks).
+- Opportunistic read of local credits/usage. It remains outside the verified
+  included-quota provider set and cannot satisfy `budget=quota` or quota stretch.
+  Passive "installed" report even after subscription cancel (e.g. Kiro CLI left
+  behind).
 - Adapter falls back gracefully; no live API required for basic robustness.
 - Only the exact `kiro.resourceNotifications.usageState` child inside the
   `kiro.kiroAgent` row is projected into quota evidence. Unrelated agent state,
@@ -448,6 +465,9 @@ unreadable or non-regular marker entry fails closed without trying credentials.
   quota. Without one, the value remains visible but unverified and cannot route;
   unrelated writes to the shared database or WAL never establish freshness.
   Timestamped evidence older than one hour is retained stale and cannot route.
+- Enterprise overage exports are delayed administration data, not a live
+  individual balance. The adapter does not collect them or automate Kiro's
+  interactive `/usage` command.
 
 ## Cursor (agentic IDE)
 
@@ -482,6 +502,10 @@ unreadable or non-regular marker entry fails closed without trying credentials.
   never visually ambiguous. The global "Show account names" setting controls
   whether those duplicate-account labels are exposed; single-account labels
   remain hidden.
+- Cursor's supported team Admin API can report current-cycle on-demand spend and
+  effective limits, but it does not document the current on-demand-enabled
+  toggle, its enforcement can lag, and pooled Enterprise limits have different
+  semantics. quotabot does not request an admin key or call this endpoint today.
 
 ## Windsurf / Devin (Codeium / Cognition)
 
@@ -507,14 +531,19 @@ unreadable or non-regular marker entry fails closed without trying credentials.
 - The adapter does not invent usage from undecodable raw blobs; free tier, no
   subscription, missing cache, and CLI-only cases stay graceful detection-only
   results. For live numbers when only CLI: check app.devin.ai.
+- Self-serve prepaid on-demand balance, sharing, and auto-reload are documented
+  only in provider Settings. Public Devin billing APIs cover different
+  Enterprise ACU surfaces. quotabot does not scrape the UI, reuse browser
+  cookies, or treat a legacy generic `credits` row as proof of current prepaid
+  balance, auto-reload state, or a hard spend ceiling.
 
 ## Local runtimes (Ollama, LM Studio, ...)
 
 Locally executed runtimes have no remaining budget to spend, so they carry no
 quota windows and are never shown as a usage bar. Instead the adapter reports
-what the runtime has: the number of installed models, which models are loaded in
-memory, and an in-use flag (a model being loaded is the available proxy for
-activity).
+what the runtime has: installed inventory, which models are loaded in memory,
+and loaded-residency evidence. Loaded state proves that a model is ready in
+memory, not that it is currently computing.
 They are marked `kind: local`, sort below the cloud services, and are used as a
 reachable routing fallback while the daemon is up. A local runtime is
 shown only when reachable; when it is off the provider is dropped, and it is
@@ -523,15 +552,24 @@ actually down). All three built-in runtime adapters emit
 `source_class: "local_runtime"`.
 
 When at least one reachable runtime exposes an on-device model, the collector
-also reads passive machine memory metadata. Linux uses `/proc/meminfo`; Windows
+also reads passive machine memory metadata. Human output leads with the loaded
+model, its actual running context, and model GPU-resident bytes. Installed count
+and disk size remain inventory detail. Host RAM, GPU memory, and optional GPU
+activity are labeled `Local host` and are never attributed to a model or
+runtime. Where total and free capacity are both known, quotabot derives the used
+bytes and percentage; this is memory pressure, not GPU compute utilization.
+Linux uses `/proc/meminfo`; Windows
 uses the local `Microsoft.VisualBasic.Devices.ComputerInfo` memory API with
 `Win32_OperatingSystem` as a compatibility fallback, both inside one bounded
 system Windows PowerShell process; macOS uses `/usr/sbin/sysctl hw.memsize` and
 `/usr/bin/vm_stat`. On Windows and Linux, an installed NVIDIA driver can add its
-largest single GPU through a bounded `nvidia-smi` memory query. Separate GPU
-pools are never summed. The read is cached for 30 seconds, has bounded output
-and deadlines, and fails soft. It does not load a model, reserve memory, execute
-inference, or measure throughput.
+largest single GPU and current device utilization through a bounded `nvidia-smi`
+query. Without `nvidia-smi`, Windows can add the GPU name and driver-reported
+memory from `Win32_VideoController`, plus the busiest supported GPU Engine
+counter as host activity. GPU engines are never summed because that can exceed
+100 percent. Separate GPU memory pools are never summed. The read is cached for
+30 seconds, has bounded output and deadlines, and fails soft. It does not load a
+model, reserve memory, execute inference, or measure throughput.
 
 For a cold model with an installed byte size, quotabot estimates required memory
 as the file size plus the larger of 25 percent or 512 MiB. Each observed memory
@@ -546,8 +584,9 @@ availability. A runtime may split work across RAM and VRAM, and context or model
 format overhead can differ from the estimate.
 
 - Ollama: `GET /api/tags` (installed) and `GET /api/ps` (loaded). `/api/ps` also
-  reports each running model's `context_length`, which quotabot reads for the
-  loaded model's context window. Neither list declares what a model can do, so
+  reports each running model's `context_length` and GPU-resident bytes, which
+  quotabot labels as `running context` and `GPU resident`. Neither value proves
+  that the model is busy. Neither list declares what a model can do, so
   quotabot also reads `POST /api/show` per model for its `capabilities` array
   (tool use and vision) and its architecture-prefixed
   `<arch>.context_length`. Honors `OLLAMA_HOST`, default

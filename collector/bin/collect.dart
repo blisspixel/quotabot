@@ -32,7 +32,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.10.2';
+const _version = '0.10.3';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -3416,7 +3416,9 @@ String _stateStyled(String state) {
   switch (state) {
     case 'live':
       return style.green(padded);
-    case 'in use':
+    case 'loaded':
+    case 'ready':
+    case 'reachable':
     case 'available':
     case 'local':
       return style.cyan(padded);
@@ -3511,8 +3513,13 @@ String _quotaAlertFallback(RouteFallback fallback, int now) {
 
 String _providerAlertState(ProviderQuota q, int now) {
   if (q.isLocal) {
-    if (!isLocalRuntimeAvailableAt(q, now)) return 'unavailable';
-    return q.active ? 'in use' : 'available';
+    if (!isLocalRuntimeReachableAt(q, now) || q.error != null) {
+      return 'unavailable';
+    }
+    if (q.active) return 'loaded';
+    return q.models.any((model) => !model.cloudOffloaded)
+        ? 'ready'
+        : 'reachable';
   }
   if (q.driftReason != null) return 'provider drift';
   if (q.stale) return 'cached';
@@ -3584,8 +3591,11 @@ String _doctorState(ProviderQuota q, int now) {
     if (q.asOf <= 0 || q.asOf > now + kQuotaEvidenceClockSkewSeconds) {
       return 'UNVERIFIED';
     }
-    if (!isLocalRuntimeAvailableAt(q, now)) return 'unavailable';
-    return q.active ? 'in use' : 'available';
+    if (!isLocalRuntimeReachableAt(q, now)) return 'unavailable';
+    if (q.active) return 'loaded';
+    return q.models.any((model) => !model.cloudOffloaded)
+        ? 'ready'
+        : 'reachable';
   }
   if (q.driftReason != null) return 'PROVIDER DRIFT';
   if (!q.ok || q.sourceClassViolation != null) return 'ERROR';
@@ -3711,9 +3721,9 @@ void _printDoctor(
   for (final q in results) {
     final state = _doctorState(q, now);
     final detail = q.isLocal
-        ? (isLocalRuntimeAvailableAt(q, now)
+        ? (isLocalRuntimeReachableAt(q, now) && q.error == null
             ? q.status ?? 'ready'
-            : q.error ?? 'local runtime unavailable')
+            : q.error ?? 'unreachable')
         : q.windows.isEmpty
             // A no-window row shows its status if it has one (a setup or
             // availability state), otherwise its error. A real failure sets
@@ -4407,7 +4417,7 @@ String _verificationProvenanceState(ProviderQuota q, String state) =>
             'out_of_quota' => 'OUT OF QUOTA',
             'error' => 'ERROR',
             'no_data' => 'metadata',
-            'local' => q.active ? 'in use' : 'available',
+            'local' => q.active ? 'loaded' : 'ready',
             _ => state,
           };
 

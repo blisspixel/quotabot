@@ -224,6 +224,7 @@ void main() {
           systemMemoryAvailableBytes: 20 * gib,
           gpuMemoryTotalBytes: 12 * gib,
           gpuMemoryAvailableBytes: 8 * gib,
+          gpuUtilizationPercent: 37,
           gpuCount: 1,
           gpuName: 'AMD Radeon 780M',
         ),
@@ -234,10 +235,12 @@ void main() {
 
       expect(decoded.localHardware?.systemMemoryTotalBytes, 32 * gib);
       expect(decoded.localHardware?.gpuMemoryAvailableBytes, 8 * gib);
+      expect(decoded.localHardware?.gpuUtilizationPercent, 37);
       expect(decoded.localHardware?.gpuCount, 1);
       expect(decoded.localHardware?.gpuName, 'AMD Radeon 780M');
       expect(sanitized.localHardware?.asOf, 999);
       expect(sanitized.localHardware?.gpuName, 'AMD Radeon 780M');
+      expect(sanitized.localHardware?.gpuUtilizationPercent, 37);
     });
 
     test('local hardware parsing bounds malformed capacity metadata', () {
@@ -247,6 +250,7 @@ void main() {
         'system_memory_available_bytes': 200,
         'gpu_memory_total_bytes': 'large',
         'gpu_count': 1000,
+        'gpu_utilization_percent': 101,
       });
 
       expect(hardware.asOf, 0);
@@ -254,6 +258,7 @@ void main() {
       expect(hardware.systemMemoryAvailableBytes, isNull);
       expect(hardware.gpuMemoryTotalBytes, isNull);
       expect(hardware.gpuCount, 0);
+      expect(hardware.gpuUtilizationPercent, isNull);
     });
 
     test('subscription provenance rejects attached local hardware evidence',
@@ -287,7 +292,10 @@ void main() {
       expect(q.toJson()['reset_credits_available'], 2);
       expect(ProviderQuota.fromJson(q.toJson()).resetCreditsAvailable, 2);
       expect(sanitizeProviderQuota(q).resetCreditsAvailable, 2);
-      expect(resetAvailableMessage(q), contains('2 resets available in Codex'));
+      expect(
+        resetAvailableMessage(q),
+        contains('2 banked resets available in Codex'),
+      );
     });
 
     test('the escape-hatch message is omitted from stale or drifted evidence',

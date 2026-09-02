@@ -2162,15 +2162,15 @@ void main() {
     var checks = 0;
     final opened = <String>[];
     const latest = QuotabotRelease(
-      tag: 'v0.10.3',
-      version: '0.10.3',
-      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.3',
+      tag: 'v0.10.4',
+      version: '0.10.4',
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.4',
       prerelease: false,
     );
     const stable = QuotabotRelease(
-      tag: 'v0.10.3',
-      version: '0.10.3',
-      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.3',
+      tag: 'v0.10.4',
+      version: '0.10.4',
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.4',
       prerelease: false,
     );
     await tester.pumpWidget(
@@ -2209,7 +2209,7 @@ void main() {
     await tester.pump();
     expect(checks, 1);
     expect(find.text('Update available'), findsOneWidget);
-    expect(find.text('Latest release: 0.10.3'), findsOneWidget);
+    expect(find.text('Latest release: 0.10.4'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byType(AlertDialog).last,

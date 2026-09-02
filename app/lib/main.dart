@@ -4717,8 +4717,13 @@ class _DashboardState extends State<Dashboard>
       if (q.asOf <= 0 || q.asOf > now + kQuotaEvidenceClockSkewSeconds) {
         return ('unverified', amber);
       }
-      if (!isLocalRuntimeAvailableAt(q, now)) return ('unavailable', grey);
-      return q.active ? ('in use', green) : ('idle', blue);
+      if (!isLocalRuntimeReachableAt(q, now) || q.error != null) {
+        return ('unavailable', grey);
+      }
+      if (q.active) return ('loaded', green);
+      return q.models.any((model) => !model.cloudOffloaded)
+          ? ('ready', blue)
+          : ('reachable', blue);
     }
     if (q.driftReason != null) return ('provider drift', errorColor);
     if (!q.ok) {
@@ -5082,7 +5087,8 @@ class ProviderTile extends StatelessWidget {
       binding = _view(quota, bindingWin, now);
     }
     final trustedEvidence = isTrustedQuotaEvidenceAt(quota, now);
-    final localAvailable = isLocalRuntimeAvailableAt(quota, now);
+    final localReachable =
+        isLocalRuntimeReachableAt(quota, now) && quota.error == null;
     final blocked = binding != null && binding.exhausted;
     // When a spent short window blocks the card, a longer window that still has
     // room is the constraint the user faces after the short one resets - show it
@@ -5090,7 +5096,7 @@ class ProviderTile extends StatelessWidget {
     final secondaryWin = blocked ? secondaryVisibleWindow(quota, now) : null;
     final driftColor = _providerDriftForeground(cardColor);
     final statusColor = quota.isLocal
-        ? !localAvailable
+        ? !localReachable
               ? muted
               : quota.active
               ? const Color(0xFF3FB950)
@@ -5364,12 +5370,9 @@ class ProviderTile extends StatelessWidget {
                 ),
               const SizedBox(height: 10),
               if (quota.isLocal)
-                (localAvailable
+                (localReachable
                     ? _localRow(quota, muted, fg)
-                    : _noData(
-                        quota.error ?? 'local runtime unavailable',
-                        muted,
-                      ))
+                    : _noData(quota.error ?? 'unreachable', muted))
               else if (quota.windows.isEmpty)
                 ((quota.status ?? '').isNotEmpty
                     ? _statusOnlyRow(quota, muted, fg)
@@ -5972,8 +5975,8 @@ class ProviderTile extends StatelessWidget {
     );
   }
 
-  /// Status block for a local runtime: what is loaded or how many are installed,
-  /// an in-use / idle label, and the detail lines (size, quantization, disk).
+  /// Status block for a local runtime: what is loaded or ready, plus running
+  /// context, GPU residency, and inventory detail.
   /// Local runtimes have no quota to show.
   Widget _localRow(ProviderQuota quota, Color muted, Color fg) {
     final loaded = quota.active;
@@ -6002,7 +6005,7 @@ class ProviderTile extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             Text(
-              loaded ? 'in use' : 'idle',
+              loaded ? 'loaded' : 'ready',
               style: TextStyle(fontSize: AppType.small, color: muted),
             ),
           ],
@@ -6710,7 +6713,7 @@ class PStatus {
 
 PStatus providerStatus(ProviderQuota q, int now) {
   // A running local runtime is available, so it reads green like a healthy
-  // provider. The in-use vs idle nuance is shown in the card body, not the dot.
+  // provider. The loaded vs ready nuance is shown in the card body, not the dot.
   if (q.isLocal) {
     return isLocalRuntimeAvailableAt(q, now)
         ? const PStatus(Color(0xFF3FB950), true, false)

@@ -1690,7 +1690,7 @@ void main() {
     await tester.pump();
 
     expect(
-      find.textContaining('in use | local runtime | captured'),
+      find.textContaining('loaded | local runtime | captured'),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
@@ -1722,7 +1722,7 @@ void main() {
     expect(status.hasData, isFalse);
     expect(status.blocked, isFalse);
     expect(find.textContaining('cached | local runtime'), findsOneWidget);
-    expect(find.text('local runtime unavailable'), findsOneWidget);
+    expect(find.text('unreachable'), findsOneWidget);
     expect(find.text('qwen loaded'), findsNothing);
     expect(find.text('in use'), findsNothing);
     expect(tester.takeException(), isNull);

@@ -38,7 +38,7 @@ import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.10.2';
+const quotabotMcpVersion = '0.10.3';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
@@ -509,9 +509,10 @@ final _windowSchema = JsonSchema.object(
   required: ['label'],
 );
 
-/// One per-model quota entry, either an exhaustive independent pool such as
+/// One per-model quota entry, either an exhaustive model-facing gate such as
 /// Antigravity or a sparse scoped overlay such as Claude Fable and Codex Spark.
-/// The shared `windows` summary stays the provider headline.
+/// Multiple gates can refer to one provider pool and must never be summed. The
+/// shared `windows` summary stays the provider headline.
 final _modelQuotaSchema = JsonSchema.object(
   description: 'Per-model quota, when a provider meters models separately.',
   properties: {
@@ -549,6 +550,9 @@ final _localHardwareSchema = JsonSchema.object(
     ),
     'gpu_memory_available_bytes': JsonSchema.integer(
       description: 'Free memory on that same GPU.',
+    ),
+    'gpu_utilization_percent': JsonSchema.integer(
+      description: 'Host GPU activity from 0 through 100, when supported.',
     ),
     'gpu_count': JsonSchema.integer(),
     'gpu_name': JsonSchema.string(
@@ -1151,7 +1155,9 @@ final _modelEntrySchema = JsonSchema.object(
       description: 'For local-runtime models: installed model size in bytes.',
     ),
     'vram_bytes': JsonSchema.integer(
-      description: 'For loaded local-runtime models: VRAM bytes when known.',
+      description:
+          'For loaded local-runtime models: GPU-resident bytes when known. '
+          'This is residency, not utilization.',
     ),
     'quant': JsonSchema.string(
       description: 'For local-runtime models: quantization label when known.',

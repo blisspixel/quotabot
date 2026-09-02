@@ -7,7 +7,7 @@ These tools change often. Treat this as a starting point and verify against each
 vendor's official docs (linked per provider). For exactly where quotabot reads
 each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
 
-**Last updated: 2026-07-18.**
+**Last verified: 2026-09-02.**
 
 The provider command is only one part of the trust statement. quotabot also
 emits a normalized `source_class`: Claude and live Codex, Grok, and Antigravity
@@ -19,8 +19,9 @@ and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
 
 ## Claude (Claude Code)
 
-- Official docs: https://platform.claude.com/docs and the rate-limit reference at
-  https://platform.claude.com/docs/en/api/rate-limits
+- Official docs: https://platform.claude.com/docs/en/models/overview, the
+  [plan usage-credit guide](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans),
+  and the [Fable plan guide](https://support.claude.com/en/articles/15424964-claude-fable-models-on-your-plan).
 - Check usage yourself: `/usage` in a Claude Code session shows current-window
   usage bars and reset times. Its separate contribution breakdown can be based
   only on local sessions and does not prove account balance or cross-device
@@ -33,21 +34,26 @@ and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
   Extra-usage credits on that same response can appear as display-only card
   detail; they are not plan windows.
 - Quota shape: a rolling 5-hour window plus a weekly cap, shared across Claude
-  Code, Claude.ai, and related products.
+  Code, Claude.ai, and related products. Anthropic doubled the five-hour Claude
+  Code allowance for Pro, Max, Team, and seat-based Enterprise on 2026-05-06
+  and removed the prior peak-hours reduction for Pro and Max. quotabot reads
+  provider percentages and reset times, so no plan amount is hardcoded.
 - The live response may also include a model-scoped weekly cap. Beginning July
-  20, 2026, Anthropic says Fable 5 is a standard included benefit at 50% of
-  limits for Max and Team Premium. Pro and Team Standard retain Fable through
-  usage credits and receive a one-time $100 credit. This is a dated plan policy,
-  not a value quotabot hardcodes. `budget=quota` therefore requires both a live
-  scoped Fable row and a Max or Team Premium entitlement carried by current
-  provider usage or profile metadata read with the same credential on or after
-  July 20, 2026 UTC. The
+  20, 2026, Anthropic says Fable 5 and Fable 5.1 use up to 50% of the regular
+  shared weekly plan limit for Max, Team Premium, and premium legacy seat-based
+  Enterprise. Pro, Team Standard, Enterprise Standard, and usage-based
+  Enterprise use pay-as-you-go credits. This is a dated plan policy, not a
+  value quotabot hardcodes. `budget=quota` therefore requires both a live scoped
+  Fable row and a current provider entitlement that quotabot can identify
+  exactly. Max and Team Premium are supported today. Generic Enterprise remains
+  fail-closed because the current profile response does not distinguish premium
+  from standard reliably. The
   `subscriptionType` in the local Claude credential is
   labeled `host_credential` evidence and never proves included spend after a
   plan change. Positive included-quota and credit-backed labels both require
   current provider plan evidence. Unknown, host-label-only, and credit-backed
   plans remain visible only under the unrestricted budget. See the
-  [July 17 announcement](https://x.com/claudeai/status/2078302415804379218).
+  [current Fable plan guide](https://support.claude.com/en/articles/15424964-claude-fable-models-on-your-plan).
 - quotabot reads: the OAuth usage and profile metadata endpoints, reusing the
   token Claude Code stores.
   Live with no quotabot login when Claude Code has a valid signed-in token here;
@@ -75,6 +81,14 @@ account id enters quota output.
   Current Pro responses can expose one weekly primary pool, an explicit null
   secondary pool, and a separate named GPT-5.3-Codex-Spark weekly pool. The
   named pool gates Spark only; it does not replace the shared account limit.
+- Codex currently offers GPT-5.6 Sol, Terra, and Luna, plus the Pro-only
+  GPT-5.3-Codex-Spark research preview. GPT-5.4 and GPT-5.4-Mini retired from
+  ChatGPT-authenticated Codex on 2026-08-31. See the
+  [current Codex model guide](https://learn.chatgpt.com/docs/models).
+- The endpoint can also report `rate_limit_reset_credits.available_count`.
+  OpenAI now calls these banked resets: promotional full resets of the active
+  windows, not cash or API credit. quotabot keeps the stable JSON field
+  `reset_credits_available` and labels the value as banked resets to users.
 - quotabot reads: the ChatGPT usage endpoint, reusing the OAuth access token
   Codex stores locally, or a self-refreshing grant from `quotabot login codex`
   when that token is expired. The grant path is designed to keep an idle machine
@@ -87,15 +101,18 @@ account id enters quota output.
 
 ## Antigravity / Gemini (Google)
 
-- Official docs: https://antigravity.google/docs/cli-overview ,
-  https://antigravity.google/docs/cli-using ,
-  https://antigravity.google/docs/cli-credits
+- Official docs: https://antigravity.google/docs/models/ ,
+  https://antigravity.google/docs/plans/ , and
+  https://antigravity.google/docs/cli/commands/usage .
 - The CLI is `agy`. `agy --help` lists flags (`--print` for non-interactive,
   `--model`, `--project`, ...) and subcommands (`models`, `update`, ...). Inside
   the TUI, the Models & Quota panel shows per-model-group Weekly and Five Hour
   limits. Antigravity replaced the consumer Gemini CLI on 2026-06-18.
-- Quota shape: per-model-group Weekly and Five Hour limits (Gemini models;
-  Claude and GPT models), depending on plan (free, AI Pro, Ultra).
+- Quota shape: two shared groups, each with Weekly and Five Hour limits: one
+  for Gemini models and one for Claude/GPT models. Gemini 3.7 Flash, 3.6 Flash,
+  3.5 Flash, and 3.1 Pro share the Gemini pool. Claude Sonnet 4.6, Claude Opus
+  4.6, and GPT-OSS-120B use the separate non-Gemini pool. Provider model rows
+  are gates onto those groups, not balances that can be added together.
 - quotabot reads: the Cloud Code API (`loadCodeAssist`, `onboardUser`,
   `fetchAvailableModels`). It can reuse refresh material from a signed-in
   Antigravity IDE or from `agy` (OS keyring target `gemini:antigravity`);
@@ -109,7 +126,9 @@ account id enters quota output.
 
 ## Grok (xAI)
 
-- Official docs: https://docs.x.ai and the console at https://console.x.ai .
+- Official docs: https://docs.x.ai, the
+  [shared-pool FAQ](https://docs.x.ai/grok/faq), and the console at
+  https://console.x.ai .
   Open-source coding CLI: https://github.com/superagent-ai/grok-cli
 - Check usage yourself: `/usage` in the Grok TUI tracks token and credit use.
   Do not automate this as `grok usage` or `grok -p /usage`: a positional
@@ -139,14 +158,34 @@ account id enters quota output.
 
 ## Passive and local
 
-- **Cursor, Windsurf, Kiro:** detected from their local state files; no usage
-  command needed. quotabot reports only provider-owned metadata it can read
-  opportunistically. Current Cursor 3.x state can identify a recognized,
-  owner-bound plan but does not persist the current Cursor Models and Other
-  Models quota balances in supported local rows, so that plan is diagnostic and
-  unroutable. Open Cursor Settings > Usage to inspect those balances.
+- **Cursor:** current plans use two separate monthly pools, Cursor Models and
+  Other Models. Current Cursor 3.x state can identify a recognized, owner-bound
+  plan but does not persist those current balances in supported local rows, so
+  the plan is diagnostic and unroutable. Open Cursor Settings > Usage and its
+  Spending tab to inspect them. See
+  https://cursor.com/docs/models-and-pricing .
+- **Windsurf / Devin:** Pro and Teams full seats use daily and weekly limits
+  shared across Devin, Terminal, and Windsurf; Max uses a weekly limit without
+  the daily limit. Prepaid on-demand credits can continue after included quota,
+  can auto-reload, and can be shared at team scope. The provider documents that
+  balance in Settings but no supported self-serve balance API, so quotabot does
+  not scrape it or infer a paid ceiling from local plan state.
+  quotabot reports only provider-owned, timestamped local evidence it can read
+  opportunistically. See
+  https://docs.devin.ai/admin/billing/self-serve .
+- **Kiro:** plans use monthly credits that renew at the next billing cycle, and
+  individual client displays can combine them with prepaid add-on credits.
+  quotabot preserves supported provider-owned local rows as aggregate
+  credit-based evidence and does not call them included quota or decompose a
+  paid balance without field validation. Cross-check
+  https://kiro.dev/docs/billing/add-on-credits/ and https://kiro.dev/pricing/ .
 - **Ollama, LM Studio, Lemonade (and other OpenAI-compatible runtimes):**
-  quotabot lists installed and loaded models from the local API. Locally
+  quotabot leads with models loaded now, their actual running context when the
+  runtime reports it, and GPU-resident bytes when known. Installed count and
+  disk size remain inventory detail. `loaded` means resident, not necessarily
+  busy. Host RAM, GPU memory pressure, and optional supported host GPU activity
+  are explicitly labeled as local-host evidence and are never attributed to one
+  model. Locally
   executed models have no quota to spend, so a supported runtime is a fallback
   while its daemon is reachable. LM Studio must have its local server started
   (Developer tab, or `lms server start`); Lemonade desktop packages start their

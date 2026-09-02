@@ -589,7 +589,7 @@ void main() {
     expect(q.resetCreditsAvailable, 2);
     expect(
       resetAvailableMessage(q),
-      allOf(contains('2 resets available in Codex'), contains('redeem')),
+      allOf(contains('2 banked resets available in Codex'), contains('redeem')),
     );
   });
 
@@ -617,7 +617,10 @@ void main() {
       usageCredentialIdentity: injectedIdentity,
     ).collect();
     expect(one.resetCreditsAvailable, 1);
-    expect(resetAvailableMessage(one), contains('1 reset available in Codex'));
+    expect(
+      resetAvailableMessage(one),
+      contains('1 banked reset available in Codex'),
+    );
   });
 
   test('host identity survives access and refresh rotation', () async {

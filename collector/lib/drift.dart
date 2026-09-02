@@ -91,7 +91,7 @@ const _reRatingWindows = <String, Set<String>>{
 };
 
 /// Providers that can legitimately start a new reset generation before the
-/// prior reset boundary. Codex exposes redeemable rate-limit reset credits, so
+/// prior reset boundary. Codex exposes redeemable banked resets, so
 /// an advancing reset plus restored headroom is a real refill. This exemption
 /// applies only to the advanced-generation check in [_pairDrift]; an unexplained
 /// drop inside the same Codex 5 hour generation remains drift.

@@ -388,7 +388,7 @@ void main() {
         loaded: const [],
       );
       expect(q.active, isFalse);
-      expect(q.status, contains('idle'));
+      expect(q.status, 'ready - no model loaded');
       expect(q.isLocal, isTrue);
     });
 
@@ -451,10 +451,10 @@ void main() {
       );
       expect(q.active, isTrue);
       expect(q.status, contains('loaded'));
-      expect(q.details.any((d) => d.contains('VRAM')), isTrue);
-      expect(q.details.any((d) => d.contains('ctx')), isTrue);
+      expect(q.details.any((d) => d.contains('GPU resident')), isTrue);
+      expect(q.details.any((d) => d.contains('running context')), isTrue);
       expect(q.details.any((d) => d.contains('unloads in')), isTrue);
-      expect(q.details.any((d) => d.contains('models loaded')), isTrue);
+      expect(q.details.any((d) => d.contains('more loaded')), isTrue);
       expect(q.details.any((d) => d.contains('on disk')), isTrue);
     });
 

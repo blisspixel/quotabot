@@ -123,18 +123,44 @@ Pages speculative:                        50000.
       expect(sample?.name, 'NVIDIA GeForce RTX 4090');
       expect(sample?.totalBytes, 24576 * 1024 * 1024);
       expect(sample?.availableBytes, 18000 * 1024 * 1024);
+      expect(sample?.utilizationPercent, isNull);
+    });
+
+    test('parses host GPU utilization from the current NVIDIA query', () {
+      final sample = parseNvidiaSmiMemory(
+        'NVIDIA GeForce RTX 4090, 24576, 18000, 37\n',
+      );
+      expect(sample?.name, 'NVIDIA GeForce RTX 4090');
+      expect(sample?.totalBytes, 24576 * 1024 * 1024);
+      expect(sample?.availableBytes, 18000 * 1024 * 1024);
+      expect(sample?.utilizationPercent, 37);
+      expect(
+        parseNvidiaSmiMemory('NVIDIA GPU, 24576, 18000, 101'),
+        isNull,
+      );
     });
 
     test('parses Windows Win32_VideoController name and AdapterRAM', () {
       final sample = parseWindowsGpuInfo(
         'Microsoft Basic Display Adapter\t4294967295\n'
-        'AMD Radeon(TM) 780M\t2147483648\n',
+        'AMD Radeon(TM) 780M\t2147483648\n'
+        '__utilization__\t6\n',
       );
       expect(sample?.name, 'AMD Radeon 780M');
       expect(sample?.totalBytes, 2147483648);
       expect(sample?.availableBytes, isNull);
+      expect(sample?.utilizationPercent, 6);
       expect(sample?.count, 1);
       expect(parseWindowsGpuInfo('Basic Display Adapter\t0'), isNull);
+      expect(
+        parseWindowsGpuInfo('AMD Radeon\t1024\n__utilization__\t101'),
+        isNotNull,
+      );
+      expect(
+        parseWindowsGpuInfo('AMD Radeon\t1024\n__utilization__\t101')
+            ?.utilizationPercent,
+        isNull,
+      );
     });
 
     test('rejects zero, negative, and implausibly large values', () {
@@ -178,6 +204,10 @@ Pages speculative:                        50000.
     }
     if (gpuTotal != null && gpuAvailable != null) {
       expect(gpuAvailable, lessThanOrEqualTo(gpuTotal));
+    }
+    final gpuUtilization = evidence.gpuUtilizationPercent;
+    if (gpuUtilization != null) {
+      expect(gpuUtilization, inInclusiveRange(0, 100));
     }
   });
 }

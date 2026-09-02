@@ -35,7 +35,7 @@ LocalModel _m(
 
 void main() {
   group('localRuntimeQuota', () {
-    test('reports a loaded model in use, with detail', () {
+    test('reports a loaded model with residency detail', () {
       final q = localRuntimeQuota(
         id: 'ollama',
         name: 'Ollama',
@@ -64,8 +64,8 @@ void main() {
       expect(q.status, contains('qwen3-coder'));
       expect(q.status, contains('7B'));
       expect(q.status, contains('Q4_K_M'));
-      // Detail lines include VRAM and disk usage.
-      expect(q.details.any((d) => d.contains('VRAM')), isTrue);
+      // Detail lines distinguish GPU residency from host utilization.
+      expect(q.details.any((d) => d.contains('GPU resident')), isTrue);
       expect(q.details.any((d) => d.contains('on disk')), isTrue);
     });
 
@@ -105,7 +105,7 @@ void main() {
       );
     });
 
-    test('reports idle with an installed count when nothing is loaded', () {
+    test('reports ready when local models are installed but not loaded', () {
       final q = localRuntimeQuota(
         id: 'lmstudio',
         name: 'LM Studio',
@@ -114,7 +114,7 @@ void main() {
         loaded: const [],
       );
       expect(q.active, isFalse);
-      expect(q.status, '2 installed, idle');
+      expect(q.status, 'ready - no model loaded');
     });
 
     test('singularizes a single installed model', () {
@@ -143,7 +143,7 @@ void main() {
       expect(back.isLocal, isTrue);
     });
 
-    test('formats context, VRAM, and an unload countdown', () {
+    test('formats running context, GPU residency, and an unload countdown', () {
       const now = 1000;
       final q = localRuntimeQuota(
         id: 'lmstudio',
@@ -161,9 +161,31 @@ void main() {
         ],
       );
       final joined = q.details.join(' | ');
-      expect(joined, contains('VRAM'));
-      expect(joined, contains('ctx'));
+      expect(joined, contains('GPU resident'));
+      expect(joined, contains('running context'));
       expect(joined, contains('unloads in'));
+    });
+
+    test('distinguishes empty and cloud-only reachable runtimes', () {
+      final empty = localRuntimeQuota(
+        id: 'lemonade',
+        name: 'Lemonade',
+        asOf: 100,
+        installed: const [],
+        loaded: const [],
+      );
+      final cloudOnly = localRuntimeQuota(
+        id: 'ollama',
+        name: 'Ollama',
+        asOf: 100,
+        installed: [_m('remote-cloud', cloud: true)],
+        loaded: const [],
+      );
+
+      expect(empty.status, 'reachable - no local models installed');
+      expect(cloudOnly.status, 'reachable - cloud routes only');
+      expect(empty.active, isFalse);
+      expect(cloudOnly.active, isFalse);
     });
 
     test('renders small models in MB and counts multiple loaded', () {
@@ -179,7 +201,7 @@ void main() {
       );
       final joined = q.details.join(' | ');
       expect(joined, contains('MB'));
-      expect(joined, contains('2 models loaded'));
+      expect(joined, contains('+1 more loaded'));
     });
 
     test('carries declared capabilities onto the model inventory', () {

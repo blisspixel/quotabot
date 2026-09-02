@@ -34,14 +34,15 @@ it was enabled on July 18, 2026. v0.9.4 and later releases are locked under that
 policy; v0.9.2 and earlier releases were not changed retroactively.
 
 The verified
-[v0.10.2 stable release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.2)
+[v0.10.3 stable release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.3)
 contains all three desktop bundles and sidecars inside the exact 14-asset set.
-The [stable release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
-built, attested, freshly downloaded, and verified those archives before immutable
-publication. The separate unpinned GitHub Latest
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
-passed stable-channel, packaged desktop, canonical acquisition, and source-setup
-checks on Windows, macOS, and Ubuntu.
+The release workflow builds, attests, freshly downloads, and verifies those
+archives before immutable publication. The separate unpinned GitHub Latest
+smoke covers stable-channel, packaged desktop, canonical acquisition, and
+source-setup checks on Windows, macOS, and Ubuntu. The preceding v0.10.2
+[release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
+and [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
+remain the prior audited lifecycle record.
 Application signing and notarization remain pre-1.0 native trust gates.
 Interactive native accessibility evidence remains a separate final 1.0 gate
 and must run again on the exact signed candidate.
@@ -129,7 +130,7 @@ Expand-Archive -LiteralPath $asset -DestinationPath $destination
 Start-Process (Join-Path $destination 'quotabot.exe')
 ```
 
-The published v0.10.2 Windows packages are not Authenticode-signed. Each newer
+The published v0.10.3 Windows packages are not Authenticode-signed. Each newer
 release begins with a mandatory native signing status in its GitHub release
 notes. `Windows: unsigned transition artifact` means SmartScreen publisher
 identity is not established. Checksums and GitHub provenance do not establish

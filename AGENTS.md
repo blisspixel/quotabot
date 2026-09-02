@@ -39,15 +39,17 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 
 ## Project status and execution order
 
-The current verified stable release is 0.10.2. It corrects bounded GitHub
-stable-release discovery and adds a Latest-channel install regression. The
+The current verified stable release is 0.10.3. It refreshes provider and model
+semantics and makes existing local-runtime evidence lead with loaded model,
+running context, GPU residency, and separately labeled host pressure. The
 shipped routing policies are `balanced`,
 `local_first`, and opt-in `quota_stretch`. The bounded provider-ID cache
 coordinator passed the complete release, install, update, and source-setup
 lifecycle on Windows, macOS, and Linux; the shipped alias map remains empty. The
 next work continues native field validation and signed 1.0 readiness, with no
-new product breadth during stabilization. Bounded local-resource visibility is
-specified as the first post-stabilization track. The
+new product breadth during stabilization. Later credit-backed balance visibility
+and expanded local-resource sampling remain explicit post-stabilization tracks.
+The
 [roadmap Next section](ROADMAP.md#next) is the sole source for its
 behavior, guardrails, completion criteria, and rationale.
 

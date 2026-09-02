@@ -554,7 +554,7 @@ class ModelCapabilityGates {
 
   /// Conservative current headroom for an available capability gate, keyed by
   /// provider/account. This is populated only for providers whose provider-wide
-  /// window is a synthetic summary over exhaustive independent model pools.
+  /// window is a synthetic summary over exhaustive model-facing gates.
   /// Callers may use it instead of that summary for a capability-scoped route.
   final Map<String, double> headroomByQuotaKey;
 
@@ -583,7 +583,7 @@ ModelCapabilityGates modelCapabilityGates(
     if (entry.available) {
       available.add(key);
       // Antigravity's provider window is the tightest display summary across
-      // independent model pools. It must not gate an unrelated eligible model.
+      // model-facing gates. It must not gate an unrelated eligible model.
       // Among eligible available pools, retain the lowest measured headroom so
       // provider-level routing never advertises more budget than every viable
       // model represented by this capability gate can support.
@@ -820,7 +820,7 @@ List<ModelEntry> buildModelRegistry(
   final reset = quota?.resetsAt;
   final modelQuotaCurrent =
       quota != null && isCurrentModelQuotaEvidenceAt(quota, now);
-  // Antigravity's model_quotas are exhaustive independent pools. Its synthetic
+  // Antigravity's model_quotas are exhaustive model-facing gates. Its synthetic
   // provider window intentionally shows the tightest pool for a truthful glance,
   // but an exhausted sibling cannot make this matched pool unavailable. Provider
   // integrity and freshness still gate every model, so stale or drifted evidence
@@ -1126,12 +1126,15 @@ String _recommendReason(
 List<String> _localModelEvidence(ModelInfo model) {
   final evidence = <String>[];
   if (model.loaded && model.vramBytes != null) {
-    evidence.add('${formatCompactBytes(model.vramBytes!)} VRAM');
+    evidence.add('${formatCompactBytes(model.vramBytes!)} GPU resident');
   } else if (!model.loaded && model.sizeBytes != null) {
     evidence.add('${formatCompactBytes(model.sizeBytes!)} on disk');
   }
   if (model.contextTokens != null) {
-    evidence.add('${formatContextTokens(model.contextTokens!)} ctx');
+    evidence.add(
+      '${formatContextTokens(model.contextTokens!)} '
+      '${model.loaded ? 'running context' : 'max context'}',
+    );
   }
   if (model.quant != null) evidence.add(model.quant!);
   return evidence;

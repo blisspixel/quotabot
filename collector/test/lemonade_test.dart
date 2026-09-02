@@ -107,7 +107,7 @@ void main() {
       );
       final q = await LemonadeAdapter(client: mock).collect();
       expect(q.ok, isTrue);
-      expect(q.status, '0 installed, idle');
+      expect(q.status, 'reachable - no local models installed');
       expect(q.models, isEmpty);
       expect(isLocalRuntimeAvailableAt(q, q.asOf), isFalse);
     });

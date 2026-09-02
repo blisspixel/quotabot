@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-08-31. This file is the forward plan. It records brief shipped
+Updated 2026-09-02. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -94,7 +94,11 @@ signed 0.10.x lifecycle rehearsal before 1.0.** Feature breadth is frozen.
 Completed release detail belongs in [CHANGELOG.md](CHANGELOG.md); this section
 records the remaining dependency order and why it comes next.
 
-Stable 0.10.2 closed the corrective updater gate. Its
+Stable 0.10.3 refreshes provider and model semantics as of 2026-09-02 and makes
+local-runtime readiness lead with loaded model, running context, GPU residency,
+and separately labeled host pressure. It does not broaden routing or treat host
+utilization as model activity. The preceding 0.10.2 release closed the
+corrective updater gate. Its
 [release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
 published the exact immutable 14-asset set, the unpinned GitHub Latest
 [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
@@ -111,7 +115,11 @@ one-time recovery bootstrap for the immutable rc.16 Windows updater defect.
    does not depend on signed artifacts, and keep recovery guidance current.
    Correct current human labels that call loaded model residency `in use` when
    the runtime exposes no direct busy or streaming evidence; use `loaded` for
-   residency alone.
+   residency alone. Lead local summaries with the loaded model, running context,
+   and model GPU residency. Keep installed inventory secondary. Host RAM, VRAM,
+   and optional supported host GPU utilization may be displayed only as separately
+   labeled, bounded, passive host evidence and must never be attributed to one
+   runtime or model.
    Compatibility work for an already claimed provider may improve truthful
    detection, but must not invent quota or depend on an undocumented private
    endpoint.
@@ -277,13 +285,14 @@ dated idle-machine validation of the Claude and Codex grants, then the frozen
 
 ### Local-resource visibility after stabilization
 
-After the frozen 0.10.x release and signed lifecycle complete, add bounded,
-content-blind local-resource visibility for reachable on-device runtimes.
-Implementation remains queued until every 0.10.x completion criterion above
-closes. The narrow loaded-versus-in-use wording correction in [Next](#next) is
-truth maintenance and may land during stabilization; it does not add resource
-sampling.
-Expose host-scoped CPU, RAM, GPU, VRAM, and NPU gauges separately from
+The stabilization line now includes the narrow, bounded first slice of
+content-blind local-resource visibility: loaded model, running context,
+model GPU residency, host RAM and VRAM pressure, and optional host GPU
+utilization. It is truth and quality-of-life refinement for existing local
+runtimes, not a new routing input. After the frozen 0.10.x release and signed
+lifecycle complete, extend this evidence across supported hardware and operating
+systems.
+Expose additional host-scoped CPU, GPU, VRAM, and NPU gauges separately from
 runtime-scoped loaded, busy, streaming, and model-residency evidence. Prefer
 documented runtime metadata and supported vendor or operating-system counters;
 every value must carry source, scope, observation time, and explicit absence
@@ -298,9 +307,73 @@ routing use. Require bounded probes, fail-soft behavior, deterministic parser an
 schema tests, and dated Windows, macOS, and Linux field validation before
 claiming each metric on that platform.
 
+### Credit-backed fallback visibility after stabilization
+
+After the signed lifecycle and typed shared-pool work, add one provider-neutral
+way to expose an authoritative purchased-credit, prepaid-unit, or dollar balance
+where a provider actually returns it. This is capacity evidence, not a general
+spend ledger, and it applies across supported providers rather than only Codex.
+Each provider must be assessed independently because a balance can be
+account-wide, key-scoped, monthly, expiring, promotional, on-demand, or an
+unbounded pay-as-you-go authorization.
+
+Keep four concepts separate in the schema and every human surface: included
+subscription quota, promotional quota resets such as Codex banked resets,
+purchased or prepaid credits, and unbounded paid API access. A balance record
+must carry its amount or units, currency when applicable, scope, source,
+observation time, expiry or reset when known, and whether paid continuation or
+overages are enabled. Show a value such as "$197.00 paid credits available" only
+from an authoritative current provider response. Never derive a balance from
+token logs, pricing estimates, model calls, or host application content.
+
+When included quota is exhausted but a paid fallback exists, CLI, `top`,
+desktop, MCP, HTTP, and receipts must say that no included quota remains and
+label the paid balance separately. Default routing and `budget: quota` continue
+to exclude it. Any paid route requires an explicit paid-spend opt-in plus a
+provider or account policy that bounds exposure; an available balance never
+silently enables overages or automatic paid continuation. Stale, manual,
+unknown-currency, unbounded, or drifted evidence cannot satisfy a paid balance
+gate.
+
+Start with provider reads that are documented, metadata-only, and usable with
+least-privilege authority. Record an explicit unsupported or unverified result
+for every current cloud provider rather than fabricating parity. Existing local
+runtimes have no provider credit balance, and manual entries remain
+self-reported rather than authoritative.
+
+Current provider admission record, researched from first-party documentation on
+2026-09-02:
+
+| Provider | Authoritative or supported evidence | Roadmap decision |
+|---|---|---|
+| Codex | The supported [App Server](https://learn.chatgpt.com/docs/app-server) rate-limit snapshot can include provider-native `credits`, separately from `rateLimitResetCredits`; public API administration exposes historical spend and configured limits, not a documented remaining prepaid balance | First field-validation candidate. Preserve the native unit and ship display-only before any paid policy; never confuse purchased credits with banked resets |
+| Claude | Individual [Usage Credits](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans) and Usage Bundles expose balance and controls in Settings, but no supported individual balance API is documented; the Enterprise [Spend Limits API](https://platform.claude.com/docs/en/manage-claude/spend-limits-api) returns an effective limit and informational period-to-date spend, not prepaid balance | Keep additive live response fields optional and display-only. Do not scrape the UI or turn enterprise spend-to-limit into a balance |
+| Antigravity | The interactive [`/credits` panel](https://antigravity.google/docs/cli/credits?hl=en) and status line can show AI credits; no documented machine-readable balance API exists, and the host `useG1Credits` setting controls continuation after baseline exhaustion | Never invoke or scrape the TUI and never change the host setting. Require a future stable signed-in metadata field plus explicit quotabot paid opt-in |
+| Grok and xAI API | Consumer [Extra Usage Credits](https://docs.x.ai/grok/faq) are documented in Settings only. The separate [xAI Management API](https://docs.x.ai/developers/rest-api-reference/management/billing) has prepaid-balance and postpaid-limit reads, but requires a broad Management key and has unresolved sign, auto-top-up, and overage semantics | Keep consumer credits out until a stable provider field is validated. Defer the management integration until least-privilege read authority and fail-closed billing semantics are proven |
+| Cursor | The team [Admin API](https://cursor.com/docs/account/teams/admin-api) reports current-cycle on-demand spend and effective per-user limits, but not the current enabled state; enforcement can lag and Enterprise pooled limits have different meaning | Admit only as display-only `metered_overage` spend-to-cap evidence after explicit admin setup, never as funded balance or default routing |
+| Devin and Windsurf | Self-serve [prepaid balance, sharing, and auto-reload](https://docs.devin.ai/admin/billing/self-serve) are documented in Settings; public billing APIs cover different Enterprise ACU surfaces | No collector until a documented self-serve endpoint or stable provider-owned metadata row exists; do not scrape UI or private calls |
+| Kiro | Individual client displays can combine plan and [prepaid add-on credits](https://kiro.dev/docs/billing/add-on-credits/); Enterprise exports delayed overage enabled, cap, and used fields | Capture and validate add-on and no-add-on accounts before decomposing local rows. Keep delayed Enterprise export analytical, not live routing evidence |
+| NVIDIA NIM | [Catalog access](https://docs.api.nvidia.com/nim/re/docs/api-quickstart) proves status only; no documented numeric hosted credit balance, paid fallback, or reset metadata exists | Retain `status_only`; never infer a balance from catalog access or rate-limit errors |
+| OpenRouter candidate | The [ordinary-key read](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key) reports an optional key spending limit, remaining-to-limit, usage, reset, expiry, and BYOK accounting; account-wide purchased credits require a broader Management key | Implement ordinary-key allowance as display-only `paid_api` evidence first. A key-limit remainder is not funded-account proof, so paid routing fails closed without both an explicit opt-in and authoritative bounded funds |
+
+Gemini API [prepaid or postpaid billing](https://ai.google.dev/gemini-api/docs/billing)
+is a separate product and identity from
+Antigravity or Google One AI credits and must never be merged with either. Google
+currently directs prepaid-balance management to AI Studio rather than exposing a
+standard API-key balance read.
+
+Acceptance requires sanitized fixtures for zero, positive, expired, unlimited,
+malformed, unauthorized, and multi-account balances; exact decimal handling;
+accessible paid-spend warnings; no credentials in output; and invariants proving
+that paid balances never enter quota stretch, projected-waste, included-quota
+headroom, or default routing. Dated field validation must cover each provider
+before its balance is claimed. This follows stabilization because the shared
+typed balance and spend-policy contract must land once, while provider APIs and
+plan semantics remain uneven.
+
 ## Current state
 
-The current line, **0.10.2**, is the stable release version and carries
+The current line, **0.10.3**, is the stable release version and carries
 the latest hardening inventory described in [Next](#next). The stable line
 contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
@@ -317,16 +390,16 @@ milestone sections below.
 
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
-| Core contracts and automated quality | Stable 0.10.2 | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the stable immutable release, unpinned three-OS Latest smoke, and live RC-to-stable update passed | Keep every 0.10.x patch green and resolve any new reproducible defect before signing activation |
-| Integration trust boundary | Stable 0.10.2 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
+| Core contracts and automated quality | Stable 0.10.3 | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the stable immutable release, unpinned three-OS Latest smoke, and live RC-to-stable update passed | Keep every 0.10.x patch green and resolve any new reproducible defect before signing activation |
+| Integration trust boundary | Stable 0.10.3 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
 | Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
 | Provider-ID cache continuity | Stable 0.10.1 | The bounded coordinator, exact role validation, mixed-version locks, durable prepared receipts, crash recovery, branch-conflict quarantine, and empty shipped alias map passed [ordinary hosted CI](https://github.com/blisspixel/quotabot/actions/runs/33542805801), the immutable [candidate release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1-rc.1), and the complete [three-OS lifecycle](https://github.com/blisspixel/quotabot/actions/runs/33562140830) | Add an alias only for a real provider rename and retain the same fail-closed migration evidence when one exists |
-| Installation and update | Stable 0.10.2 | The immutable 14-asset stable release, unpinned GitHub Latest smoke, three-OS stable-channel, clean install, prior-stable upgrade, persistence, source-setup, and desktop-run matrix passed; one live Windows installation also updated from RC to stable and resolved no later stable | Repeat the complete path on the signed rehearsal and frozen 1.0 candidate |
+| Installation and update | Stable 0.10.3 | The immutable stable release, unpinned GitHub Latest smoke, three-OS stable-channel, clean install, prior-stable upgrade, persistence, source-setup, and desktop-run matrix passed; the preceding release also has a live RC-to-stable update record | Repeat the complete path on the signed rehearsal and frozen 1.0 candidate |
 | Native signing | Repository-ready; inactive | Exact Windows PE and macOS Mach-O inventories and deltas, isolated signer jobs, protected nonpublishing rehearsal workflows, reviewed `main` and `v*` environment policies, deterministic policy and failure tests, credential-free packaging, bounded receipts, and exact draft-asset re-verification are implemented for CLI and desktop; current published artifacts remain unsigned | Provision both owner identities and the exact protected-environment values and secrets, pass native protected rehearsals, activate both modes, and retain one signed 0.10.x lifecycle record |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Stable 0.10.2 baseline complete | The stable release completed the tag, exact 14-asset set, checksum, provenance, fresh download, install, upgrade, state, exact self-update, source setup, immutable publication, unpinned Latest acquisition, and installed stable-channel assertion | Run a signed 0.10.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Stable 0.10.3 baseline complete | The stable release completed the tag, exact 14-asset set, checksum, provenance, fresh download, install, upgrade, state, exact self-update, source setup, immutable publication, unpinned Latest acquisition, and installed stable-channel assertion | Run a signed 0.10.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Run focused 0.10.x stabilization
@@ -704,10 +777,10 @@ recommendation is aligned to what the user actually wants.
   combined or visually confused.
 - **Done:** Spent-window escape hatch. Codex's authoritative usage metadata
   carries `rate_limit_reset_credits.available_count` - the redeemable off-cycle
-  resets a user can spend to refresh their limit early - verified against a live
-  account (not inferred). quotabot surfaces it as an actionable line ("N
-  rate-limit reset credits available - redeem in Codex to refresh your limit
-  early") wherever provider details render, and `top` now shows provider details
+  full resets OpenAI calls banked resets - verified against a live account (not
+  inferred). They are promotional resets, not cash or API credit. quotabot
+  surfaces the stable count as an actionable line ("N banked resets available
+  in Codex - redeem now") wherever provider details render, and `top` now shows provider details
   on a spent card too (previously dropped on the spent-collapse path), so a spent
   window shows the way out and not only a wait time. Detection and display only,
   no purchase action.
@@ -971,7 +1044,9 @@ justify a separate adapter ahead of Kiro.
 OpenRouter is a viable credit-backed metadata candidate, not an included-quota
 plan. Its official [`GET /api/v1/key`](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key)
 read works with the current API key and reports the key's optional dollar limit,
-remaining limit, reset cadence, usage, expiration, and free-tier classification.
+remaining-to-limit value, reset cadence, usage, expiration, and free-tier
+classification. That value is a key spending control, not proof of funded
+account credits.
 The account-wide
 [`GET /api/v1/credits`](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits)
 read reports total purchased credits and usage but requires a broader management
@@ -979,10 +1054,10 @@ key. Prefer the current-key read so quotabot does not ask for management authori
 merely to show capacity. If admitted after the typed shared-pool work, classify
 the route as `paid_api`, keep it out of default and `budget: quota` routing, show
 dollars and reset semantics without calling them subscription quota, and fail
-closed when the key has no explicit spending limit. Sanitized fixtures must cover
-unlimited keys, free-tier keys, reset and non-reset limits, expired or otherwise
-unusable keys, BYOK accounting, and malformed or unauthorized responses. No
-inference request is needed to validate this surface.
+closed when either an explicit spending limit or funded-account proof is absent.
+Sanitized fixtures must cover unlimited keys, free-tier keys, reset and non-reset
+limits, expired or otherwise unusable keys, BYOK accounting, and malformed or
+unauthorized responses. No inference request is needed to validate this surface.
 
 ElevenLabs is a separate AI-service candidate, not a coding-route commitment.
 Its official [subscription endpoint](https://elevenlabs.io/docs/api-reference/user/subscription/get)
@@ -1019,7 +1094,8 @@ cloud collection:
 
 - becoming a request proxy or hosted service;
 - global leaderboards, account sync, or automatic telemetry;
-- a general dollar-spend ledger;
+- a general dollar-spend ledger (authoritative provider-returned paid fallback
+  capacity remains an allowed, explicitly labeled roadmap input);
 - provider breadth as a goal by itself;
 - model quality rankings or task-content inspection;
 - inference probes for latency or tokens per second;

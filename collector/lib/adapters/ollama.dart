@@ -12,7 +12,7 @@ import '../provider_ids.dart';
 import '../util.dart';
 
 /// One local model with whatever detail the runtime exposes. Fields are
-/// optional because runtimes differ (Ollama reports size and VRAM; LM Studio
+/// optional because runtimes differ (Ollama reports size and GPU residency; LM Studio
 /// reports quantization and context length).
 typedef LocalModel = ({
   String name,
@@ -54,7 +54,8 @@ typedef DeclaredModelCapabilities = ({
 /// Local runtimes have no remaining-budget to spend, so a quota bar would be
 /// meaningless. Instead this reports the useful local signal: installed models
 /// and total size on disk, which model is loaded (with size, quantization, and
-/// VRAM), and whether anything is loaded (a proxy for being in use). It carries
+/// GPU residency), and whether anything is loaded. Loaded residency does not
+/// prove that a model is currently computing. It carries
 /// no quota windows; routing treats it as an always-available fallback while
 /// the daemon is running.
 ///
@@ -444,7 +445,7 @@ String? _digest(dynamic value) {
 
 /// Builds a normalized snapshot for a local runtime from its installed and
 /// loaded models. Shared by every local-runtime adapter so they present
-/// identically: a status headline, rich detail lines, and an in-use flag, with
+/// identically: a status headline, rich detail lines, and a loaded-model flag, with
 /// no quota windows.
 ProviderQuota localRuntimeQuota({
   required String id,
@@ -455,10 +456,22 @@ ProviderQuota localRuntimeQuota({
   int? now,
 }) {
   String shortName(String n) => n.split(':').first;
-  final headline = loaded.isEmpty ? null : loaded.first;
+  final localInstalled = [
+    for (final model in installed)
+      if (!model.cloud) model
+  ];
+  final localLoaded = [
+    for (final model in loaded)
+      if (!model.cloud) model
+  ];
+  final headline = localLoaded.isEmpty ? null : localLoaded.first;
 
   final status = headline == null
-      ? '${installed.length} installed, idle'
+      ? localInstalled.isNotEmpty
+          ? 'ready - no model loaded'
+          : installed.isNotEmpty
+              ? 'reachable - cloud routes only'
+              : 'reachable - no local models installed'
       : [
           shortName(headline.name),
           if (headline.param != null) headline.param,
@@ -470,17 +483,19 @@ ProviderQuota localRuntimeQuota({
   if (headline != null) {
     final bits = <String>[];
     if (headline.vramBytes != null) {
-      bits.add('${formatCompactBytes(headline.vramBytes!)} VRAM');
+      bits.add('${formatCompactBytes(headline.vramBytes!)} GPU resident');
     }
     if (headline.context != null) {
-      bits.add('${formatContextTokens(headline.context!)} ctx');
+      bits.add('${formatContextTokens(headline.context!)} running context');
     }
     if (headline.expiresAt != null) {
       final secs = headline.expiresAt! - (now ?? nowEpoch());
       if (secs > 0) bits.add('unloads in ${_dur(secs)}');
     }
     if (bits.isNotEmpty) details.add(bits.join(' . '));
-    if (loaded.length > 1) details.add('${loaded.length} models loaded');
+    if (localLoaded.length > 1) {
+      details.add('+${localLoaded.length - 1} more loaded');
+    }
   }
   final totalBytes = installed.fold<int>(0, (s, m) => s + (m.bytes ?? 0));
   details.add(
@@ -490,8 +505,8 @@ ProviderQuota localRuntimeQuota({
   );
 
   // Normalize the installed list into the registry model shape, marking which
-  // are loaded and folding in the loaded entry's live VRAM/context.
-  final loadedByName = {for (final m in loaded) m.name: m};
+  // are loaded and folding in the loaded entry's live GPU residency/context.
+  final loadedByName = {for (final m in localLoaded) m.name: m};
   final models = [
     for (final m in installed)
       ModelInfo(

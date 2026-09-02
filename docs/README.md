@@ -4,13 +4,14 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.10.2. The next work in the focused
+The current verified stable release is 0.10.3. The next work in the focused
 0.10.x hardening line is native field validation, owner signing setup, and one
 signed lifecycle rehearsal before 1.0. The bounded
 provider-ID cache coordinator passed ordinary hosted CI plus the complete
 release, install, update, and source-setup lifecycle on Windows, macOS, and
-Linux; the shipped alias map remains empty. Bounded local-resource visibility
-is specified as the first post-stabilization product track.
+Linux; the shipped alias map remains empty. The current line includes bounded
+local readiness and host-pressure refinement. Expanded resource sampling and
+explicit paid fallback balance visibility remain post-stabilization tracks.
 Stable 0.10.2 retains the verified 0.10.0 updater foundation. Its immutable
 [release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
 and unpinned GitHub Latest

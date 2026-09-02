@@ -301,6 +301,11 @@ class LocalHardwareInfo {
   /// Currently free memory on that same GPU in bytes, when available.
   final int? gpuMemoryAvailableBytes;
 
+  /// Current host GPU activity from a supported driver or operating-system
+  /// counter, when available. This is host-scoped and must not be attributed to
+  /// one loaded model.
+  final int? gpuUtilizationPercent;
+
   /// Number of GPUs represented by the driver metadata.
   final int gpuCount;
 
@@ -313,6 +318,7 @@ class LocalHardwareInfo {
     this.systemMemoryAvailableBytes,
     this.gpuMemoryTotalBytes,
     this.gpuMemoryAvailableBytes,
+    this.gpuUtilizationPercent,
     this.gpuCount = 0,
     this.gpuName,
   });
@@ -330,6 +336,8 @@ class LocalHardwareInfo {
           'gpu_memory_total_bytes': gpuMemoryTotalBytes,
         if (gpuMemoryAvailableBytes != null)
           'gpu_memory_available_bytes': gpuMemoryAvailableBytes,
+        if (gpuUtilizationPercent != null)
+          'gpu_utilization_percent': gpuUtilizationPercent,
         if (gpuCount > 0) 'gpu_count': gpuCount,
         if (gpuName != null) 'gpu_name': gpuName,
       };
@@ -372,6 +380,11 @@ class LocalHardwareInfo {
       systemMemoryAvailableBytes: systemAvailable,
       gpuMemoryTotalBytes: gpuTotal,
       gpuMemoryAvailableBytes: gpuAvailable,
+      gpuUtilizationPercent: boundedIntFromWire(
+        json['gpu_utilization_percent'],
+        min: 0,
+        max: 100,
+      ),
       gpuCount: gpuTotal == null && gpuName == null
           ? 0
           : boundedIntFromWire(json['gpu_count'], min: 0, max: 64) ??
@@ -474,11 +487,13 @@ class ProviderQuota {
   final ProviderQuotaKind kind;
 
   /// Short status line for providers that have no quota windows, such as a
-  /// local runtime ("qwen3-coder loaded" / "5 models, idle"). Null otherwise.
+  /// local runtime ("qwen3-coder loaded" / "ready - no model loaded").
+  /// Null otherwise.
   final String? status;
 
-  /// True when a local runtime currently has a model loaded in memory (a proxy
-  /// for being in use). Always false for metered subscriptions.
+  /// True when a local runtime currently has a model loaded in memory. This is
+  /// residency evidence, not proof that the model is busy. Always false for
+  /// metered subscriptions.
   final bool active;
 
   /// Extra human-readable detail lines. Local runtimes use this for loaded
@@ -496,9 +511,9 @@ class ProviderQuota {
   /// for subscriptions and when the operating system exposes no usable value.
   final LocalHardwareInfo? localHardware;
 
-  /// Live per-model quota. Antigravity uses an exhaustive set of independent
-  /// model pools; Claude may use sparse overlays on its shared [windows]. Empty
-  /// when the provider exposes only shared quota.
+  /// Live per-model quota. Antigravity uses an exhaustive set of model-facing
+  /// gates that can share a provider pool; Claude may use sparse overlays on
+  /// its shared [windows]. Empty when the provider exposes only shared quota.
   final List<ModelQuota> modelQuotas;
 
   /// True when data was read successfully.
@@ -554,7 +569,7 @@ class ProviderQuota {
   final int? retryAfterSeconds;
 
   /// Count of redeemable off-cycle resets the provider reports as available now
-  /// (for example Codex's rate-limit reset credits). Zero when none are offered
+  /// (for example Codex's banked resets). Zero when none are offered
   /// or the provider does not expose them. This is a live, fresh-read signal, so
   /// it is deliberately not asserted from stale, drifted, or degraded snapshots.
   final int resetCreditsAvailable;
@@ -1158,6 +1173,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
                 q.localHardware!.systemMemoryAvailableBytes,
             gpuMemoryTotalBytes: q.localHardware!.gpuMemoryTotalBytes,
             gpuMemoryAvailableBytes: q.localHardware!.gpuMemoryAvailableBytes,
+            gpuUtilizationPercent: q.localHardware!.gpuUtilizationPercent,
             gpuCount: q.localHardware!.gpuCount,
             gpuName: q.localHardware!.gpuName == null
                 ? null
@@ -1197,7 +1213,7 @@ String? resetAvailableMessage(ProviderQuota q) {
   if (n <= 0 || q.stale || q.driftReason != null || q.suspect != null) {
     return null;
   }
-  final unit = n == 1 ? 'reset' : 'resets';
+  final unit = n == 1 ? 'banked reset' : 'banked resets';
   return '$n $unit available in ${q.displayName} - redeem now';
 }
 
@@ -1236,7 +1252,7 @@ class BurnStat {
 /// and catalog. Capability fields are hints, null when unknown; local-only fields
 /// ([loaded], [sizeBytes], [vramBytes], [quant]) are null/false for cloud models.
 class ModelInfo {
-  /// Provider-native model id, e.g. "claude-opus-4-8" or "llama3.1:8b".
+  /// Provider-native model id, e.g. "claude-opus-5" or "llama3.1:8b".
   final String id;
 
   /// Human display name when it differs usefully from [id].
@@ -1291,7 +1307,8 @@ class ModelInfo {
   /// Local only: on-disk size in bytes.
   final int? sizeBytes;
 
-  /// Local only: VRAM in bytes when loaded.
+  /// Local only: bytes resident on a GPU when loaded. This does not measure
+  /// compute utilization.
   final int? vramBytes;
 
   /// Local only: quantization label, e.g. "Q4_K_M".
