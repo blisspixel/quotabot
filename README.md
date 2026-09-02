@@ -168,12 +168,14 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Stable 0.10.2 promotes the exact updater correction proven by the immutable
-[v0.10.2-rc.1 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.2-rc.1),
-its audited
-[release run](https://github.com/blisspixel/quotabot/actions/runs/33584103523),
-and complete three-OS
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33586821262).
+Stable 0.10.2 is the current verified release. Its audited
+[release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
+published an immutable 14-asset set, and its unpinned GitHub Latest
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
+passed clean install, prior-stable upgrade, source setup, stable-channel
+resolution, and desktop-run checks on Windows, macOS, and Ubuntu. A live Windows
+installation also updated from 0.10.2-rc.1 to 0.10.2 and then reported no newer
+stable release.
 The release uses GitHub's dedicated Latest endpoint for stable discovery and
 keeps preview discovery within smaller bounded pages. Every release
 repeats native build, archive, checksum, provenance,
