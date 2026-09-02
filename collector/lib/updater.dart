@@ -9,8 +9,8 @@ const quotabotUpdateSchema = 'quotabot.update.v1';
 const quotabotReleaseRepository = 'blisspixel/quotabot';
 const _maxReleaseResponseBytes = 512 * 1024;
 const _maxReleaseDiscoveryBytes = 2 * 1024 * 1024;
-const _releasePageSize = 20;
-const _maxReleasePages = 5;
+const _releasePageSize = 5;
+const _maxReleasePages = 4;
 
 enum UpdateChannel { stable, preview }
 
@@ -254,6 +254,26 @@ Future<QuotabotUpdateCheck> checkForQuotabotUpdate({
         remainingByteBudget: _maxReleaseDiscoveryBytes,
         notFoundMessage:
             'GitHub has no published quotabot release for ${requested.tag}',
+      );
+      if (result.decoded is! Map) {
+        throw const QuotabotUpdateException(
+          'GitHub release discovery returned an unexpected document',
+        );
+      }
+      rows.add(result.decoded);
+    } else if (channel == UpdateChannel.stable) {
+      final result = await _readReleaseDocument(
+        client: httpClient,
+        uri: Uri.https(
+          'api.github.com',
+          '/repos/$repository/releases/latest',
+        ),
+        headers: headers,
+        clock: clock,
+        timeout: timeout,
+        remainingByteBudget: _maxReleaseDiscoveryBytes,
+        notFoundMessage:
+            'GitHub has no published quotabot release on the stable channel',
       );
       if (result.decoded is! Map) {
         throw const QuotabotUpdateException(

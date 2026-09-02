@@ -770,11 +770,14 @@ leaves JSON standard output reserved for alert records.
 - Desktop maintenance uses one responsive Settings dialog instead of a long
   popup menu. Profile and provider visibility, display, refresh and alert, and
   update controls are grouped into bounded sections. Release discovery is
-  user-triggered, streams small bounded GitHub pages under one deadline,
-  distinguishes the newest candidate from the newest stable release, and opens release details rather
+  user-triggered, reads GitHub's dedicated Latest endpoint plus small bounded
+  preview pages under one deadline and byte budget, distinguishes the newest
+  candidate from the newest stable release, and opens release details rather
   than silently replacing a running binary. The CLI `update` command follows
-  the installed channel, uses GitHub's direct tag endpoint for exact selection,
-  and invokes only the installer bundled inside its authenticated archive. That
+  the installed channel, uses the same dedicated Latest endpoint for stable
+  selection, small bounded pages for preview selection, and the direct tag
+  endpoint for exact selection. It invokes only the installer bundled inside
+  its authenticated archive. That
   installer verifies the new archive sidecar and extracted executable version
   before the existing rollback-protected generation switch. The command then
   executes the stable entry to verify the selected version again. No update
