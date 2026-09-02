@@ -23,4 +23,15 @@ while [ "$attempt" -le 3 ]; do
   sleep 5
 done
 
-timeout 180s sudo apt-get install -y "$@"
+attempt=1
+while [ "$attempt" -le 3 ]; do
+  if timeout 300s sudo apt-get -o Acquire::Retries=3 install -y "$@"; then
+    exit 0
+  fi
+  if [ "$attempt" -eq 3 ]; then
+    echo 'apt-get install failed after three bounded attempts.' >&2
+    exit 1
+  fi
+  attempt=$((attempt + 1))
+  sleep 5
+done
