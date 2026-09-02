@@ -33,9 +33,9 @@ reads and writes helps scope any report:
   draft is published.
   The current audited release is [v0.10.1](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1).
   Its exact 14-asset set is locked after the native
-  [candidate release run](https://github.com/blisspixel/quotabot/actions/runs/33557788567)
+  [stable release run](https://github.com/blisspixel/quotabot/actions/runs/33572003688)
   and three-OS
-  [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33562140830)
+  [Latest install smoke](https://github.com/blisspixel/quotabot/actions/runs/33575042208)
   passed, including exact-tag installation and upgrade from the actual prior
   stable. Stable publication binds GitHub Latest; its follow-up smoke repeats
   the unversioned canonical install.
