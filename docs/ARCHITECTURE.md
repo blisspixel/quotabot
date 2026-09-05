@@ -625,8 +625,10 @@ quotabot cannot verify their overage settings. Local-runtime entries surface
 local models ahead of cold installed models when both satisfy the same profile.
 When a reachable runtime has an on-device model, `local_hardware.dart` performs
 one cached, deadline-bounded passive read of system RAM and GPU evidence.
-NVIDIA uses `nvidia-smi`; other Windows GPUs use `Win32_VideoController` for
-the adapter name and AdapterRAM. The largest supported GPU memory pool is
+NVIDIA uses `nvidia-smi`; the Windows compatibility fallback uses
+`Win32_VideoController` for names and count only. Its 32-bit AdapterRAM and
+unbound aggregate GPU Engine counters are not capacity or activity evidence.
+The largest supported GPU memory pool is
 selected; separate devices are never summed. Cold models with size evidence get an advisory `hardware_fit`
 of `comfortable`, `tight`, `constrained`, or `unknown`; loaded models retain the
 direct `loaded` state. The fit evidence is carried in the provider snapshot and
@@ -637,6 +639,11 @@ loads or invokes a model.
 Recommendations also echo available local size, context, and fit evidence so
 callers can see why a model is loaded versus merely installed without forcing a
 model call.
+Ollama's explicit `thinking` capability propagates through the existing model
+reasoning field. Missing or malformed declarations cannot satisfy a reasoning
+requirement, and capability support cannot override cloud, embedding, stale,
+context, or spend exclusions. LM Studio reasoning remains unadmitted while its
+LM Link execution location cannot be established from the model-list contract.
 Ollama exposes cloud-offloaded models through the local daemon with a `-cloud`
 tag suffix. Lemonade exposes configured cloud routes with `recipe: "cloud"` and
 `cloud_provider`. quotabot preserves either as `cloud_offloaded` and excludes it

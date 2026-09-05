@@ -1,0 +1,80 @@
+{
+  "schema": "quotabot.harness_examples.v1",
+  "reviewed_on": "2026-09-04",
+  "quotabot_baseline": "0.10.3",
+  "cli_mcp_minimum_version": "0.11.0",
+  "mcp_protocol": "2025-11-25",
+  "protocol_mode": "legacy_initialize",
+  "automatic_model_selection": false,
+  "harness_native_smoke": "not_performed",
+  "harnesses": [
+    {
+      "id": "opencode-1",
+      "version_reviewed": "1.18.29",
+      "support": "documented_configuration",
+      "transports": ["stdio", "streamable_http_loopback"],
+      "configuration_root": "mcp.quotabot",
+      "sources": [
+        "https://opencode.ai/docs/mcp-servers/",
+        "https://github.com/anomalyco/opencode/tree/v1.18.29/packages/opencode/src/mcp"
+      ]
+    },
+    {
+      "id": "openclaw",
+      "version_reviewed": "2026.9.1",
+      "support": "documented_configuration",
+      "transports": ["stdio", "streamable_http_loopback"],
+      "configuration_root": "mcp.servers.quotabot",
+      "sources": [
+        "https://docs.openclaw.ai/cli/mcp",
+        "https://docs.openclaw.ai/plugins/bundles",
+        "https://github.com/openclaw/openclaw/blob/v2026.9.1/src/config/types.mcp.ts"
+      ]
+    },
+    {
+      "id": "hermes",
+      "version_reviewed": "2026.8.31",
+      "support": "documented_configuration",
+      "transports": ["stdio", "streamable_http_loopback"],
+      "configuration_root": "mcp_servers.quotabot",
+      "sources": [
+        "https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference",
+        "https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp",
+        "https://github.com/NousResearch/hermes-agent/blob/v2026.8.31/tools/mcp_tool.py"
+      ]
+    },
+    {
+      "id": "pi",
+      "version_reviewed": "0.85.0",
+      "support": "cli_advisory_only",
+      "transports": ["cli"],
+      "sources": [
+        "https://github.com/badlogic/pi-mono/blob/v0.85.0/packages/coding-agent/README.md",
+        "https://github.com/badlogic/pi-mono/blob/v0.85.0/packages/coding-agent/docs/extensions.md"
+      ]
+    },
+    {
+      "id": "nemoclaw",
+      "version_reviewed": "0.0.119",
+      "support": "host_cli_advisory_only",
+      "transports": ["host_cli"],
+      "managed_loopback_mcp": "unsupported",
+      "sources": [
+        "https://github.com/NVIDIA/NemoClaw/tree/v0.0.119",
+        "https://docs.nvidia.com/nemoclaw/user-guide/openclaw/manage-sandboxes/mcp-servers/about-managed-mcp-servers",
+        "https://docs.nvidia.com/nemoclaw/latest/user-guide/openclaw/manage-sandboxes/mcp-servers/add-an-mcp-server",
+        "https://docs.nvidia.com/nemoclaw/latest/user-guide/openclaw/reference/commands"
+      ]
+    },
+    {
+      "id": "opencode-2",
+      "version_reviewed": "beta_documentation_only",
+      "support": "future_untested",
+      "transports": [],
+      "sources": [
+        "https://opencode.ai/v2/docs",
+        "https://opencode.ai/v2/docs/mcp-servers"
+      ]
+    }
+  ]
+}

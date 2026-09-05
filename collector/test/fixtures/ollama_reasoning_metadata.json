@@ -1,0 +1,34 @@
+{
+  "tags": {
+    "models": [
+      {"name": "declared:7b", "digest": "sha256:declared", "size": 4000000000},
+      {"name": "ordinary:7b", "digest": "sha256:ordinary"},
+      {"name": "deepseek-r1:7b", "digest": "sha256:undeclared"},
+      {"name": "malformed:7b", "digest": "sha256:malformed"},
+      {"name": "mixed:7b", "digest": "sha256:mixed"},
+      {"name": "empty:7b", "digest": "sha256:empty"},
+      {"name": "blank:7b", "digest": "sha256:blank"},
+      {"name": "reasoner:cloud", "digest": "sha256:cloud"},
+      {"name": "embed:1b", "digest": "sha256:embedding"}
+    ]
+  },
+  "ps": {
+    "models": [
+      {"name": "declared:7b", "context_length": 8192, "size_vram": 4000000000}
+    ]
+  },
+  "show": {
+    "declared:7b": {
+      "capabilities": ["completion", "tools", "thinking"],
+      "model_info": {"example.context_length": 131072}
+    },
+    "ordinary:7b": {"capabilities": ["completion", "tools"]},
+    "deepseek-r1:7b": {},
+    "malformed:7b": {"capabilities": {"thinking": true}},
+    "mixed:7b": {"capabilities": ["completion", "thinking", false]},
+    "empty:7b": {"capabilities": []},
+    "blank:7b": {"capabilities": ["completion", "thinking", " "]},
+    "reasoner:cloud": {"capabilities": ["completion", "thinking"]},
+    "embed:1b": {"capabilities": ["embedding", "thinking"]}
+  }
+}

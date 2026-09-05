@@ -331,7 +331,7 @@ void main() {
         ],
         {
           'coder:32b': {
-            'capabilities': ['completion', 'tools'],
+            'capabilities': ['completion', 'tools', 'thinking'],
             'model_info': <String, Object?>{},
           },
         },
@@ -346,6 +346,8 @@ void main() {
       expect(probed, ['coder:32b'], reason: 'the second read reuses the cache');
       expect(first.models.single.tools, isTrue);
       expect(second.models.single.tools, isTrue);
+      expect(first.models.single.reasoning, 'reasoning');
+      expect(second.models.single.reasoning, 'reasoning');
       expect(cache.length, 1);
     });
 
@@ -387,11 +389,13 @@ void main() {
             ),
           ).collect();
 
-      final before = await read('sha256:a', ['completion']);
+      final before = await read('sha256:a', ['completion', 'thinking']);
       final after = await read('sha256:b', ['completion', 'vision']);
 
       expect(before.models.single.vision, isFalse);
       expect(after.models.single.vision, isTrue);
+      expect(before.models.single.reasoning, 'reasoning');
+      expect(after.models.single.reasoning, isNull);
     });
 
     test('probing is capped so a large library cannot run unbounded', () async {

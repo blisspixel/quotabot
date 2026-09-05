@@ -149,7 +149,7 @@ class QuotabotStreamableHttpServer {
   Future<void> stop() async {
     await _http?.close(force: true);
     _http = null;
-    for (final transport in _transports.values) {
+    for (final transport in _transports.values.toList()) {
       await transport.close();
     }
     _transports.clear();
@@ -480,6 +480,20 @@ class QuotabotStreamableHttpServer {
           _transports[sessionId] = transport;
           final server = serverFactory(sessionId);
           _servers[sessionId] = server;
+          // Protocol.connect owns transport.onclose. Chain session bookkeeping
+          // at the server callback so it survives connection and still disposes
+          // the quota subscription hub when a session closes.
+          // ignore: deprecated_member_use
+          final onClose = server.server.onclose;
+          // ignore: deprecated_member_use
+          server.server.onclose = () {
+            try {
+              onClose?.call();
+            } finally {
+              _transports.remove(sessionId);
+              _servers.remove(sessionId);
+            }
+          };
           server.connect(transport).catchError((_) {
             _transports.remove(sessionId);
             _servers.remove(sessionId);
@@ -487,13 +501,6 @@ class QuotabotStreamableHttpServer {
         },
       ),
     );
-    transport.onclose = () {
-      final sessionId = transport.sessionId;
-      if (sessionId != null) {
-        _transports.remove(sessionId);
-        _servers.remove(sessionId);
-      }
-    };
     return transport;
   }
 }

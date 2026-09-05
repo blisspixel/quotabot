@@ -29,10 +29,12 @@ import 'package:window_manager/window_manager.dart';
 
 import 'chrome_controls.dart';
 import 'demo.dart';
+import 'desktop_notification_policy.dart';
 import 'desktop_readiness.dart';
 import 'first_run.dart';
 import 'fleet.dart';
 import 'headroom_colors.dart';
+import 'local_model_details.dart';
 import 'logos.dart';
 import 'prefs.dart';
 import 'profile_editor.dart';
@@ -267,6 +269,12 @@ final bool _demoMode =
     _shotsMode || Platform.environment['QUOTABOT_DEMO'] == '1';
 final DesktopReadinessProbe _desktopReadiness =
     DesktopReadinessProbe.fromEnvironment();
+final DesktopNotificationPolicy _desktopNotificationPolicy =
+    DesktopNotificationPolicy(
+      screenshotCapture:
+          _shotsMode || Platform.environment['QUOTABOT_SHOT'] == '1',
+      readinessProbe: _desktopReadiness.enabled,
+    );
 final Completer<void> _nativeWindowReady = Completer<void>();
 
 /// Boundary around the live route, captured for screenshots.
@@ -363,20 +371,22 @@ Future<void> main() async {
 
   // Keep startup resilient when a platform notification backend is unavailable.
   try {
-    const initSettings = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      iOS: DarwinInitializationSettings(),
-      macOS: DarwinInitializationSettings(),
-      linux: LinuxInitializationSettings(defaultActionName: 'Open'),
-      windows: WindowsInitializationSettings(
-        appName: 'quotabot',
-        appUserModelId: _windowsAppUserModelId,
-        guid: _windowsNotificationGuid,
-      ),
-    );
-    await flutterLocalNotificationsPlugin.initialize(settings: initSettings);
-    tz.initializeTimeZones();
-    tz.setLocalLocation(tz.local);
+    await _desktopNotificationPolicy.initialize(() async {
+      const initSettings = InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        iOS: DarwinInitializationSettings(),
+        macOS: DarwinInitializationSettings(),
+        linux: LinuxInitializationSettings(defaultActionName: 'Open'),
+        windows: WindowsInitializationSettings(
+          appName: 'quotabot',
+          appUserModelId: _windowsAppUserModelId,
+          guid: _windowsNotificationGuid,
+        ),
+      );
+      await flutterLocalNotificationsPlugin.initialize(settings: initSettings);
+      tz.initializeTimeZones();
+      tz.setLocalLocation(tz.local);
+    });
   } catch (_) {
     // notifications init failed, app will continue without them
   }
@@ -625,6 +635,8 @@ class Dashboard extends StatefulWidget {
   @visibleForTesting
   final DesktopNotificationClient? notificationClient;
   @visibleForTesting
+  final DesktopNotificationPolicy? notificationPolicy;
+  @visibleForTesting
   final FirstRunSession? firstRunSession;
   @visibleForTesting
   final UpdateChecker? updateChecker;
@@ -645,6 +657,7 @@ class Dashboard extends StatefulWidget {
       profileSaver = null,
       trayInitializer = null,
       notificationClient = null,
+      notificationPolicy = null,
       firstRunSession = null,
       updateChecker = null,
       releaseOpener = null,
@@ -668,6 +681,7 @@ class Dashboard extends StatefulWidget {
     this.profileSaver,
     this.trayInitializer,
     this.notificationClient,
+    this.notificationPolicy,
     this.firstRunSession,
     this.updateChecker,
     this.releaseOpener,
@@ -951,8 +965,11 @@ class _DashboardState extends State<Dashboard>
         widget.firstRunSession ??
         (widget._hostIntegration ? _processFirstRunSession : FirstRunSession());
     _notificationClient =
-        widget.notificationClient ??
-        (widget._hostIntegration ? _desktopNotificationClient : null);
+        (widget.notificationPolicy ?? _desktopNotificationPolicy)
+            .allowPlatformAccess
+        ? widget.notificationClient ??
+              (widget._hostIntegration ? _desktopNotificationClient : null)
+        : null;
     _defaultHidden = {...widget.prefs.hidden};
     _defaultSort = widget.prefs.sort;
     _profiles = _loadProfiles();
@@ -1869,6 +1886,7 @@ class _DashboardState extends State<Dashboard>
           if (q.isLocal || isExpanded) {
             card += q.details.length * 14; // detail lines
           }
+          if (q.isLocal) card += 34; // model inventory detail control
           if (isExpanded && (_history[key] ?? const []).isNotEmpty) {
             card += 20; // "usually ~X% free" line
           }
@@ -5415,6 +5433,11 @@ class ProviderTile extends StatelessWidget {
                       evidenceLabel: evidenceLabel,
                     ),
                   ),
+                ),
+              if (quota.isLocal)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: LocalModelDetailsButton(quota: quota, now: now),
                 ),
               // Retained trusted quota is the useful primary signal. Keep a
               // failed refresh visible, but below the quota bars it qualifies.

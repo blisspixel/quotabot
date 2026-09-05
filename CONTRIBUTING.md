@@ -62,7 +62,7 @@ flutter test
 
 ## Before you open a pull request
 
-CI runs static policy, both Dart packages, the MCP clients, the LiteLLM router,
+CI runs static policy, both Dart packages, the harness setup pack, the MCP clients, the LiteLLM router,
 coverage floors, and native packaging. Stacked pull requests get the same
 quality workflows as PRs into main. Run the portable gates locally first.
 The exact platform package and readiness commands are in
@@ -97,8 +97,13 @@ flutter analyze --no-pub
 flutter test --no-pub --coverage
 python ../tools/check_lcov.py coverage/lcov.info 80
 
+# Harness configuration and metadata-only MCP entrypoint, after collector tests
+cd ..
+QUOTABOT_HARNESS_SMOKE=1 python -m unittest discover \
+  -s integrations/harnesses -p 'test_*.py'
+
 # MCP client snippets
-cd ../integrations/mcp_clients
+cd integrations/mcp_clients
 npm ci
 npm run typecheck
 python -m unittest test_mcp_client_snippets.py
@@ -108,7 +113,16 @@ cd ../litellm
 python -m pip install --require-hashes -r requirements.txt
 QUOTABOT_RUN_LITELLM_PROXY_TEST=1 python -m unittest \
   test_quotabot_router.py test_quotabot_proxy_integration.py
+
+# Portable Agent Plugins package, using the same pinned Python dependencies
+cd ../..
+python -m unittest discover -s integrations/agent_plugin -p 'test_*.py'
 ```
+
+After native CLI packaging, set `QUOTABOT_PLUGIN_TEST_EXECUTABLE` to the
+packaged executable to include the prepared plugin's initialization and
+tool-list smoke. CI runs that check on Windows, macOS, and Linux. It uses
+isolated empty profile paths and makes no quota or inference request.
 
 Guidelines:
 

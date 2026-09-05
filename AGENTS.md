@@ -11,8 +11,10 @@ request before reading quota. Named
 login, manual-entry, preference, cache/history, and lease operations write
 bounded local metadata.
 
-If you are an agent or tool that picks a model/provider, use quotabot to route to
-whichever subscription still has budget instead of stalling on a spent cap.
+If you are an agent or tool choosing an account, use quotabot for advice about
+which configured subscription has usable quota. The harness chooses through
+its supported access under provider terms. Advice does not grant API access,
+bypass a limit, or authorize paid fallback.
 
 ## Rules for any agent editing this repository
 
@@ -39,9 +41,11 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 
 ## Project status and execution order
 
-The current verified stable release is 0.10.3. It refreshes provider and model
-semantics and makes existing local-runtime evidence lead with loaded model,
-running context, GPU residency, and separately labeled host pressure. The
+The current verified stable release is 0.11.0. It adds per-model desktop details,
+Ollama reasoning evidence, conservative Windows GPU fallback metadata, and
+versioned harness and Agent Plugins setup through the release CLI's `mcp`
+command. Local-runtime evidence leads with loaded model, running context, GPU
+residency, and separately labeled host pressure. The
 shipped routing policies are `balanced`,
 `local_first`, and opt-in `quota_stretch`. The bounded provider-ID cache
 coordinator passed the complete release, install, update, and source-setup
@@ -78,9 +82,10 @@ Pick whichever transport you already speak. They share normalized quota data
 and routing logic, while each transport exposes the schema and subset documented
 for that surface.
 
-- **MCP (preferred for agents).** Point an MCP client at `dart run
-  bin/mcp_server.dart` (or a compiled `quotabot-mcp`) for stdio. For clients
-  that need MCP Streamable HTTP, run `dart run bin/mcp_server.dart --http`
+- **MCP (preferred for agents).** Point an MCP client at `quotabot mcp` using
+  the 0.11.0 or newer release CLI for stdio. Source users can run `dart run
+  bin/mcp_server.dart` from `collector/`, or use a compiled `quotabot-mcp`.
+  For clients that need MCP Streamable HTTP, run `quotabot mcp --http`
   with `--token-file` or `--token-env` (loopback only, bearer auth required).
   HTTP POST bodies must declare a length and are capped at 256 KiB. Missing
   bearer is HTTP 401; oversized or chunked bodies are HTTP 413. Tools:

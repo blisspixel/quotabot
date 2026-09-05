@@ -1,6 +1,6 @@
 # Product strategy
 
-Updated 2026-09-04. Revisit this document when provider quota models, the MCP
+Updated 2026-09-05. Revisit this document when provider quota models, the MCP
 specification, or the product's acquisition path changes materially. The
 execution order and single immediate priority live in
 [ROADMAP.md](../ROADMAP.md#next); this document explains the product reasoning
@@ -18,12 +18,33 @@ content-blind capacity decision system that combines subscription windows,
 local-runtime readiness, source provenance, fail-soft behavior, and concurrent
 agent reservations without becoming a proxy.
 
+Its primary agent integration is quota advice for the user's existing configured
+accounts. The harness chooses an available account through supported access
+under provider terms, keeping the account and spend class attached to the
+recommendation. Advice does not create API entitlement, bypass a provider limit,
+or silently change model selection. Concrete local-model suggestions are useful
+optional detail on the same evidence.
+
+```mermaid
+flowchart LR
+    H[Agent harness] -->|Account and capability requirements| Q[quotabot]
+    Q -->|Bounded metadata reads| E[Quota and runtime evidence]
+    E --> Q
+    Q -->|Availability, limits, age, and reason| H
+    H -->|Request through configured supported access| P[Provider or local runtime]
+```
+
+The harness owns the final selection and request. quotabot receives only the
+bounded metadata needed to explain availability.
+
 The next product gains come from making existing evidence useful in everyday
 work: inspectable local-model choices, dependable native behavior, and explicit
-connections to the agent harnesses people use. Stable 0.10.3 already improves
-loaded-model, context, residency, and host-pressure summaries. Per-model detail,
-capability truth, connection diagnostics, and versioned harness support can now
-build on that foundation without broadening default paid routing.
+connections to the agent harnesses people use. The 0.11.0 increment adds
+per-model desktop inspection, explicit Ollama reasoning metadata, conservative
+Windows GPU fallback evidence, and versioned harness and Agent Plugins setup.
+Native recovery, terminal detail, connection diagnostics, execution-scope truth,
+and installed-client evidence can build on that foundation without broadening
+default paid routing.
 
 Release signing remains a trust requirement for 1.0. Both signing paths are
 implemented; owner identities and successful protected rehearsals remain open.

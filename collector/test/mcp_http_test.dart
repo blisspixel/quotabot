@@ -509,6 +509,47 @@ void main() {
     expect(second.body, contains('Session capacity reached'));
   });
 
+  test('authenticated DELETE releases a session slot for a new client',
+      () async {
+    final harness = await _start(maxSessions: 1);
+    addTearDown(harness.stop);
+    final initialized = await http.post(
+      harness.uri,
+      headers: {
+        HttpHeaders.authorizationHeader: 'Bearer $_token',
+        HttpHeaders.acceptHeader: 'application/json, text/event-stream',
+        HttpHeaders.contentTypeHeader: 'application/json',
+      },
+      body: jsonEncode(_initializeBody()),
+    );
+    expect(initialized.statusCode, HttpStatus.ok);
+    final sessionId = initialized.headers['mcp-session-id'];
+    expect(sessionId, isNotEmpty);
+
+    final deleted = await http.delete(harness.uri, headers: {
+      HttpHeaders.authorizationHeader: 'Bearer $_token',
+      'mcp-session-id': sessionId!,
+      'mcp-protocol-version': '2025-11-25',
+    });
+    expect(deleted.statusCode, HttpStatus.ok);
+
+    final replacement = await _connect(harness.uri);
+    addTearDown(replacement.close);
+    expect((await replacement.listTools()).tools.map((tool) => tool.name),
+        contains('suggest_provider'));
+  });
+
+  test('stopping multiple sessions tolerates their close callbacks', () async {
+    final harness = await _start();
+    addTearDown(harness.stop);
+    final first = await _connect(harness.uri);
+    addTearDown(first.close);
+    final second = await _connect(harness.uri);
+    addTearDown(second.close);
+
+    await expectLater(harness.stop(), completes);
+  });
+
   test('DNS rebinding and endpoint hardening reject unsafe requests', () async {
     final harness = await _start();
     addTearDown(harness.stop);

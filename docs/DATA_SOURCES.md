@@ -564,10 +564,11 @@ uses the local `Microsoft.VisualBasic.Devices.ComputerInfo` memory API with
 system Windows PowerShell process; macOS uses `/usr/sbin/sysctl hw.memsize` and
 `/usr/bin/vm_stat`. On Windows and Linux, an installed NVIDIA driver can add its
 largest single GPU and current device utilization through a bounded `nvidia-smi`
-query. Without `nvidia-smi`, Windows can add the GPU name and driver-reported
-memory from `Win32_VideoController`, plus the busiest supported GPU Engine
-counter as host activity. GPU engines are never summed because that can exceed
-100 percent. Separate GPU memory pools are never summed. The read is cached for
+query. Without `nvidia-smi`, Windows adds GPU name and count from
+`Win32_VideoController`, with memory and utilization left unknown. Its
+`AdapterRAM` property is a 32-bit compatibility value, and an aggregate GPU
+Engine counter cannot describe the selected device. Neither is used for model
+fit or per-device activity. Separate GPU memory pools are never summed. The read is cached for
 30 seconds, has bounded output and deadlines, and fails soft. It does not load a
 model, reserve memory, execute inference, or measure throughput.
 
@@ -588,7 +589,7 @@ format overhead can differ from the estimate.
   quotabot labels as `running context` and `GPU resident`. Neither value proves
   that the model is busy. Neither list declares what a model can do, so
   quotabot also reads `POST /api/show` per model for its `capabilities` array
-  (tool use and vision) and its architecture-prefixed
+  (tool use, vision, and explicitly declared `thinking`) and its architecture-prefixed
   `<arch>.context_length`. Honors `OLLAMA_HOST`, default
   `http://127.0.0.1:11434`.
 - LM Studio: `GET /api/v1/models` (the current native REST API, 0.4.0+), which
@@ -604,6 +605,11 @@ format overhead can differ from the estimate.
   start`); loading a model in the chat window does not start it. Metadata only;
   never loads or invokes a model. The v0 shape carries `arch` (architecture), not
   a parameter count, so quotabot does not fill the parameter-size slot from it.
+  LM Link can serve a localhost request on another device, and the current model
+  list has no documented per-model execution-location field. The current
+  runtime classification does not certify LM Link as on-device; do not use its
+  host-fit estimate as proof of remote-device capacity. Reasoning declarations
+  remain unadmitted pending that location contract.
 - Lemonade: the AMD/lemonade-sdk OpenAI-compatible server. `GET /api/v1/models`
   (falling back to `/v1/models`) lists downloaded local models by default and
   can also list configured cloud-provider routes. quotabot reads
