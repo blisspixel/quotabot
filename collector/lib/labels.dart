@@ -54,13 +54,15 @@ String capturedAgeLabel(int capturedAt, int now) {
 }
 
 /// Access evidence is separate from the measured balance of a quota pool.
-String? requestAdmissionLabel(RequestAdmission admission) => switch (admission) {
+String? requestAdmissionLabel(RequestAdmission admission) =>
+    switch (admission) {
       RequestAdmission.denied => 'requests denied',
       RequestAdmission.unresolved => 'request status unverified',
       _ => null,
     };
 
-String? requestAdmissionDetail(RequestAdmission admission) => switch (admission) {
+String? requestAdmissionDetail(RequestAdmission admission) =>
+    switch (admission) {
       RequestAdmission.denied =>
         'The provider denies requests for this pool. Remaining quota is still shown as measured.',
       RequestAdmission.unresolved =>
