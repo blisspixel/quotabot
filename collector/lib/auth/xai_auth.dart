@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import '../file_guard.dart';
 import 'provider_disconnect.dart';
 import 'tokens.dart';
 
@@ -11,6 +13,9 @@ import 'tokens.dart';
 /// CLI's own credentials.
 class XaiAuth {
   static const provider = 'grok';
+  static const issuer = 'https://auth.x.ai';
+  static const publicClientId = 'b1a00492-073a-47ea-816f-4c329264a828';
+  static const hostScope = '$issuer::$publicClientId';
   static const _device = 'https://auth.x.ai/oauth2/device/code';
   static const _token = 'https://auth.x.ai/oauth2/token';
   static const _scope = 'openid profile email offline_access grok-cli:access';
@@ -20,10 +25,16 @@ class XaiAuth {
   // Injected clients remain caller-owned. Default requests are one-shot so the
   // short-lived auth objects created during collection do not leak pools.
   final http.Client? _client;
+  final Duration requestTimeout;
+  final Duration refreshAcquisitionTimeout;
   XaiAuth({
-    this.clientId = 'b1a00492-073a-47ea-816f-4c329264a828',
+    this.clientId = publicClientId,
     http.Client? client,
-  }) : _client = client;
+    this.requestTimeout = const Duration(seconds: 15),
+    this.refreshAcquisitionTimeout = defaultFileGuardAcquisitionTimeout,
+  })  : assert(requestTimeout.inMicroseconds > 0),
+        assert(refreshAcquisitionTimeout.inMicroseconds > 0),
+        _client = client;
 
   /// Runs the device flow: prints the verification URL and code via [prompt],
   /// then polls until the user authorizes. Saves and returns the tokens.
@@ -111,6 +122,15 @@ class XaiAuth {
         'requiredDefaultOwner applies only to the default grant',
       );
     }
+    bool isOwner(TokenRecord record) =>
+        (account == null || record.owner == account) &&
+        (requiredDefaultOwner == null || record.owner == requiredDefaultOwner);
+    // Reading an already-fresh immutable record performs no refresh side
+    // effect. It must not wait behind an unrelated token rotation guard.
+    final initial = TokenStore.loadRecord(provider, account: account);
+    if (initial != null && isOwner(initial) && initial.tokens.isFresh) {
+      return initial.tokens.accessToken;
+    }
     return TokenStore.refreshTransaction(
       provider,
       (record) async {
@@ -118,10 +138,7 @@ class XaiAuth {
         // Validate ownership only after entering the same transaction that
         // governs the refresh. A concurrent login cannot swap the default slot
         // between this guard and the token-endpoint request.
-        if (requiredDefaultOwner != null &&
-            record.owner != requiredDefaultOwner) {
-          return null;
-        }
+        if (!isOwner(record)) return null;
         final stored = record.tokens;
         if (stored.isFresh) return stored.accessToken;
         if (stored.refreshToken == null) return null;
@@ -136,6 +153,7 @@ class XaiAuth {
         return accessToken;
       },
       account: account,
+      acquisitionTimeout: refreshAcquisitionTimeout,
     );
   }
 
@@ -183,15 +201,63 @@ class XaiAuth {
     }
   }
 
-  Future<http.Response> _postRaw(String url, Map<String, String> form) {
+  Future<http.Response> _postRaw(
+    String url,
+    Map<String, String> form,
+  ) async {
     final uri = Uri.parse(url);
     const headers = {
       'Content-Type': 'application/x-www-form-urlencoded',
     };
-    final client = _client;
-    final request = client == null
-        ? http.post(uri, headers: headers, body: form)
-        : client.post(uri, headers: headers, body: form);
-    return request.timeout(const Duration(seconds: 15));
+    final client = _client ?? http.Client();
+    final abort = Completer<void>();
+    var expired = false;
+    final timer = Timer(requestTimeout, () {
+      expired = true;
+      if (!abort.isCompleted) abort.complete();
+    });
+    void cancel() {
+      if (!abort.isCompleted) abort.complete();
+    }
+
+    try {
+      final request = http.AbortableRequest(
+        'POST',
+        uri,
+        abortTrigger: abort.future,
+      )
+        ..followRedirects = false
+        ..headers.addAll(headers)
+        ..bodyFields = form;
+      // Await the original request and body, including cancellation. The
+      // refresh transaction keeps its native guard until this work settles.
+      final response = await client.send(request);
+      const maxBytes = 128 * 1024;
+      if ((response.contentLength ?? 0) > maxBytes) {
+        cancel();
+        await response.stream.listen(null).cancel();
+        throw const FormatException('token response exceeds size limit');
+      }
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in response.stream) {
+        if (bytes.length + chunk.length > maxBytes) {
+          cancel();
+          throw const FormatException('token response exceeds size limit');
+        }
+        bytes.add(chunk);
+      }
+      if (expired) throw TimeoutException('token metadata deadline');
+      return http.Response.bytes(
+        bytes.takeBytes(),
+        response.statusCode,
+        headers: response.headers,
+      );
+    } on http.RequestAbortedException {
+      if (expired) throw TimeoutException('token metadata deadline');
+      rethrow;
+    } finally {
+      timer.cancel();
+      if (_client == null) client.close();
+    }
   }
 }

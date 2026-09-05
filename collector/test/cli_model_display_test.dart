@@ -37,6 +37,41 @@ void main() {
     cli.style = const AnsiStyle(false);
   });
 
+  for (final value in ['denied', 'future-admission']) {
+    test('$value model display retains measured quota and explains exclusion',
+        () {
+      final quota = ProviderQuota.fromJson({
+        'provider': 'codex',
+        'display_name': 'Codex',
+        'account': 'fixture',
+        'as_of': _now,
+        'request_admission': value,
+        'windows': [
+          {'label': 'weekly', 'used_percent': 50, 'resets_at': _now + 3600}
+        ],
+      });
+      const catalog = {
+        'codex': [
+          ModelInfo(id: 'codex-test', tier: 'standard', reasoning: 'reasoning')
+        ]
+      };
+      final registry = buildModelRegistry([quota], _now, catalog: catalog);
+      final output = _render(() => cli.printModelRegistry(registry, _now));
+      expect(registry.single.available, isFalse);
+      expect(output, contains('50% free'));
+      expect(
+          output,
+          contains(value == 'denied'
+              ? 'requests denied'
+              : 'request status unverified'));
+      expect(output, isNot(contains('spent')));
+      final suggested = suggestModel([quota], _now, catalog: catalog);
+      expect(suggested.recommended, isNull);
+      expect(_render(() => cli.printModelSuggestion(suggested, _now)),
+          contains('request admission'));
+    });
+  }
+
   test('model inspection does not label upstream evidence as local readiness',
       () {
     final registry = buildModelRegistry([

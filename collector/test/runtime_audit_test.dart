@@ -2,6 +2,61 @@ import 'package:quotabot_collector/collector.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('Codex manifest follows the requested OS and explicit home', () {
+    const environment = {
+      'USERPROFILE': r'C:\windows-home',
+      'HOME': '/posix-home',
+    };
+    String authPath(String os, Map<String, String> env) =>
+        defaultProviderRuntimeAccess(environment: env, os: os)
+            .singleWhere((provider) => provider.provider == 'codex')
+            .reads
+            .singleWhere((record) => record.target.endsWith('auth.json'))
+            .target;
+    expect(
+        authPath('windows', environment), r'C:\windows-home\.codex\auth.json');
+    for (final os in ['linux', 'macos']) {
+      expect(authPath(os, environment), '/posix-home/.codex/auth.json');
+      expect(authPath(os, {...environment, 'CODEX_HOME': '/configured'}),
+          '/configured/auth.json');
+    }
+    expect(
+        authPath('windows', {...environment, 'CODEX_HOME': r'D:\configured'}),
+        r'D:\configured\auth.json');
+  });
+
+  test('modern metadata manifests include only their declared coordination',
+      () {
+    final providers = defaultProviderRuntimeAccess(
+        environment: const {'HOME': '/synthetic'}, os: 'linux');
+    for (final id in ['codex', 'claude', 'grok']) {
+      final provider = providers.singleWhere((p) => p.provider == id);
+      final gateRecords = provider.reads
+          .where((record) => record.target.contains('/provider_read_gates/'));
+      expect(gateRecords.map((record) => record.access).toSet(),
+          {'read', 'write'});
+      expect(gateRecords.every((record) => record.metadataOnly), isTrue);
+      final associations = provider.reads.where(
+          (record) => record.target.contains('/credential_pools/$id.json'));
+      expect(associations, hasLength(id == 'codex' ? 0 : 2));
+    }
+    final grok = providers.singleWhere((p) => p.provider == 'grok');
+    final quotaReads = grok.network
+        .where((record) => record.host == 'cli-chat-proxy.grok.com');
+    expect(quotaReads.map((record) => record.path).toSet(), {
+      '/v1/billing?format=credits',
+      '/v1/user?include=subscription',
+    });
+    expect(quotaReads.every((record) => record.method == 'GET'), isTrue);
+    expect(grok.network.any((record) => record.host == 'grok.com'), isFalse);
+    expect(
+        providers
+            .singleWhere((p) => p.provider == 'antigravity')
+            .reads
+            .any((record) => record.target.contains('/provider_read_gates/')),
+        isFalse);
+  });
+
   test('runtime access report names metadata-only reads and hosts', () {
     final report = buildRuntimeAccessReport(
       generatedAt: 1782000000,

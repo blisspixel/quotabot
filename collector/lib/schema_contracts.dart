@@ -152,6 +152,10 @@ const quotabotV1JsonSchema = <String, Object?>{
           'enum': ProviderPlanEvidenceSource.wireValues,
         },
         'plan_evidence_as_of': {'type': 'integer', 'minimum': 1},
+        'request_admission': {
+          'type': 'string',
+          'enum': RequestAdmission.wireValues,
+        },
         'source': {'type': 'string'},
         'source_class': {
           'type': 'string',
@@ -298,6 +302,10 @@ const quotabotV1JsonSchema = <String, Object?>{
       'required': ['model'],
       'properties': {
         'model': {'type': 'string', 'minLength': 1},
+        'request_admission': {
+          'type': 'string',
+          'enum': RequestAdmission.wireValues,
+        },
         'used_percent': {'type': 'number', 'minimum': 0, 'maximum': 100},
         'resets_at': {'type': 'integer', 'minimum': 0},
         'window_label': {
@@ -640,6 +648,7 @@ void _validateProvider(
   _checkBool(provider, 'ok', path, errors);
   _checkOptionalString(provider, 'error', path, errors);
   _checkNonNegativeInt(provider, 'as_of', path, errors);
+  _checkRequestAdmission(provider, path, errors);
   _checkBool(provider, 'stale', path, errors);
   _checkOptionalString(provider, 'suspect', path, errors);
   _checkOptionalString(provider, 'drift_reason', path, errors);
@@ -913,6 +922,7 @@ void _validateModelQuota(
 ) {
   _checkRequired(quota, const ['model'], path, errors);
   _checkNonEmptyString(quota, 'model', path, errors);
+  _checkRequestAdmission(quota, path, errors);
   final usedPercent = quota['used_percent'];
   if (usedPercent != null &&
       !_finiteNumberInRange(usedPercent, min: 0, max: 100)) {
@@ -922,6 +932,21 @@ void _validateModelQuota(
   _checkModelQuotaWindowLabel(quota, path, errors);
   _checkOptionalString(quota, 'category', path, errors);
   _checkOptionalString(quota, 'note', path, errors);
+}
+
+void _checkRequestAdmission(
+  Map<String, dynamic> quota,
+  String path,
+  List<String> errors,
+) {
+  if (!quota.containsKey('request_admission')) return;
+  _checkStringEnum(
+    quota,
+    'request_admission',
+    path,
+    RequestAdmission.wireValues.toSet(),
+    errors,
+  );
 }
 
 void _checkModelQuotaWindowLabel(

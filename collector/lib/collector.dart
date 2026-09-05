@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'adapters/claude.dart';
 import 'analysis.dart';
 import 'cache.dart';
+import 'credential_pool_store.dart';
 import 'demo.dart';
 import 'drift.dart';
 import 'local_hardware.dart';
@@ -57,6 +59,38 @@ bool _sweptTemp = false;
 /// degrades to a truthful timeout error for that provider instead of wedging
 /// the whole fleet, the desktop refresh loop, and MCP snapshot calls.
 const Duration kAdapterDeadline = Duration(seconds: 30);
+
+final _activeAdapterCollections = <Future<void>>{};
+
+Future<List<ProviderQuota>> _collectAdapter(
+  ProviderAdapterRegistration entry,
+) {
+  final settled = Completer<void>();
+  _activeAdapterCollections.add(settled.future);
+  void finish() {
+    _activeAdapterCollections.remove(settled.future);
+    settled.complete();
+  }
+
+  // A deadline bounds publication, not the adapter's original lifetime. An
+  // ungated adapter may still own a native credential-refresh guard afterward.
+  final original = Future<List<ProviderQuota>>.sync(entry.collect);
+  unawaited(original.then<void>(
+    (_) => finish(),
+    onError: (Object error, StackTrace stack) => finish(),
+  ));
+  return original;
+}
+
+/// Waits for original adapter futures in this isolate, including reads whose
+/// caller already received a deadline result. Owners must stop new dispatch and
+/// await their outer fleet before this barrier, then drain provider read gates.
+/// Payloads and errors remain with the original caller; this tracks settlement.
+Future<void> drainActiveAdapterCollections() async {
+  while (_activeAdapterCollections.isNotEmpty) {
+    await Future.wait(_activeAdapterCollections.toList());
+  }
+}
 
 class CollectedQuotaSnapshot {
   final List<ProviderQuota> providers;
@@ -240,7 +274,7 @@ Future<ProviderDriftRecoveryReport> verifyAndRecoverProviderDriftBaseline({
       );
   late List<ProviderQuota> collected;
   try {
-    collected = await entry.collect().timeout(deadline);
+    collected = await _collectAdapter(entry).timeout(deadline);
   } on TimeoutException {
     final failedAt = observedAt ?? nowEpoch();
     return _driftRecoveryFailure(
@@ -385,15 +419,15 @@ ProviderQuota _adapterErrorQuota(
 Future<List<ProviderQuota>> _listWithDeadline(
   ProviderAdapterRegistration entry,
 ) =>
-    entry.collect().timeout(
-          kAdapterDeadline,
-          onTimeout: () => [
-            _adapterErrorQuota(
-              entry,
-              'timed out after ${kAdapterDeadline.inSeconds}s',
-            ),
-          ],
-        );
+    _collectAdapter(entry).timeout(
+      kAdapterDeadline,
+      onTimeout: () => [
+        _adapterErrorQuota(
+          entry,
+          'timed out after ${kAdapterDeadline.inSeconds}s',
+        ),
+      ],
+    );
 
 /// Reports one provider adapter settling during a fleet collection, so a caller
 /// can render live progress instead of a blank wait. [ok] is whether the adapter
@@ -709,10 +743,26 @@ Future<List<ProviderQuota>> _collectRegistered(
       );
     }
     if (entry.accountScopedCache) {
+      final currentAccounts = Set<String>.of(entry.currentAccounts!());
+      if (entry.id == ClaudeAdapter.id) {
+        final credentials = ClaudeAdapter.currentCredentialGenerations();
+        final associations = CredentialPoolStore(ClaudeAdapter.id);
+        for (final quota in results) {
+          if (!isTrustedQuotaEvidenceAt(quota, now) ||
+              !credentials.contains(quota.account)) {
+            continue;
+          }
+          // A successful usage read without a current profile stays keyed to
+          // its exact credential. Its prior pool may aid a future failed read,
+          // but adding that stale alias now would duplicate this same account.
+          final alias = associations.lookup(quota.account)?.pool;
+          if (alias != null) currentAccounts.remove(alias);
+        }
+      }
       results.addAll(currentAccountFallbacks(
         liveResults: results,
         cachedSnapshots: loadAccountSnapshots(entry.id),
-        currentAccounts: entry.currentAccounts!(),
+        currentAccounts: currentAccounts,
       ));
     }
     return results;

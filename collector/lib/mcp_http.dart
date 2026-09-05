@@ -11,6 +11,7 @@ import 'mcp.dart';
 import 'model_catalog.dart';
 import 'models.dart';
 import 'profiles.dart';
+import 'refresh_timer.dart';
 import 'util.dart';
 
 const defaultMcpHttpHost = '127.0.0.1';
@@ -512,6 +513,8 @@ QuotabotStreamableHttpServer buildQuotabotStreamableHttpServer({
   CachedSnapshotProvider cachedSnapshot = emptyCachedSnapshot,
   RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
   bool enableSubscriptionTimers = true,
+  Set<String> providersWithUsageCooldowns = const {},
+  RefreshTimerFactory? subscriptionTimerFactory,
   int Function() now = nowEpoch,
   Map<String, List<ModelInfo>> catalog = kModelCatalog,
   ProfileLoader profileLoader = loadProfile,
@@ -559,6 +562,8 @@ QuotabotStreamableHttpServer buildQuotabotStreamableHttpServer({
     );
   }
 
+  final usageCooldownProviders =
+      Set<String>.unmodifiable(providersWithUsageCooldowns);
   return QuotabotStreamableHttpServer(
     host: config.host,
     port: config.port,
@@ -574,6 +579,8 @@ QuotabotStreamableHttpServer buildQuotabotStreamableHttpServer({
       cachedSnapshot: cachedSnapshot,
       leaseStore: leaseStore,
       enableSubscriptionTimers: enableSubscriptionTimers,
+      providersWithUsageCooldowns: usageCooldownProviders,
+      subscriptionTimerFactory: subscriptionTimerFactory,
       now: now,
       catalog: catalog,
       profileLoader: profileLoader,

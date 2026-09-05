@@ -10,6 +10,7 @@ import '../http_client.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
+import '../provider_read_gate.dart';
 import '../util.dart';
 
 typedef CodexUsageFetcher = Future<Map<String, dynamic>?> Function();
@@ -22,9 +23,26 @@ typedef CodexGrantToken = Future<String?> Function();
 /// Injectable for tests that need to model credential replacement precisely.
 typedef CodexGrantCredential = Future<OpenAiCredential?> Function();
 
+/// Resolves the file-backed Codex login without inspecting its contents.
+/// An explicit Codex home must never fall back to another home's account.
+File codexHostAuthFile({
+  Map<String, String>? environment,
+  String? operatingSystem,
+}) {
+  final env = environment ?? Platform.environment;
+  final configured = env['CODEX_HOME']?.trim();
+  final userHome = (operatingSystem ?? Platform.operatingSystem) == 'windows'
+      ? env['USERPROFILE'] ?? env['HOME']
+      : env['HOME'] ?? env['USERPROFILE'];
+  final root = configured != null && configured.isNotEmpty
+      ? configured
+      : '${userHome ?? Directory.current.path}/.codex';
+  return File('$root/auth.json');
+}
+
 /// Reads Codex usage from the authoritative account-wide ChatGPT metadata
 /// endpoint. It resolves credentials in priority order:
-///   1. the credential Codex stores in ~/.codex/auth.json;
+///   1. the credential in CODEX_HOME/auth.json (default ~/.codex/auth.json);
 ///   2. quotabot's independent refreshable grant from `quotabot login codex`.
 ///
 /// It deliberately does not inspect rollout or session files. Those files mix
@@ -36,33 +54,37 @@ class CodexAdapter {
   static const _usageEndpoint = 'https://chatgpt.com/backend-api/wham/usage';
   static const _duplicateFallbackDeadline = Duration(seconds: 8);
 
-  final File? _authFile;
+  final File _authFile;
   final CodexUsageFetcher? _usageFetcher;
   final String? _usageCredentialIdentity;
   final http.Client? _http;
   final CodexGrantCredential _grantCredential;
   final bool Function()? _disconnectReader;
   final Duration _grantResolutionDeadline;
+  final ProviderReadGate _readGate;
 
   CodexAdapter({
     File? authFile,
+    Map<String, String>? environment,
     CodexUsageFetcher? usageFetcher,
     String? usageCredentialIdentity,
     http.Client? client,
     CodexGrantToken? grantToken,
     CodexGrantCredential? grantCredential,
     bool Function()? disconnectReader,
+    ProviderReadGate? readGate,
     Duration grantResolutionDeadline = const Duration(seconds: 8),
   })  : assert(
           grantToken == null || grantCredential == null,
           'provide grantToken or grantCredential, not both',
         ),
         assert(grantResolutionDeadline.inMicroseconds > 0),
-        _authFile = authFile,
+        _authFile = authFile ?? codexHostAuthFile(environment: environment),
         _usageFetcher = usageFetcher,
         _usageCredentialIdentity = usageCredentialIdentity,
         _http = client,
         _disconnectReader = disconnectReader,
+        _readGate = readGate ?? ProviderReadGate(),
         _grantResolutionDeadline = grantResolutionDeadline,
         _grantCredential = grantCredential ??
             (grantToken != null
@@ -249,18 +271,85 @@ class CodexAdapter {
     // at once. Give it more headroom so a slow-but-successful read is not cut
     // off and reported as a timeout.
     Duration timeout = const Duration(seconds: 20),
+  }) =>
+      _readGate.run<_ReadOutcome>(
+        provider: id,
+        // Codex's existing identity uses the configured account selector or
+        // provider account claim when present, and the established credential
+        // identity for legacy auth. Access rotation must not clear a cooldown.
+        // This preserves exact-ID deduplication without joining account labels.
+        credentialIdentity: credential.identity,
+        purpose: ProviderReadPurpose.usage,
+        attempt: (operation) => _readUsage(
+          credential,
+          accountId,
+          asOf,
+          operation,
+          timeout: timeout,
+        ),
+        classify: (outcome) {
+          final error = outcome.error;
+          if (outcome.quota != null || error?.httpStatus == 401) {
+            return const ProviderReadDisposition.completed();
+          }
+          final status = error?.httpStatus;
+          if (status != null) {
+            return ProviderReadDisposition.httpFailure(
+              status,
+              retryAfterSeconds: error?.retryAfterSeconds,
+            );
+          }
+          return ProviderReadDisposition.failed(
+            error?.pipeHealth == providerPipeHealthThrottled
+                ? ProviderReadFailure.timedOut
+                : ProviderReadFailure.unavailable,
+          );
+        },
+        deferred: (deferral) => _ReadOutcome.error(ProviderQuota.error(
+          id,
+          name,
+          switch (deferral.reason) {
+            ProviderReadDeferralReason.cooldown => 'Codex usage read deferred',
+            ProviderReadDeferralReason.busy =>
+              'Codex usage read already in progress',
+            ProviderReadDeferralReason.storageUnavailable =>
+              'Codex usage read coordination unavailable',
+            ProviderReadDeferralReason.failed => 'unable to read Codex usage',
+          },
+          asOf,
+          account: credential.identity,
+          httpStatus: deferral.httpStatus,
+          retryAfterSeconds: deferral.retryAfterSeconds,
+          pipeHealth: switch (deferral.failure) {
+            ProviderReadFailure.rateLimited ||
+            ProviderReadFailure.timedOut =>
+              providerPipeHealthThrottled,
+            ProviderReadFailure.serviceUnavailable =>
+              providerPipeHealthDegraded,
+            _ => null,
+          },
+        )),
+      );
+
+  Future<_ReadOutcome> _readUsage(
+    OpenAiCredential credential,
+    String? accountId,
+    int asOf,
+    ProviderReadOperation operation, {
+    required Duration timeout,
   }) async {
     http.Response response;
     try {
-      final get = _http?.get ?? sharedHttpClient.get;
-      response = await get(
+      response = await operation.get(
+        _http ?? sharedHttpClient,
         Uri.parse(_usageEndpoint),
         headers: {
           'Authorization': 'Bearer ${credential.accessToken}',
           if (accountId != null && accountId.isNotEmpty)
             'chatgpt-account-id': accountId,
         },
-      ).timeout(timeout);
+        timeout: timeout,
+      );
     } catch (e) {
       final health = providerPipeHealthForReadError(e);
       return _ReadOutcome.error(
@@ -336,6 +425,7 @@ class CodexAdapter {
       asOf: asOf,
       windows: usage.windows,
       modelQuotas: usage.modelQuotas,
+      requestAdmission: usage.requestAdmission,
       resetCreditsAvailable: codexResetCredits(body) ?? 0,
     );
   }
@@ -359,20 +449,21 @@ class CodexAdapter {
         asOf,
       );
 
-  _HostCredential? _readHostCredential() => _readHostCredentialFile(
-        _authFile ?? File('${home()}/.codex/auth.json'),
-      );
+  _HostCredential? _readHostCredential() => _readHostCredentialFile(_authFile);
 
   /// Credential identities currently present on this machine. Cache fallback
   /// is admitted only for identities in this set, so a replaced login cannot
   /// resurrect or drift-compare a prior account's evidence.
   static Set<String> get currentAccounts => currentCredentialIdentities();
 
-  static Set<String> currentCredentialIdentities({File? authFile}) {
+  static Set<String> currentCredentialIdentities({
+    File? authFile,
+    Map<String, String>? environment,
+  }) {
     if (ProviderDisconnectStore.isDisconnected(id)) return const {};
     final found = <String>{};
     final host = _readHostCredentialFile(
-      authFile ?? File('${home()}/.codex/auth.json'),
+      authFile ?? codexHostAuthFile(environment: environment),
     );
     if (host != null) found.add(host.credential.identity);
     final grant = OpenAiAuth.currentCredentialIdentity();

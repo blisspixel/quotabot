@@ -153,13 +153,20 @@ useful parallelism is overlapping those waits, not occupying every CPU core.
   the same way. Result order stays the discovered account order.
 - Claude and Codex start host and grant reads together so a slow grant cannot
   hide a healthy host observation.
-- The desktop app runs `collectAll` on a background isolate so SQLite, protobuf,
-  and JSON work cannot freeze the UI isolate. If that isolate cannot start, it
-  falls back to the UI isolate.
+- The desktop app has one reusable collection worker. It publishes each bounded
+  fleet result immediately and retains ownership of work still settling after a
+  timeout. Calls coalesce into the pending generation; a late result cannot
+  complete a different generation. A failed worker gives a bounded refresh
+  error and never falls back to collection on the UI isolate. Cooperative close
+  stops dispatch, waits for the outer fleet and original adapters, drains their
+  read gates, then closes the pooled HTTP client. Only whole-application Quit
+  may end the process after a five-second grace period; widget disposal never
+  kills a worker that could still own a native credential or request guard.
 - One-shot CLI collection stays on the process isolate. Spawning a second
   isolate for a command that exits immediately would cost more than it saves.
-- Analytics directory scans also run off the UI isolate, with a timeout and a
-  same-isolate fallback, so a stalled scan cannot freeze refresh.
+- Advisory analytics has its own worker and newest-pending request. It cannot
+  delay quota publication, hold Refresh disabled, or republish an older profile.
+  Cancellation retains ownership until the original work exits.
 
 quotabot does not spawn one isolate per provider. Isolates do not share memory,
 so that design would drop the shared HTTP pool, duplicate credential and cache
@@ -182,10 +189,9 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
   token cost). Claude reuses the token Claude Code stores for concurrent usage
   and profile reads. The profile plan is current provider evidence, and its
   account plus organization ids are hashed into one stable quota-pool identity.
-  No raw profile id is retained. Grok and Antigravity
-  prefer quotabot's own OAuth grant (see Authentication) and fall back to the
-  token the host CLI or IDE currently holds. Grok reads every account in the CLI
-  auth file and caches them separately. Antigravity scans the active account and
+  No raw profile id is retained. Grok starts a usable first-party host read
+  independently of owned grants, verifies exact personal/team principals and
+  reads included JSON billing metadata through the CLI proxy. Antigravity scans the active account and
   profile databases, attempts live reads for each discovered account, refreshes
   the Gemini CLI token from disk when it is the active token source, and runs the
   Cloud Code onboarding step only when `loadCodeAssist` has not already returned
@@ -887,24 +893,43 @@ leaves JSON standard output reserved for alert records.
 
 ## Adaptive refresh
 
-`_nextInterval()` picks the next refresh delay from the current data. Quota moves
-slowly and a cloud read can be rate-limited, so the default leans gentle: about
-thirty seconds only when a reset is imminent, ten to twenty minutes when a
-provider is near a cap and its binding window's own reset is near enough to be
-worth watching, twenty minutes at the healthy baseline, and one to twelve hours
-as the nearest reset recedes. A provider that is spent (or nearly so) but whose
-reset is far away is not watched closely - it just sits there until it resets -
-so it relaxes like a healthy provider rather than pinning the whole fleet to a
-fast poll. A cycle that returns nothing live backs off to one hour, then six.
-When a provider keeps pushing back, the back-off escalates each consecutive
-cycle - twenty minutes, then forty, then ninety - and honors an explicit
-retry-after, so quotabot stops checking a provider that is not ready; an
-imminent reset is still caught promptly. A timeout reads as `provider slow`,
-HTTP 429 as `rate limited`, and HTTP 5xx as `provider error`, while all three
-retain the same bounded automatic recovery policy. A
-fixed cadence (15 minutes or 1 hour) can be chosen from the menu instead of the
-smart schedule. `top` and `watch` share the same `nextRefreshSeconds`, so all
-three poll alike.
+Smart refresh checks current authoritative quota within five minutes, including
+weekly-only and spent plans whose balance can change after a banked reset.
+An imminent reset uses 30 or 60 seconds. A recently captured window that just
+expired gets a bounded confirmation period: 30 seconds for the first two
+minutes, then two minutes until fifteen minutes after its boundary. This is a
+reason to check again, never evidence of a refill. Last-known percentages stay
+unavailable until the provider supplies a current window. Old, passive, manual
+and empty legacy quarantine evidence cannot start that confirmation loop.
+
+Claude, Codex and Grok register explicit usage-cooldown coverage. Their transport
+gates serialize each supported identity and metadata purpose across processes,
+keep ownership through actual request settlement, and persist bounded absolute
+retry deadlines. A timeout wrapper cannot release an active request. Optional
+Claude profile and Grok user discovery have separate scopes, so they cannot
+erase a healthy usage read or clear its cooldown. Valid Retry-After is a lower
+bound; no-header failures use bounded escalating backoff with positive jitter.
+The state contains opaque identifiers and typed failure metadata only. Grant
+refresh is outside this usage-gate capability.
+
+Healthy siblings retain their freshness checks while covered scopes defer
+locally. Uncovered transports, including Antigravity, keep the fleet-wide
+throttle floor. A recent reset or all-failed cycle cannot bypass their explicit
+Retry-After. Other all-failed cycles back off to one hour, then six; passive-only
+fleets keep their gentler adaptive schedule. The desktop's fixed 15-minute and
+hourly choices remain available, as do explicit CLI intervals. Fixed cadences
+still retain an uncovered transport's explicit Retry-After floor.
+`top`, `watch`, the desktop and MCP resource
+subscriptions share `nextRefreshSeconds`. Injected collectors receive no
+cooldown exemption by default; production coverage comes from the audited
+adapter registry. Long waits retain their full seconds value through one-day
+timer chunks, avoiding duration overflow without making intermediate reads.
+
+The desktop also coalesces freshness recovery after a visible return or a gap
+in its display ticks. It respects the selected failure due time and excludes
+demo, readiness and screenshot modes. Recovery copy distinguishes a throttled
+quota check from a spent plan and does not promise a timer based only on a
+Retry-After header.
 
 ## Packaging
 

@@ -32,13 +32,14 @@ import 'model_catalog.dart';
 import 'models.dart';
 import 'profiles.dart';
 import 'provider_filters.dart';
+import 'refresh_timer.dart';
 import 'registry.dart';
 import 'routing_context.dart';
 import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.11.1';
+const quotabotMcpVersion = '0.11.2';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
@@ -484,6 +485,8 @@ Map<String, dynamic> availabilityResponse(
     'account': q.account,
     'source_class': q.sourceClass.wireName,
     'available': q.isLocal ? isLocalRuntimeAvailableAt(q, now) : a.available,
+    if (q.requestAdmission != RequestAdmission.notReported)
+      'request_admission': q.requestAdmission.wireName,
     'headroom_percent': a.headroom,
     'resets_at': a.resetsAt,
     'stale': q.stale,
@@ -513,10 +516,16 @@ final _windowSchema = JsonSchema.object(
 /// Antigravity or a sparse scoped overlay such as Claude Fable and Codex Spark.
 /// Multiple gates can refer to one provider pool and must never be summed. The
 /// shared `windows` summary stays the provider headline.
+final _requestAdmissionSchema = JsonSchema.string(
+  description: 'Provider request admission, independent of measured usage.',
+  enumValues: RequestAdmission.wireValues,
+);
+
 final _modelQuotaSchema = JsonSchema.object(
   description: 'Per-model quota, when a provider meters models separately.',
   properties: {
     'model': JsonSchema.string(description: 'Provider model name.'),
+    'request_admission': _requestAdmissionSchema,
     'used_percent': JsonSchema.number(
         description: 'Percent of the pool consumed (0..100).'),
     'resets_at': JsonSchema.integer(description: 'Reset epoch seconds.'),
@@ -567,6 +576,7 @@ final _providerSchema = JsonSchema.object(
   description: 'A provider snapshot. Unlisted fields may be added over time.',
   properties: {
     'provider': JsonSchema.string(description: 'Stable provider id.'),
+    'request_admission': _requestAdmissionSchema,
     'display_name': JsonSchema.string(description: 'Human display name.'),
     'account': JsonSchema.string(),
     'plan': JsonSchema.string(),
@@ -677,6 +687,7 @@ final mostHeadroomOutputSchema = JsonSchema.object(
 /// One ranked candidate inside a routing suggestion.
 final _candidateSchema = JsonSchema.object(
   properties: {
+    'request_admission': _requestAdmissionSchema,
     'provider': JsonSchema.string(),
     'account': JsonSchema.string(),
     'plan': JsonSchema.string(),
@@ -826,6 +837,7 @@ final _receiptAdjustmentSchema = JsonSchema.object(
 
 final _receiptCandidateSchema = JsonSchema.object(
   properties: {
+    'request_admission': _requestAdmissionSchema,
     'provider': JsonSchema.string(),
     'account': JsonSchema.string(),
     'source_class': _sourceClassSchema,
@@ -1100,6 +1112,7 @@ final releaseProviderOutputSchema = JsonSchema.object(
 final _modelEntrySchema = JsonSchema.object(
   description: 'A routable model plus the provider or model budget gating it.',
   properties: {
+    'request_admission': _requestAdmissionSchema,
     'id': JsonSchema.string(description: 'Provider-native model id.'),
     'display_name': JsonSchema.string(),
     'provider': JsonSchema.string(),
@@ -1395,6 +1408,7 @@ final listModelsOutputSchema = JsonSchema.object(
 final availabilityOutputSchema = JsonSchema.object(
   description: 'Whether one named provider has quota available now.',
   properties: {
+    'request_admission': _requestAdmissionSchema,
     ..._profileMetaProperties,
     'schema': JsonSchema.string(
       description: 'Schema id, always "quotabot.check.v1".',
@@ -1441,6 +1455,8 @@ McpServer buildQuotabotMcpServer({
   CachedSnapshotProvider cachedSnapshot = emptyCachedSnapshot,
   RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
   bool enableSubscriptionTimers = true,
+  Set<String> providersWithUsageCooldowns = const {},
+  RefreshTimerFactory? subscriptionTimerFactory,
   int Function() now = nowEpoch,
   Map<String, List<ModelInfo>> catalog = kModelCatalog,
   ProfileLoader profileLoader = loadProfile,
@@ -1462,6 +1478,8 @@ McpServer buildQuotabotMcpServer({
     cachedSnapshot: cachedSnapshot,
     leaseStore: leaseStore,
     enableSubscriptionTimers: enableSubscriptionTimers,
+    providersWithUsageCooldowns: providersWithUsageCooldowns,
+    subscriptionTimerFactory: subscriptionTimerFactory,
     now: now,
     catalog: catalog,
     profileLoader: profileLoader,
@@ -1742,6 +1760,10 @@ class QuotaResourceSubscriptionHub {
   final Future<void> Function(String uri) notifyUpdated;
   final bool autoStart;
 
+  /// Audited capabilities of the supplied collector, never snapshot claims.
+  final Set<String> providersWithUsageCooldowns;
+  final RefreshTimerFactory? _timerFactory;
+
   final Set<String> _subscribed = {};
   var _armed = <String>{};
   var _lastAlerts = <QuotaAlert>[];
@@ -1760,7 +1782,11 @@ class QuotaResourceSubscriptionHub {
     required this.now,
     required this.notifyUpdated,
     this.autoStart = true,
-  });
+    Set<String> providersWithUsageCooldowns = const {},
+    RefreshTimerFactory? timerFactory,
+  })  : providersWithUsageCooldowns =
+            Set<String>.unmodifiable(providersWithUsageCooldowns),
+        _timerFactory = timerFactory;
 
   Map<String, dynamic> alertsResource() => alertsSnapshot(
         _lastAlerts,
@@ -1771,7 +1797,7 @@ class QuotaResourceSubscriptionHub {
   Future<void> subscribe(String uri) async {
     _assertSubscribable(uri);
     _subscribed.add(uri);
-    if (autoStart) _schedule(Duration.zero);
+    if (autoStart) _schedule(0);
   }
 
   Future<void> unsubscribe(String uri) async {
@@ -1837,21 +1863,22 @@ class QuotaResourceSubscriptionHub {
     _subscribed.clear();
   }
 
-  void _schedule(Duration delay) {
+  void _schedule(int seconds) {
     if (_disposed || _subscribed.isEmpty) return;
     _timer?.cancel();
-    _timer = Timer(delay, () async {
+    _timer = RefreshTimer.seconds(seconds, () async {
       await pollOnce();
       if (_disposed || _subscribed.isEmpty) return;
-      final seconds = _lastSnapshot.isEmpty
+      final nextSeconds = _lastSnapshot.isEmpty
           ? 60
           : nextRefreshSeconds(
               _lastSnapshot,
               now(),
               failStreak: _failStreak,
+              providersWithUsageCooldowns: providersWithUsageCooldowns,
             );
-      _schedule(Duration(seconds: seconds));
-    });
+      _schedule(nextSeconds);
+    }, timerFactory: _timerFactory);
   }
 
   void _assertSubscribable(String uri) {
@@ -1998,6 +2025,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
   CachedSnapshotProvider cachedSnapshot = emptyCachedSnapshot,
   RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
   bool enableSubscriptionTimers = true,
+  Set<String> providersWithUsageCooldowns = const {},
+  RefreshTimerFactory? subscriptionTimerFactory,
   int Function() now = nowEpoch,
   Map<String, List<ModelInfo>> catalog = kModelCatalog,
   ProfileLoader profileLoader = loadProfile,
@@ -2010,6 +2039,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     catalog: catalog,
     now: now,
     autoStart: enableSubscriptionTimers,
+    providersWithUsageCooldowns: providersWithUsageCooldowns,
+    timerFactory: subscriptionTimerFactory,
     notifyUpdated: (uri) async {
       if (!server.isConnected) return;
       try {
@@ -2403,6 +2434,15 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final pipePenalties =
           loadRoutedRequestSummary().pipePenaltyByProvider(now: n);
       final requestedProvider = providerSelection.value;
+      final admissionGates = providerRouteCapabilityGates(
+        results,
+        n,
+        catalog: catalog,
+      ).requestAdmissionByQuotaKey;
+      bool admissionAllowsReuse(ProviderQuota quota) =>
+          !quota.requestAdmission.blocksRequests &&
+          !(admissionGates[quotaIdentityKeyFor(quota)]?.blocksRequests ??
+              false);
       final requestedAccount = profiled.accountFilter;
       final explicit = requestedProvider != null;
       final idempotencyKey = idempotencySelection.value;
@@ -2457,7 +2497,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           reuseWhere: (lease) => results.any(
             (quota) =>
                 normalizeLeaseProvider(quota.provider) == lease.provider &&
-                normalizeLeaseAccount(quota.account) == lease.account,
+                normalizeLeaseAccount(quota.account) == lease.account &&
+                admissionAllowsReuse(quota),
           ),
         );
         return CallToolResult.fromStructuredContent(
@@ -2513,7 +2554,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
               quota.provider == requestedProvider &&
               (requestedAccount == null || quota.account == requestedAccount) &&
               normalizeLeaseProvider(quota.provider) == lease.provider &&
-              normalizeLeaseAccount(quota.account) == lease.account,
+              normalizeLeaseAccount(quota.account) == lease.account &&
+              admissionAllowsReuse(quota),
         ),
       );
       return CallToolResult.fromStructuredContent(

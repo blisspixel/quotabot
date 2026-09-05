@@ -40,6 +40,38 @@ Insights _insights() => Insights.from([
     ], _now);
 
 void main() {
+  for (final value in ['denied', 'future-admission']) {
+    test('$value report preserves measured headroom and an explicit rejection',
+        () {
+      final quota = ProviderQuota.fromJson({
+        'provider': 'codex',
+        'display_name': 'Codex',
+        'account': 'fixture',
+        'as_of': _now,
+        'request_admission': value,
+        'windows': [
+          {'label': 'weekly', 'used_percent': 50, 'resets_at': _now + 3600}
+        ],
+      });
+      final report =
+          buildQuotaHealthReport([quota], _now, suggestRoute([quota], _now));
+      final expected =
+          value == 'denied' ? 'requests denied' : 'request status unverified';
+      expect(report.providers.single.state, expected);
+      expect(report.providers.single.headroomPercent, 50);
+      expect(report.providers.single.toJson()['request_admission'],
+          value == 'denied' ? 'denied' : 'unresolved');
+      expect(report.toMarkdown(), contains(expected));
+      expect(report.toMarkdown(), contains('50.0%'));
+      expect(report.toJson()['recommended_provider'], isNull);
+      final stale = quota.asStale('synthetic unavailable read');
+      final cached =
+          buildQuotaHealthReport([stale], _now, suggestRoute([stale], _now));
+      expect(cached.providers.single.state, 'cached');
+      expect(cached.providers.single.headroomPercent, 50);
+    });
+  }
+
   test('upstream and embedding inventory reports reachable without readiness',
       () {
     for (final model in const [

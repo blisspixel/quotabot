@@ -779,6 +779,78 @@ void main() {
     }
   });
 
+  for (final admission in [
+    RequestAdmission.denied,
+    RequestAdmission.unresolved
+  ]) {
+    test(
+        'HTTP request admission ${admission.wireName} blocks lease creation and reuse',
+        () async {
+      var current = _now;
+      var observed = RequestAdmission.allowed;
+      var collections = 0;
+      final store = InMemoryRouteLeaseStore(idFactory: () => 'admission-lease');
+      final server = await startLocalQuotabotServer(
+        port: 0,
+        snapshotProvider: () async {
+          collections++;
+          return [
+            ProviderQuota(
+              provider: 'codex',
+              displayName: 'Codex',
+              account: 'fixture',
+              asOf: current,
+              requestAdmission: observed,
+              windows: [
+                QuotaWindow(
+                    label: 'weekly', usedPercent: 50, resetsAt: _now + 3600)
+              ],
+            )
+          ];
+        },
+        routeSummaryProvider: _emptyRouteSummary,
+        leaseStore: store,
+        mutationToken: _mutationToken,
+        now: () => current,
+      );
+      final uri = Uri.parse('http://127.0.0.1:${server.port}/leases/reserve');
+      const body = {
+        'targets': [
+          {'provider': 'codex', 'account': 'fixture'}
+        ],
+        'lease_seconds': 120,
+        'idempotency_key': 'admission-retry',
+      };
+      const headers = {
+        HttpHeaders.authorizationHeader: 'Bearer $_mutationToken',
+      };
+      try {
+        final first = await _requestJson(uri,
+            method: 'POST', headers: headers, jsonBody: body);
+        expect(first.status, HttpStatus.ok);
+        expect(first.body['reserved'], isTrue);
+        observed = admission;
+        current += 6;
+        final retry = await _requestJson(uri,
+            method: 'POST', headers: headers, jsonBody: body);
+        expect(retry.status, HttpStatus.ok);
+        expect(collections, 2, reason: 'retry uses a fresh metadata snapshot');
+        expect(retry.body['reserved'], isFalse);
+        expect(retry.body['reused'], isFalse);
+        expect(retry.body['lease'], isNull);
+        final fresh = await _requestJson(uri,
+            method: 'POST',
+            headers: headers,
+            jsonBody: {...body, 'idempotency_key': 'new-admission-retry'});
+        expect(fresh.status, HttpStatus.ok);
+        expect(fresh.body['reserved'], isFalse);
+        expect(store.active(current), hasLength(1));
+      } finally {
+        await server.close(force: true);
+      }
+    });
+  }
+
   test('HTTP reservation TTL starts after slow collection completes', () async {
     var current = _now;
     final collectionStarted = Completer<void>();

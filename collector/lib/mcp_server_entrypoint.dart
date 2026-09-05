@@ -9,6 +9,7 @@ import 'mcp.dart';
 import 'mcp_http.dart';
 import 'mcp_server_options.dart';
 import 'provider_id_migration.dart';
+import 'refresh_timer.dart';
 import 'util.dart';
 
 /// MCP server exposing AI subscription quota as a primitive other agents can
@@ -18,20 +19,38 @@ import 'util.dart';
 ///
 /// All tool shapes, schemas, and behavior live in `lib/mcp.dart`; this is a thin
 /// wiring shell that supplies the live snapshot and burn sources.
+/// The default collector uses audited registration cooldown capabilities.
+/// An injected [snapshotSource] has no such coverage unless the caller supplies
+/// [providersWithUsageCooldowns] explicitly.
 Future<void> runQuotabotMcpServer(
   List<String> args, {
-  SnapshotProvider snapshotSource = collectAll,
+  SnapshotProvider? snapshotSource,
+  Set<String>? providersWithUsageCooldowns,
+  RefreshTimerFactory? subscriptionTimerFactory,
   Stream<ProcessSignal>? shutdownSignals,
 }) async {
   try {
-    await _runMain(args, snapshotSource, shutdownSignals);
+    await _runMain(
+      args,
+      snapshotSource ?? collectAll,
+      shutdownSignals,
+      Set<String>.unmodifiable(providersWithUsageCooldowns ??
+          (snapshotSource == null
+              ? providersWithMetadataUsageCooldowns()
+              : const <String>{})),
+      subscriptionTimerFactory,
+    );
   } finally {
     closeSharedHttpClient();
   }
 }
 
-Future<void> _runMain(List<String> args, SnapshotProvider snapshotSource,
-    Stream<ProcessSignal>? shutdownSignals) async {
+Future<void> _runMain(
+    List<String> args,
+    SnapshotProvider snapshotSource,
+    Stream<ProcessSignal>? shutdownSignals,
+    Set<String> providersWithUsageCooldowns,
+    RefreshTimerFactory? subscriptionTimerFactory) async {
   late final McpServerCliOptions options;
   try {
     options = McpServerCliOptions.parse(args);
@@ -97,6 +116,8 @@ Future<void> _runMain(List<String> args, SnapshotProvider snapshotSource,
         burnByProvider: recentBurnStatsByQuota,
         cachedSnapshot: cachedDecisionSnapshot,
         leaseStore: leaseStore,
+        providersWithUsageCooldowns: providersWithUsageCooldowns,
+        subscriptionTimerFactory: subscriptionTimerFactory,
       );
     } on FormatException catch (error) {
       stderr.writeln(error.message);
@@ -137,6 +158,8 @@ Future<void> _runMain(List<String> args, SnapshotProvider snapshotSource,
     burnByProvider: recentBurnStatsByQuota,
     cachedSnapshot: cachedDecisionSnapshot,
     leaseStore: leaseStore,
+    providersWithUsageCooldowns: providersWithUsageCooldowns,
+    subscriptionTimerFactory: subscriptionTimerFactory,
   );
   final done = Completer<void>();
   // The high-level server does not expose its transport-close callback. Keep

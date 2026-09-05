@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'adapters/codex.dart' show codexHostAuthFile;
 import 'litellm_metrics.dart';
 import 'local_runtime_config.dart';
 import 'manual_quota.dart';
@@ -263,6 +264,8 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
         _fileWrite(join(config, 'quotabot/auth/claude*.json'),
             'rotated Claude OAuth grant persistence',
             dataClass: 'credential'),
+        ..._usageCoordinationAccess(config, operatingSystem,
+            poolAssociation: claudeProviderId),
       ],
       network: [
         _https('GET', 'api.anthropic.com', '/api/oauth/usage',
@@ -283,7 +286,13 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       displayName: codexProviderName,
       kind: 'subscription',
       reads: [
-        _file(join(h, '.codex/auth.json'), 'Codex ChatGPT OAuth access token',
+        _file(
+            codexHostAuthFile(
+                    environment: env, operatingSystem: operatingSystem)
+                .path
+                .replaceAll(RegExp(r'[\\/]'),
+                    operatingSystem == 'windows' ? '\\' : '/'),
+            'Codex ChatGPT OAuth access token from CODEX_HOME or the default home',
             dataClass: 'credential'),
         _file(join(config, 'quotabot/auth/codex*.json'),
             'quotabot stored Codex OAuth grant',
@@ -291,6 +300,7 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
         _fileWrite(join(config, 'quotabot/auth/codex*.json'),
             'rotated Codex OAuth grant persistence',
             dataClass: 'credential'),
+        ..._usageCoordinationAccess(config, operatingSystem),
       ],
       network: [
         _https('GET', 'chatgpt.com', '/backend-api/wham/usage',
@@ -313,13 +323,15 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
         _fileWrite(join(config, 'quotabot/auth/grok*.json'),
             'rotated Grok OAuth grant persistence',
             dataClass: 'credential'),
+        ..._usageCoordinationAccess(config, operatingSystem,
+            poolAssociation: grokProviderId),
       ],
       network: [
-        _https(
-            'POST',
-            'grok.com',
-            '/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig',
-            'Grok billing quota metadata'),
+        _https('GET', 'cli-chat-proxy.grok.com', '/v1/billing?format=credits',
+            'Grok included billing quota metadata'),
+        _https('GET', 'cli-chat-proxy.grok.com',
+            '/v1/user?include=subscription', 'Grok account and plan metadata',
+            dataClass: 'account_metadata'),
         _https('POST', 'auth.x.ai', '/oauth2/token', 'Grok OAuth token refresh',
             dataClass: 'credential_exchange'),
       ],
@@ -470,6 +482,27 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       ],
       notes: const ['NVIDIA is not treated as measured quota-plan budget.'],
     ),
+  ];
+}
+
+List<RuntimeAccessRecord> _usageCoordinationAccess(
+  String config,
+  String operatingSystem, {
+  String? poolAssociation,
+}) {
+  String path(String relative) =>
+      _joinPath(config, 'quotabot/$relative', operatingSystem);
+  return [
+    _file(path('provider_read_gates/*'),
+        'opaque metadata-scope retry deadlines and native ownership'),
+    _fileWrite(path('provider_read_gates/*'),
+        'bounded metadata retry state and native ownership'),
+    if (poolAssociation != null) ...[
+      _file(path('credential_pools/$poolAssociation.json*'),
+          'same-credential last-known cache association'),
+      _fileWrite(path('credential_pools/$poolAssociation.json*'),
+          'bounded opaque credential-to-pool association'),
+    ],
   ];
 }
 

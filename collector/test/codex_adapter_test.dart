@@ -11,6 +11,7 @@ import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/parsing.dart';
 import 'package:quotabot_collector/provider_adapters.dart';
+import 'package:quotabot_collector/provider_read_gate.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
@@ -49,6 +50,100 @@ void main() {
 
   String hostIdentity(String accountId) =>
       opaqueCredentialIdentity(CodexAdapter.id, 'account-id:$accountId');
+
+  group('configured Codex home', () {
+    late Map<String, String> environment;
+
+    setUp(() {
+      environment = {
+        'USERPROFILE': '${temp.path}/profile',
+        'HOME': '${temp.path}/other-profile',
+        'CODEX_HOME': '${temp.path}/configured codex',
+      };
+    });
+
+    File writeHostAt(File file, String account) {
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync(jsonEncode({
+        'tokens': {'access_token': 'synthetic-token', 'account_id': account},
+      }));
+      return file;
+    }
+
+    test('collection and current identity select CODEX_HOME over legacy home',
+        () async {
+      final old = writeHostAt(
+        File('${environment[Platform.isWindows ? 'USERPROFILE' : 'HOME']}'
+            '/.codex/auth.json'),
+        'old-account',
+      );
+      final current = writeHostAt(
+        File('${environment['CODEX_HOME']}/auth.json'),
+        'current-account',
+      );
+      final before = [old.readAsStringSync(), current.readAsStringSync()];
+      var requests = 0;
+      final quota = await CodexAdapter(
+        environment: environment,
+        grantCredential: () async => null,
+        client: MockClient((request) async {
+          requests++;
+          expect(request.headers['chatgpt-account-id'], 'current-account');
+          return http.Response(
+              jsonEncode(_wham(primary: 10, secondary: 20)), 200);
+        }),
+      ).collect();
+
+      expect(requests, 1);
+      expect(quota.account, hostIdentity('current-account'));
+      expect(CodexAdapter.currentCredentialIdentities(environment: environment),
+          {quota.account});
+      expect([old.readAsStringSync(), current.readAsStringSync()], before);
+    });
+
+    test('missing configured file never revives another home account',
+        () async {
+      writeHostAt(
+        File('${environment[Platform.isWindows ? 'USERPROFILE' : 'HOME']}'
+            '/.codex/auth.json'),
+        'old-account',
+      );
+      var requests = 0;
+      final quota = await CodexAdapter(
+        environment: environment,
+        grantCredential: () async => null,
+        client: MockClient((_) async {
+          requests++;
+          throw StateError('no configured host credential');
+        }),
+      ).collect();
+
+      expect(quota.ok, isFalse);
+      expect(requests, 0);
+      expect(CodexAdapter.currentCredentialIdentities(environment: environment),
+          isEmpty);
+    });
+
+    test('absent or blank configuration retains the platform home default', () {
+      for (final value in [null, '', '   ']) {
+        final env = Map<String, String>.from(environment)..remove('CODEX_HOME');
+        if (value != null) env['CODEX_HOME'] = value;
+        expect(codexHostAuthFile(environment: env).path,
+            '${env[Platform.isWindows ? 'USERPROFILE' : 'HOME']}/.codex/auth.json');
+        for (final os in ['windows', 'macos', 'linux']) {
+          final preferred = os == 'windows' ? 'USERPROFILE' : 'HOME';
+          final fallback = os == 'windows' ? 'HOME' : 'USERPROFILE';
+          expect(codexHostAuthFile(environment: env, operatingSystem: os).path,
+              '${env[preferred]}/.codex/auth.json');
+          final onlyFallback = Map<String, String>.from(env)..remove(preferred);
+          expect(
+              codexHostAuthFile(environment: onlyFallback, operatingSystem: os)
+                  .path,
+              '${env[fallback]}/.codex/auth.json');
+        }
+      }
+    });
+  });
 
   test('disconnect blocks host and grant credentials before network work',
       () async {
@@ -280,6 +375,12 @@ void main() {
     final stopwatch = Stopwatch()..start();
     final quotas = await CodexAdapter(
       authFile: authFile,
+      // This assertion measures grant coalescing, not platform ACL commands.
+      readGate: ProviderReadGate(
+        directory: Directory('${temp.path}/read-gates'),
+        hardenDirectory: (_) {},
+        hardenFile: (_) {},
+      ),
       grantCredential: () => pending.future,
       grantResolutionDeadline: const Duration(milliseconds: 20),
       client: MockClient((request) async {

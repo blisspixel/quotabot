@@ -5,26 +5,32 @@ useDefault = true
 
 [[allowlists]]
 description = "Google installed-app OAuth clients are public and non-confidential."
+targetRules = ["generic-api-key"]
 condition = "AND"
+regexTarget = "line"
 paths = [
-  '''collector/lib/auth/google_auth\.dart''',
-  '''collector/lib/adapters/antigravity\.dart''',
+  '''(?:^|/)collector/lib/auth/google_auth\.dart$''',
+  '''(?:^|/)collector/lib/adapters/antigravity\.dart$''',
 ]
 regexes = [
-  '''_publicClientSecret\s*=\s*'GOCSPX-[^']+';''',
-  '''_geminiClientSecret\s*=\s*'GOCSPX-[^']+';''',
+  '''^[ \t]*static[ \t]+const[ \t]+_publicClientSecret[ \t]*=[ \t]*'GOCSPX-[^'\r\n]+';[ \t]*$''',
+  '''^[ \t]*static[ \t]+const[ \t]+_geminiClientSecret[ \t]*=[ \t]*'GOCSPX-[^'\r\n]+';[ \t]*$''',
 ]
 
 [[allowlists]]
 description = """Synthetic bearer-token fixture for the MCP transport tests. \
 The value is a fixed sequential-hex placeholder that exercises the token length \
 check; it authenticates nothing and is never read from a credential store."""
+targetRules = ["generic-api-key"]
 condition = "AND"
+regexTarget = "secret"
 paths = [
-  '''collector/test/cli_mcp_test\.dart''',
-  '''collector/test/mcp_server_cli_test\.dart''',
-  '''collector/test/mcp_http_test\.dart''',
+  '''(?:^|/)collector/test/cli_mcp_test\.dart$''',
+  '''(?:^|/)collector/test/mcp_server_cli_test\.dart$''',
+  '''(?:^|/)collector/test/mcp_http_test\.dart$''',
+  '''(?:^|/)collector/test/mcp_subscription_timer_test\.dart$''',
+  '''(?:^|/)collector/test/fixtures/mcp_subscription_scenario\.dart$''',
 ]
 regexes = [
-  '''0123456789abcdef0123456789abcdef''',
+  '''^0123456789abcdef0123456789abcdef$''',
 ]

@@ -10,10 +10,10 @@ and recommends where to send the next request. It also shows supported local
 models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
-> **Current stable:** 0.11.1. quotabot remains under active 0.x development.
-> **Next:** make local-model choices easier to inspect, improve everyday native
-> behavior on Windows, macOS, and Linux, and add tested advisory setup for named
-> agent harnesses. Product development continues while release signing is
+> **Current stable:** 0.11.2. quotabot remains under active 0.x development.
+> **Next:** finish credential-refresh lifecycle recovery, polish the desktop's
+> shared controls and native identity, and verify more named harness workflows.
+> Product development continues while release signing is
 > provisioned. See [roadmap Next](ROADMAP.md#next) and the
 > [documentation index](docs/README.md).
 
@@ -197,19 +197,19 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Stable 0.11.1 keeps fresh quota visible while advisory analytics run separately
-and excludes upstream-configured models from local/quota advice. It retains the
-inspectable model view, hardware evidence, and packaged quota advice for agent
-harnesses and Agent Plugins introduced in 0.11.0. The release CLI starts the MCP
-server directly with `quotabot mcp`. The preceding 0.11.0
-[release run](https://github.com/blisspixel/quotabot/actions/runs/33956459889)
+Stable 0.11.2 adds automatic reset confirmation, provider-specific retry
+coordination, explicit blocked-account evidence, and current Grok CLI billing
+support. Fresh quota remains independent of advisory analytics. The desktop
+retains inspectable local models and hardware evidence; agent harnesses and
+Agent Plugins use the same quota advice through `quotabot mcp`.
+The preceding 0.11.1
+[release run](https://github.com/blisspixel/quotabot/actions/runs/33977671639)
 published an immutable 14-asset set, and its unpinned GitHub Latest
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33959135481)
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33980712404)
 passed clean install, prior-stable upgrade, source setup, stable-channel
 resolution, and desktop-run checks on Windows, macOS, and Ubuntu. A live Windows
-installation used `quotabot update` to move from 0.10.3 to 0.11.0, installed the
-matching desktop, verified both payloads against fresh release downloads, and
-then reported no newer stable release.
+installation used `quotabot update` to move from 0.11.0 to 0.11.1 and installed
+the matching desktop, with both payloads verified against fresh downloads.
 The release uses GitHub's dedicated Latest endpoint for stable discovery and
 keeps preview discovery within smaller bounded pages. Every release
 repeats three-platform quality, native build, archive, checksum, provenance,
