@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/demo.dart' as demo;
 import 'package:test/test.dart';
 
 import '../bin/collect.dart' as cli;
@@ -222,10 +224,8 @@ void main() {
     final cache = Directory('${temp.path}/quotabot/cache')
       ..createSync(recursive: true);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final nextHour =
-        now - (now % Duration.secondsPerHour) + Duration.secondsPerHour;
     File('${cache.path}/buckets_codex.json').writeAsStringSync(jsonEncode([
-      _bucketSamples(nextHour - Duration.secondsPerDay * 7, 92, 2),
+      _scheduleBucket(now).toJson(),
     ]));
     final result = await runCli(['stats', '--json']);
 
@@ -236,6 +236,34 @@ void main() {
     final hint = codex['schedule_hint'] as Map<String, dynamic>;
     expect(hint['summary'], contains('before reset'));
     expect(hint['window'], isA<Map<String, dynamic>>());
+    expect(hint['scheduled_at'], lessThan(hint['resets_at'] as int));
+    expect(hint['wait_seconds'], greaterThan(0));
+  });
+
+  test('schedule fixture stays before reset when CLI startup crosses an hour',
+      () {
+    final fixtureNow =
+        DateTime.utc(2026, 9, 5, 8, 59, 59).millisecondsSinceEpoch ~/ 1000;
+    final buckets = [_scheduleBucket(fixtureNow)];
+    for (final delay in [0, 3]) {
+      final cliNow = fixtureNow + delay;
+      final codex = demo.demoProviders(cliNow).firstWhere(
+            (quota) => quota.provider == 'codex',
+          );
+      final reset = bindingWindow(codex, cliNow)!.resetsAt!;
+      final windows = Insights.from(buckets, cliNow).bestTimeWindows;
+      final hint = weekHourScheduleHint(windows, cliNow, resetsAt: reset);
+
+      expect(hint, isNotNull,
+          reason: 'CLI starts $delay seconds after fixture');
+      expect(hint!.scheduledAt, lessThan(reset));
+      expect(hint.waitSeconds, greaterThan(0));
+      expect(
+        weekHourScheduleHint(windows, cliNow, resetsAt: hint.scheduledAt),
+        isNull,
+        reason: 'A slot starting exactly at reset must remain excluded',
+      );
+    }
   });
 
   test('stats json includes explicit tier fit analysis', () async {
@@ -295,17 +323,15 @@ Map<String, dynamic> _bucket(int start, double headroom) => {
       'h': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
     };
 
-Map<String, dynamic> _bucketSamples(int start, double headroom, int samples) =>
-    {
-      's': start - (start % Duration.secondsPerHour),
-      'n': samples,
-      'sum': headroom * samples,
-      'sq': headroom * headroom * samples,
-      'min': headroom,
-      'max': headroom,
-      'x': 0,
-      'h': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, samples, 0, 0, 0, 0, 0],
-    };
+HeadroomBucket _scheduleBucket(int now) {
+  // Leave a full hour for CLI startup even when fixture creation is just
+  // before the next hour. A slot that has already started rolls to next week.
+  final scheduledAt =
+      now - (now % Duration.secondsPerHour) + 2 * Duration.secondsPerHour;
+  return HeadroomBucket(start: scheduledAt - 7 * Duration.secondsPerDay)
+    ..add(92)
+    ..add(92);
+}
 
 Map<String, dynamic> _bucketSamplesAt(
   int start,

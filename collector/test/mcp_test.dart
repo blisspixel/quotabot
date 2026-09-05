@@ -644,6 +644,68 @@ void main() {
       await server.close();
     });
 
+    test('upstream model evidence survives real MCP output and budget gates',
+        () async {
+      await connect([
+        ProviderQuota(
+          provider: 'ollama',
+          displayName: 'Ollama',
+          account: 'fixture',
+          asOf: _now,
+          kind: ProviderQuotaKind.local,
+          active: true,
+          models: const [
+            ModelInfo(
+                id: 'declared-alias',
+                local: true,
+                loaded: true,
+                upstreamRouting: UpstreamRouting.declared),
+            ModelInfo(
+                id: 'unresolved-alias',
+                local: true,
+                loaded: true,
+                upstreamRouting: UpstreamRouting.unresolved),
+          ],
+        )
+      ]);
+      final inspected = await client.callTool(const CallToolRequest(
+          name: 'list_models', arguments: {'budget': 'any'}));
+      expect(inspected.isError, isFalse);
+      final models = inspected.structuredContent!['models'] as List;
+      expect(models, hasLength(2));
+      final declared =
+          models.singleWhere((model) => model['id'] == 'declared-alias') as Map;
+      final unresolved = models
+          .singleWhere((model) => model['id'] == 'unresolved-alias') as Map;
+      expect(declared['upstream_routing'], 'declared');
+      expect(declared['available'], isTrue);
+      expect(unresolved['upstream_routing'], 'unresolved');
+      expect(unresolved['available'], isFalse);
+      for (final model in [declared, unresolved]) {
+        expect(model, isNot(contains('local_readiness')));
+        expect(model, isNot(contains('hardware_fit')));
+        expect(model, isNot(contains('headroom_percent')));
+        expect(model['quota_backed'], isFalse);
+      }
+      for (final budget in ['local', 'quota']) {
+        final filtered = await client.callTool(CallToolRequest(
+            name: 'list_models', arguments: {'budget': budget}));
+        expect(filtered.isError, isFalse);
+        expect(filtered.structuredContent!['models'], isEmpty);
+      }
+      final routed = await client.callTool(const CallToolRequest(
+          name: 'suggest_provider', arguments: {'local_first': true}));
+      expect(routed.isError, isFalse);
+      expect(routed.structuredContent!['recommended'], isNull);
+      expect((routed.structuredContent!['fallback'] as Map)['kind'],
+          'passthrough');
+      final modelSuggestion = await client.callTool(const CallToolRequest(
+          name: 'suggest_model', arguments: {'budget': 'any'}));
+      expect(modelSuggestion.isError, isFalse);
+      expect(modelSuggestion.structuredContent!['reason'],
+          contains('execution location and cost are unverified'));
+    });
+
     test('tool annotations reflect live collection and local writes', () async {
       await connect(_fixture());
       final tools = await client.listTools();
@@ -751,8 +813,9 @@ void main() {
         byName['list_models']!.description,
         allOf(
           contains('providers represented in the current registry'),
-          contains('cloud-offloaded local model'),
-          contains('excluded'),
+          contains('excludes cloud-offloaded models'),
+          contains('declared or unresolved upstream routing'),
+          contains('does not prove execution location'),
           isNot(contains('every model')),
         ),
       );

@@ -31,7 +31,7 @@ reads and writes helps scope any report:
   provenance. Repository rules block updates and deletion of `v*` tags, and
   GitHub release immutability locks an audited release's tag and assets when the
   draft is published.
-  The current audited release is [v0.11.0](https://github.com/blisspixel/quotabot/releases/tag/v0.11.0).
+  The current audited release is [v0.11.1](https://github.com/blisspixel/quotabot/releases/tag/v0.11.1).
   Its release workflow enforces the exact immutable 14-asset contract, and its
   unpinned three-OS GitHub Latest smoke covers exact-tag installation, upgrade
   from the actual prior stable, stable-channel resolution, and the canonical

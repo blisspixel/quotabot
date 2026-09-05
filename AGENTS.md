@@ -41,10 +41,12 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 
 ## Project status and execution order
 
-The current verified stable release is 0.11.0. It adds per-model desktop details,
-Ollama reasoning evidence, conservative Windows GPU fallback metadata, and
-versioned harness and Agent Plugins setup through the release CLI's `mcp`
-command. Local-runtime evidence leads with loaded model, running context, GPU
+The current verified stable release is 0.11.1. Fresh quota publishes before
+advisory analytics complete, and upstream-configured models are excluded from
+local/quota advice. It retains per-model desktop details, Ollama reasoning,
+conservative Windows GPU evidence, and versioned harness and Agent Plugins
+setup through the release CLI's `mcp` command. Local-runtime evidence leads with
+loaded model, running context, GPU
 residency, and separately labeled host pressure. The
 shipped routing policies are `balanced`,
 `local_first`, and opt-in `quota_stretch`. The bounded provider-ID cache
@@ -121,7 +123,7 @@ for that surface.
     Listing defaults to `budget: "any"` for inspection.
     `budget: "quota"` means measured built-in quota plans plus local runtimes;
     it excludes self-reported manual quota and entries catalogued as paid API.
-    Local-runtime model entries include `local_readiness` (`loaded` or `cold`);
+    Eligible local-runtime model entries include `local_readiness` (`loaded` or `cold`);
     on-device entries also carry an advisory metadata-only `hardware_fit`
     (`loaded`, `comfortable`, `tight`, `constrained`, or `unknown`) with the
     selected RAM/GPU capacity evidence. Prefer loaded, then comfortably fitting
@@ -129,6 +131,12 @@ for that surface.
     through Ollama (`-cloud`) or Lemonade (`recipe: "cloud"`) carry
     `cloud_offloaded: true` and are excluded from local and free budgets, so they
     are never evidence of local-only or free execution.
+    Ollama upstream aliases carry `upstream_routing: "declared"` or
+    `"unresolved"`, independently of public-cloud or paid classification.
+    Both states exclude local/quota budgets, local readiness, host fit, and
+    provider fallback. Declared upstreams remain inspectable under `any` with
+    execution location and cost unverified; unresolved entries are unavailable
+    under every budget. Missing upstream evidence is not on-device proof.
   - `suggest_model` - one concrete model for a task profile (same filter as
     `list_models`): available first, then local-runtime readiness, provider tier,
     and headroom. It defaults to `budget: "quota"`; pass `budget: "any"`

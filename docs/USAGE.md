@@ -8,6 +8,18 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
 - **Header buttons** (left to right): refresh now, open Quota Analytics
   (bar-chart icon), collapse, Settings, setup and help, and
   close. Hover for a tooltip on each.
+- **Refresh:** completed quota reads update the cards and release the Refresh
+  button before recent-usage analysis finishes. Repeated clicks during collection
+  share that collection. The checked time records the completed attempt; each
+  provider's capture age still identifies how old its evidence is. A failed
+  read keeps last-known quota visibly stale and unavailable for advice.
+  While matching analytics are pending or unavailable, the dashboard says so
+  and explains that recent-usage and connection-history adjustments are absent.
+  Active reservations still reduce headroom. Older analytics cannot replace a
+  newer snapshot or restore an earlier profile selection.
+  Low-quota notifications and configured webhooks still fire immediately;
+  they omit the optional alternative account until matching analytics are ready.
+  Completing those checks updates the in-app advice without repeating the alert.
 - **Move it:** drag the header bar or the cards area (the control buttons on the
   right are excluded). The expanded window measures its rendered cards and
   grows without clipping them while staying inside the active display. The body
@@ -78,8 +90,9 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   card opens every model in that card's displayed snapshot. It shows loaded or
   cold state, the reported context, quantization, capabilities, model size,
   GPU residency, and advisory memory fit when the evidence supports them.
-  Unknown values remain unknown. Stale, unavailable, embedding, and explicitly
-  cloud-offloaded entries explain their routing exclusions. The computer's
+  Unknown values remain unknown. Stale, unavailable, embedding, cloud-offloaded,
+  and upstream-configured entries explain their routing exclusions. Upstream
+  models show no advisory host fit or promise of free local execution. The computer's
   memory and GPU activity appear once, without attributing shared load to a
   model. Opening this view does not refresh the runtime or load a model.
   Inventory alone cannot certify on-device execution, and reported context can
@@ -810,6 +823,12 @@ cloud-provider routes with `recipe: "cloud"`. quotabot flags both forms
 `cloud_offloaded` and excludes them from `--budget=local` and free budgets. They
 stay listed only under `--budget=any` and never prove local-only or free
 execution.
+An Ollama alias can also declare an upstream without a `-cloud` suffix.
+`upstream_routing: "declared"` identifies that configuration without claiming
+the destination is public cloud, paid, or free. It is inspectable under `any`
+but excluded from local and quota advice. An unresolved upstream declaration
+remains unavailable for every budget. Its reported loaded state does not prove
+local readiness, and the model detail explains why host fit is unavailable.
 For a task-profiled `suggest`, add `--use-expiring-quota` when you explicitly
 want soon-resetting included quota to beat a local model. The signal is bounded:
 it uses only local burn analytics, only measured quota-backed providers, and only

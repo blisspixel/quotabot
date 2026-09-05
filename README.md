@@ -10,7 +10,7 @@ and recommends where to send the next request. It also shows supported local
 models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
-> **Current stable:** 0.11.0. quotabot remains under active 0.x development.
+> **Current stable:** 0.11.1. quotabot remains under active 0.x development.
 > **Next:** make local-model choices easier to inspect, improve everyday native
 > behavior on Windows, macOS, and Linux, and add tested advisory setup for named
 > agent harnesses. Product development continues while release signing is
@@ -27,17 +27,40 @@ is the complete workflow; the desktop app is optional.
 
 ## What it looks like
 
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/gallery/quota.png"><img src="docs/gallery/quota.png" alt="Quota overview with remaining five-hour and weekly allowances" width="420"></a><br>
+      <strong>Quota at a glance</strong><br>
+      Remaining allowance and the next available account.
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/gallery/local-models.png"><img src="docs/gallery/local-models.png" alt="Local model details with loaded state, context, capabilities and memory evidence" width="420"></a><br>
+      <strong>Local model detail</strong><br>
+      Inspect what is loaded and what the runtime reports.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/gallery/analytics.png"><img src="docs/gallery/analytics.png" alt="Ninety-day quota distributions and reliability trends" width="420"></a><br>
+      <strong>Usage over time</strong><br>
+      Compare headroom, reliability and changing demand.
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/gallery/terminal.png"><img src="docs/gallery/terminal.png" alt="quotabot top terminal view with quota bars and a provider recommendation" width="420"></a><br>
+      <strong>The terminal dashboard</strong><br>
+      Keep quota advice beside your command-line work.
+    </td>
+  </tr>
+</table>
+
 <p align="center">
-  <a href="docs/screenshot-top.png"><img src="docs/screenshot-top.png" alt="quotabot top CLI terminal dashboard using synthetic demo quota" width="760"></a>
+  <a href="docs/gallery/mini.png"><img src="docs/gallery/mini.png" alt="Wide mini view with the suggested account and provider status indicators" width="860"></a><br>
+  <strong>Mini view</strong> - a quiet status strip alongside your work.
 </p>
 
-<p align="center"><sub>The standalone <code>quotabot top</code> CLI, captured from the real terminal dashboard renderer with built-in synthetic demo data.</sub></p>
-
-<p align="center">
-  <a href="docs/quotabot-demo.gif"><img src="docs/quotabot-demo.gif" alt="quotabot CLI and optional desktop views using synthetic demo quota" width="520"></a>
-</p>
-
-<p align="center"><sub>Five generated demo views at 3 seconds per frame. <a href="docs/screenshot-widget.png">Desktop still</a> | <a href="docs/screenshot-analytics.png">Analytics still</a></sub></p>
+Synthetic demo data, rendered with the real app widgets and terminal renderer.
+Click any image for the full size. [Reproduce the gallery](docs/gallery/README.md).
 
 ## Quick start
 
@@ -174,21 +197,22 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Stable 0.11.0 adds an inspectable local-model view, truthful Windows GPU fallback
-evidence, Ollama reasoning metadata, and packaged quota advice for agent
-harnesses and Agent Plugins. The release CLI now starts the MCP server directly
-with `quotabot mcp`. The preceding audited 0.10.2
-[release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
+Stable 0.11.1 keeps fresh quota visible while advisory analytics run separately
+and excludes upstream-configured models from local/quota advice. It retains the
+inspectable model view, hardware evidence, and packaged quota advice for agent
+harnesses and Agent Plugins introduced in 0.11.0. The release CLI starts the MCP
+server directly with `quotabot mcp`. The preceding 0.11.0
+[release run](https://github.com/blisspixel/quotabot/actions/runs/33956459889)
 published an immutable 14-asset set, and its unpinned GitHub Latest
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33959135481)
 passed clean install, prior-stable upgrade, source setup, stable-channel
 resolution, and desktop-run checks on Windows, macOS, and Ubuntu. A live Windows
-installation also updated from 0.10.2-rc.1 to 0.10.2 and then reported no newer
-stable release. Every release repeats the same three-platform quality,
-packaging, provenance, and install gates.
+installation used `quotabot update` to move from 0.10.3 to 0.11.0, installed the
+matching desktop, verified both payloads against fresh release downloads, and
+then reported no newer stable release.
 The release uses GitHub's dedicated Latest endpoint for stable discovery and
 keeps preview discovery within smaller bounded pages. Every release
-repeats native build, archive, checksum, provenance,
+repeats three-platform quality, native build, archive, checksum, provenance,
 fresh-download, install, upgrade, source-setup, and desktop-run checks. Current
 Windows and macOS artifacts remain unsigned transition artifacts, so the
 0.x line must repeat that evidence with platform-signed artifacts

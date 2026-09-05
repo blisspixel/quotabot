@@ -1,5 +1,6 @@
 import 'package:quotabot_collector/adapters/lmstudio.dart';
 import 'package:quotabot_collector/adapters/ollama.dart';
+import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
@@ -379,6 +380,7 @@ void main() {
             expiresAt: null,
             context: null,
             cloud: false,
+            upstreamRouting: UpstreamRouting.notReported,
             tools: null,
             vision: null,
             reasoning: null,
@@ -405,6 +407,7 @@ void main() {
           expiresAt: null,
           context: null,
           cloud: false,
+          upstreamRouting: UpstreamRouting.notReported,
           tools: null,
           vision: null,
           reasoning: null,
@@ -420,6 +423,7 @@ void main() {
           expiresAt: null,
           context: null,
           cloud: false,
+          upstreamRouting: UpstreamRouting.notReported,
           tools: null,
           vision: null,
           reasoning: null,
@@ -437,6 +441,7 @@ void main() {
           expiresAt: now + 1800,
           context: 8192,
           cloud: false,
+          upstreamRouting: UpstreamRouting.notReported,
           tools: null,
           vision: null,
           reasoning: null,
@@ -477,6 +482,7 @@ void main() {
             expiresAt: null,
             context: null,
             cloud: true,
+            upstreamRouting: UpstreamRouting.notReported,
             tools: null,
             vision: null,
             reasoning: null,
@@ -492,6 +498,7 @@ void main() {
             expiresAt: null,
             context: null,
             cloud: false,
+            upstreamRouting: UpstreamRouting.notReported,
             tools: null,
             vision: null,
             reasoning: null,

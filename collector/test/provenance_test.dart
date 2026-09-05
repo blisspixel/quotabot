@@ -10,6 +10,7 @@ ProviderQuota _q(
   bool perMachine = false,
   String? source,
   List<QuotaWindow> windows = const [],
+  List<ModelInfo> models = const [],
 }) =>
     ProviderQuota(
       provider: provider,
@@ -22,20 +23,25 @@ ProviderQuota _q(
       perMachine: perMachine,
       source: source,
       windows: windows,
+      models: models,
     );
 
 final _win = [QuotaWindow(label: 'weekly', usedPercent: 20)];
 
 void main() {
   group('providerSpendClass', () {
-    test('a local runtime reads loaded when active, cold when idle', () {
+    test('local readiness comes from eligible represented models', () {
       expect(
-        providerSpendClass(
-            _q('ollama', kind: ProviderQuotaKind.local, active: true)),
+        providerSpendClass(_q('ollama', kind: ProviderQuotaKind.local, models: [
+          const ModelInfo(id: 'resident', loaded: true),
+        ])),
         'loaded',
       );
       expect(
-        providerSpendClass(_q('ollama', kind: ProviderQuotaKind.local)),
+        providerSpendClass(_q('ollama',
+            kind: ProviderQuotaKind.local,
+            active: true,
+            models: [const ModelInfo(id: 'cold')])),
         'cold',
       );
     });

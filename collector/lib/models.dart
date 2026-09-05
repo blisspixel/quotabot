@@ -617,6 +617,16 @@ class ProviderQuota {
   /// remote subscription.
   bool get isLocal => kind.isLocal;
 
+  /// Legacy runtime generation readiness after known execution and capability
+  /// vetoes. A non-null value is not proof of physical on-device execution.
+  /// Provider-wide activity cannot substitute for an eligible represented model.
+  String? get localGenerationReadiness {
+    if (!isLocal) return null;
+    final eligible = models.where((model) => !model.hasLocalGenerationVeto);
+    if (eligible.isEmpty) return null;
+    return eligible.any((model) => model.loaded) ? 'loaded' : 'cold';
+  }
+
   /// True when this is a self-reported manual quota entry, not measured data.
   bool get isManual => source == providerQuotaManualSource;
 
@@ -1163,6 +1173,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
           // dropping this would reset a cloud-offloaded model to on-device,
           // letting a remotely executed daemon route satisfy local/free budgets.
           cloudOffloaded: m.cloudOffloaded,
+          upstreamRouting: m.upstreamRouting,
         ),
     ],
     localHardware: q.localHardware == null
@@ -1249,6 +1260,42 @@ class BurnStat {
   const BurnStat({this.perHour, this.sePerHour, this.samples = 0});
 }
 
+/// Upstream configuration evidence, never an inference observation or a claim
+/// about physical execution location, public cloud, or price. Missing evidence
+/// preserves legacy behavior; it does not establish on-device execution.
+enum UpstreamRouting {
+  notReported('not_reported'),
+  declared('declared'),
+  unresolved('unresolved');
+
+  const UpstreamRouting(this.wireName);
+
+  final String wireName;
+
+  static const wireValues = ['not_reported', 'declared', 'unresolved'];
+
+  /// Present but unrecognized cache evidence cannot remove an execution veto.
+  static UpstreamRouting fromWire(Object? value) => switch (value) {
+        'not_reported' => notReported,
+        'declared' => declared,
+        _ => unresolved,
+      };
+
+  UpstreamRouting combine(UpstreamRouting other) {
+    if (this == unresolved || other == unresolved) return unresolved;
+    if (this == declared || other == declared) return declared;
+    return notReported;
+  }
+}
+
+/// A negative local-execution check shared by raw and normalized model records.
+/// Its absence is not positive evidence that execution stays on this device.
+bool localExecutionVeto({
+  required bool cloudOffloaded,
+  required UpstreamRouting upstreamRouting,
+}) =>
+    cloudOffloaded || upstreamRouting != UpstreamRouting.notReported;
+
 /// One normalized model candidate represented by the current provider snapshot
 /// and catalog. Capability fields are hints, null when unknown; local-only fields
 /// ([loaded], [sizeBytes], [vramBytes], [quant]) are null/false for cloud models.
@@ -1297,10 +1344,22 @@ class ModelInfo {
   /// True when a model reached through a local runtime actually executes in the
   /// provider's cloud rather than on this machine, such as an Ollama `-cloud`
   /// model or Lemonade cloud-provider route. It is still [local] in the sense of
-  /// being reached via the local daemon, but it is not on-device and not free,
-  /// so budget policies that promise local-only or free execution must exclude
-  /// it.
+  /// being reached via the local daemon. It cannot establish on-device or free
+  /// capacity, so local and quota budget policies exclude it.
   final bool cloudOffloaded;
+
+  /// Bounded upstream configuration evidence. Neither target URLs nor upstream
+  /// model identifiers are retained. Private upstreams are not labelled paid or
+  /// public cloud. Unresolved declarations exclude local/free capacity too.
+  final UpstreamRouting upstreamRouting;
+
+  bool get hasLocalExecutionVeto => localExecutionVeto(
+        cloudOffloaded: cloudOffloaded,
+        upstreamRouting: upstreamRouting,
+      );
+
+  /// Generation routing also excludes explicitly declared embedding models.
+  bool get hasLocalGenerationVeto => hasLocalExecutionVeto || embedding == true;
 
   /// Local only: currently loaded into memory.
   final bool loaded;
@@ -1328,6 +1387,7 @@ class ModelInfo {
     this.quotaIncludedUntil,
     this.local = false,
     this.cloudOffloaded = false,
+    this.upstreamRouting = UpstreamRouting.notReported,
     this.loaded = false,
     this.sizeBytes,
     this.vramBytes,
@@ -1348,6 +1408,8 @@ class ModelInfo {
           'quota_included_until': quotaIncludedUntil,
         if (local) 'local': local,
         if (cloudOffloaded) 'cloud_offloaded': cloudOffloaded,
+        if (upstreamRouting != UpstreamRouting.notReported)
+          'upstream_routing': upstreamRouting.wireName,
         if (loaded) 'loaded': loaded,
         if (sizeBytes != null) 'size_bytes': sizeBytes,
         if (vramBytes != null) 'vram_bytes': vramBytes,
@@ -1367,6 +1429,9 @@ class ModelInfo {
         quotaIncludedUntil: (j['quota_included_until'] as num?)?.toInt(),
         local: j['local'] as bool? ?? false,
         cloudOffloaded: j['cloud_offloaded'] as bool? ?? false,
+        upstreamRouting: j.containsKey('upstream_routing')
+            ? UpstreamRouting.fromWire(j['upstream_routing'])
+            : UpstreamRouting.notReported,
         loaded: j['loaded'] as bool? ?? false,
         sizeBytes: (j['size_bytes'] as num?)?.toInt(),
         vramBytes: (j['vram_bytes'] as num?)?.toInt(),

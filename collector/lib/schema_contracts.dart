@@ -282,6 +282,10 @@ const quotabotV1JsonSchema = <String, Object?>{
         'quota_included_until': {'type': 'integer', 'minimum': 0},
         'local': {'type': 'boolean'},
         'cloud_offloaded': {'type': 'boolean'},
+        'upstream_routing': {
+          'type': 'string',
+          'enum': UpstreamRouting.wireValues,
+        },
         'loaded': {'type': 'boolean'},
         'size_bytes': {'type': 'integer', 'minimum': 0},
         'vram_bytes': {'type': 'integer', 'minimum': 0},
@@ -894,6 +898,9 @@ void _validateModel(
       required: false);
   _checkBool(model, 'local', path, errors, required: false);
   _checkBool(model, 'cloud_offloaded', path, errors, required: false);
+  _checkStringEnum(model, 'upstream_routing', path,
+      UpstreamRouting.wireValues.toSet(), errors,
+      required: model.containsKey('upstream_routing'));
   _checkBool(model, 'loaded', path, errors, required: false);
   _checkNonNegativeInt(model, 'size_bytes', path, errors, required: false);
   _checkNonNegativeInt(model, 'vram_bytes', path, errors, required: false);

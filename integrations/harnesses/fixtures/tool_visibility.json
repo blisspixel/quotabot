@@ -1,0 +1,60 @@
+{
+  "schema": "quotabot.harness_tool_visibility.v1",
+  "reviewed_on": "2026-09-05",
+  "evidence": "source_derived_exact_name_contract",
+  "native_tools": [
+    "list_quotas",
+    "suggest_provider",
+    "decide_now",
+    "reserve_provider",
+    "release_provider",
+    "provider_with_most_headroom",
+    "check_provider_availability",
+    "list_models",
+    "suggest_model"
+  ],
+  "expected_advisory_tools": [
+    "decide_now",
+    "list_quotas",
+    "suggest_provider",
+    "check_provider_availability",
+    "list_models",
+    "suggest_model"
+  ],
+  "clients": {
+    "openclaw": {
+      "version": "2026.9.1",
+      "commit": "ad6fe23aecb9b833d68139b0ddc9f239b894d2f1",
+      "server_path": ["mcp", "servers", "quotabot"],
+      "filter_key": "toolFilter",
+      "empty_include_means_all": true,
+      "utilities_share_filter": true,
+      "utility_tools": {
+        "resources": ["resources_list", "resources_read"],
+        "prompts": ["prompts_list", "prompts_get"]
+      },
+      "sources": [
+        "https://github.com/openclaw/openclaw/blob/ad6fe23aecb9b833d68139b0ddc9f239b894d2f1/src/agents/agent-bundle-mcp-runtime.ts",
+        "https://github.com/openclaw/openclaw/blob/ad6fe23aecb9b833d68139b0ddc9f239b894d2f1/src/config/mcp-config-normalize.ts",
+        "https://github.com/openclaw/openclaw/blob/ad6fe23aecb9b833d68139b0ddc9f239b894d2f1/src/agents/bundle-mcp-config.ts",
+        "https://github.com/openclaw/openclaw/blob/ad6fe23aecb9b833d68139b0ddc9f239b894d2f1/src/agents/mcp-tool-filter.ts",
+        "https://github.com/openclaw/openclaw/blob/ad6fe23aecb9b833d68139b0ddc9f239b894d2f1/src/agents/agent-bundle-mcp-materialize.ts"
+      ]
+    },
+    "hermes": {
+      "version": "2026.8.31",
+      "commit": "29112bef099274229cadff79cdff7bf7b99c4b77",
+      "server_path": ["mcp_servers", "quotabot"],
+      "filter_key": "tools",
+      "empty_include_means_all": false,
+      "utilities_share_filter": false,
+      "utility_tools": {
+        "resources": ["list_resources", "read_resource"],
+        "prompts": ["list_prompts", "get_prompt"]
+      },
+      "sources": [
+        "https://github.com/NousResearch/hermes-agent/blob/29112bef099274229cadff79cdff7bf7b99c4b77/tools/mcp_tool.py"
+      ]
+    }
+  }
+}

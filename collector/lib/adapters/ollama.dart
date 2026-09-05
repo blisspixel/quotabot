@@ -25,6 +25,7 @@ typedef LocalModel = ({
   // True when the runtime explicitly identifies cloud execution. This is
   // separate from the loopback origin of the runtime's metadata endpoint.
   bool cloud,
+  UpstreamRouting upstreamRouting,
   // Capabilities the runtime itself declares for this model. Null means the
   // runtime said nothing, which fails a capability requirement rather than
   // assuming the model has the capability. A runtime that lists only model
@@ -50,6 +51,20 @@ typedef DeclaredModelCapabilities = ({
   int? context,
 });
 
+class _OllamaModelMetadata {
+  final DeclaredModelCapabilities? capabilities;
+  final UpstreamRouting upstreamRouting;
+
+  const _OllamaModelMetadata(this.capabilities, this.upstreamRouting);
+}
+
+extension LocalModelExecutionEvidence on LocalModel {
+  bool get hasLocalExecutionVeto => localExecutionVeto(
+        cloudOffloaded: cloud,
+        upstreamRouting: upstreamRouting,
+      );
+}
+
 /// Detects a local Ollama runtime and reports what it has, not a quota.
 ///
 /// Local runtimes have no remaining-budget to spend, so a quota bar would be
@@ -57,12 +72,12 @@ typedef DeclaredModelCapabilities = ({
 /// and total size on disk, which model is loaded (with size, quantization, and
 /// GPU residency), and whether anything is loaded. Loaded residency does not
 /// prove that a model is currently computing. It carries
-/// no quota windows; routing treats it as an always-available fallback while
-/// the daemon is running.
+/// no quota windows; generation fallback excludes known upstream, cloud, and
+/// embedding declarations. Missing declarations do not prove execution scope.
 ///
 /// Reads `GET /api/tags` (installed), `GET /api/ps` (loaded), and, per model,
-/// `POST /api/show` for the capabilities and maximum context the model list
-/// omits. No login or token. Honors the standard OLLAMA_HOST override (default
+/// `POST /api/show` for capabilities, maximum context, and upstream declarations.
+/// No login or token. Honors the standard OLLAMA_HOST override (default
 /// 127.0.0.1:11434).
 class OllamaAdapter {
   static const id = ollamaProviderId;
@@ -167,11 +182,11 @@ class OllamaAdapter {
   Future<List<LocalModel>> _withDeclaredCapabilities(
     List<LocalModel> installed,
   ) async {
-    final resolved = <String, DeclaredModelCapabilities>{};
+    final resolved = <String, _OllamaModelMetadata>{};
     final pending = <LocalModel>[];
     for (final m in installed) {
       final digest = m.digest;
-      final cached = digest == null ? null : _capabilities.lookup(digest);
+      final cached = digest == null ? null : _capabilities._byDigest[digest];
       if (cached != null) {
         resolved[m.name] = cached;
       } else {
@@ -188,13 +203,13 @@ class OllamaAdapter {
       if (elapsed.elapsed >= capabilityPassDeadline) break;
       final chunk = selected.skip(i).take(capabilityProbeConcurrency);
       final probed = await Future.wait([
-        for (final m in chunk) _declaredCapabilities(m).then((c) => (m, c)),
+        for (final m in chunk) _modelMetadata(m).then((c) => (m, c)),
       ]);
       for (final (model, caps) in probed) {
         if (caps == null) continue;
         resolved[model.name] = caps;
         final digest = model.digest;
-        if (digest != null) _capabilities.store(digest, caps);
+        if (digest != null) _capabilities._storeMetadata(digest, caps);
       }
     }
 
@@ -207,7 +222,7 @@ class OllamaAdapter {
 
   /// Reads one model's declared metadata, or null when the daemon does not
   /// answer with a shape quotabot can trust.
-  Future<DeclaredModelCapabilities?> _declaredCapabilities(
+  Future<_OllamaModelMetadata?> _modelMetadata(
     LocalModel model,
   ) async {
     try {
@@ -217,7 +232,13 @@ class OllamaAdapter {
         body: jsonEncode({'model': model.name}),
       ).timeout(detailRequestTimeout);
       if (resp.statusCode != 200) return null;
-      return ollamaShowFromJson(jsonDecode(resp.body));
+      final data = jsonDecode(resp.body);
+      final capabilities = ollamaShowFromJson(data);
+      final upstream = ollamaUpstreamRoutingFromJson(data);
+      if (capabilities == null && upstream == UpstreamRouting.notReported) {
+        return null;
+      }
+      return _OllamaModelMetadata(capabilities, upstream);
     } catch (_) {
       return null;
     }
@@ -263,12 +284,13 @@ class OllamaCapabilityCache {
   /// than tracking eviction order for a cache this cheap to refill.
   final int maxEntries;
 
-  final _byDigest = <String, DeclaredModelCapabilities>{};
+  final _byDigest = <String, _OllamaModelMetadata>{};
   var _nextProbeOffset = 0;
 
   int get length => _byDigest.length;
 
-  DeclaredModelCapabilities? lookup(String digest) => _byDigest[digest];
+  DeclaredModelCapabilities? lookup(String digest) =>
+      _byDigest[digest]?.capabilities;
 
   /// Returns a bounded rotating slice of unresolved models. The cursor lives
   /// with the shared cache because collectors create a fresh adapter per read.
@@ -292,8 +314,13 @@ class OllamaCapabilityCache {
   }
 
   void store(String digest, DeclaredModelCapabilities capabilities) {
+    _storeMetadata(digest,
+        _OllamaModelMetadata(capabilities, UpstreamRouting.notReported));
+  }
+
+  void _storeMetadata(String digest, _OllamaModelMetadata metadata) {
     if (_byDigest.length >= maxEntries) _byDigest.clear();
-    _byDigest[digest] = capabilities;
+    _byDigest[digest] = metadata;
   }
 
   void clear() {
@@ -305,6 +332,44 @@ class OllamaCapabilityCache {
 /// The process-wide capability cache used when no cache is injected.
 final OllamaCapabilityCache sharedOllamaCapabilityCache =
     OllamaCapabilityCache();
+
+/// Reads only the declaration shape, retaining no target string. Ollama permits
+/// custom upstreams through OLLAMA_REMOTES, so this never implies public cloud
+/// or paid execution. Source: Ollama v0.33.3 at b79067b0, server/create.go:128
+/// and server/routes.go:2522. Both fields are omitted for ordinary inventories.
+UpstreamRouting ollamaUpstreamRoutingFromJson(dynamic data) {
+  if (data is! Map ||
+      (!data.containsKey('remote_host') && !data.containsKey('remote_model'))) {
+    return UpstreamRouting.notReported;
+  }
+  final host = data['remote_host'];
+  final model = data['remote_model'];
+  if (host is! String ||
+      model is! String ||
+      host.isEmpty ||
+      model.isEmpty ||
+      host.length > 2048 ||
+      model.length > 512 ||
+      _upstreamInvalidCharacters.hasMatch(host) ||
+      _upstreamInvalidCharacters.hasMatch(model)) {
+    return UpstreamRouting.unresolved;
+  }
+  try {
+    final uri = Uri.parse(host);
+    if ((uri.scheme != 'http' && uri.scheme != 'https') ||
+        !uri.hasAuthority ||
+        uri.host.isEmpty ||
+        uri.port < 1 ||
+        uri.port > 65535) {
+      return UpstreamRouting.unresolved;
+    }
+    return UpstreamRouting.declared;
+  } on FormatException {
+    return UpstreamRouting.unresolved;
+  }
+}
+
+final _upstreamInvalidCharacters = RegExp(r'[\s\x00-\x1f\x7f]');
 
 /// Parses an Ollama `/api/show` body into the capability evidence it declares,
 /// or null when the body carries no capability list (an unexpected or drifted
@@ -362,8 +427,8 @@ int? _ollamaMaxContext(dynamic modelInfo) {
 /// Returns [model] carrying [capabilities]. A context window already reported
 /// by the runtime wins, because that is the model as currently configured
 /// rather than the maximum the model supports.
-LocalModel _declaring(
-    LocalModel model, DeclaredModelCapabilities capabilities) {
+LocalModel _declaring(LocalModel model, _OllamaModelMetadata metadata) {
+  final capabilities = metadata.capabilities;
   return (
     name: model.name,
     bytes: model.bytes,
@@ -371,12 +436,13 @@ LocalModel _declaring(
     quant: model.quant,
     vramBytes: model.vramBytes,
     expiresAt: model.expiresAt,
-    context: model.context ?? capabilities.context,
+    context: model.context ?? capabilities?.context,
     cloud: model.cloud,
-    tools: capabilities.tools,
-    vision: capabilities.vision,
-    reasoning: capabilities.reasoning,
-    embedding: capabilities.embedding,
+    upstreamRouting: model.upstreamRouting.combine(metadata.upstreamRouting),
+    tools: capabilities?.tools ?? model.tools,
+    vision: capabilities?.vision ?? model.vision,
+    reasoning: capabilities?.reasoning ?? model.reasoning,
+    embedding: capabilities?.embedding ?? model.embedding,
     digest: model.digest,
   );
 }
@@ -416,6 +482,7 @@ List<LocalModel> ollamaModelsFromJson(dynamic data) {
       // `-cloud` tag suffix (`qwen3-coder:480b-cloud`). Either form runs on
       // ollama.com, not on-device.
       cloud: ollamaModelNameIsCloud(name),
+      upstreamRouting: ollamaUpstreamRoutingFromJson(m),
       // Neither model-list endpoint declares capabilities; `/api/show` does,
       // and the adapter folds that in afterwards.
       tools: null,
@@ -465,22 +532,74 @@ ProviderQuota localRuntimeQuota({
   int? now,
 }) {
   String shortName(String n) => n.split(':').first;
-  final localInstalled = [
-    for (final model in installed)
-      if (!model.cloud) model
-  ];
-  final localLoaded = [
-    for (final model in loaded)
-      if (!model.cloud) model
-  ];
-  final headline = localLoaded.isEmpty ? null : localLoaded.first;
+  final loadedByName = <String, List<LocalModel>>{};
+  for (final model in loaded) {
+    loadedByName.putIfAbsent(model.name, () => []).add(model);
+  }
+  // Tags, show, and running metadata may race. Combine negative declarations
+  // monotonically; a name match cannot attach a different digest's residency.
+  final models = <ModelInfo>[];
+  final coherentLoaded = <String, LocalModel>{};
+  for (final model in installed) {
+    final matches = loadedByName[model.name] ?? const <LocalModel>[];
+    var upstream = model.upstreamRouting;
+    var cloud = model.cloud;
+    var identityConflict = false;
+    for (final running in matches) {
+      upstream = upstream.combine(running.upstreamRouting);
+      cloud = cloud || running.cloud;
+      if (model.digest != null &&
+          running.digest != null &&
+          model.digest != running.digest) {
+        identityConflict = true;
+      }
+    }
+    final veto = localExecutionVeto(
+      cloudOffloaded: cloud,
+      upstreamRouting: upstream,
+    );
+    final running =
+        matches.isEmpty || veto || identityConflict ? null : matches.first;
+    if (running != null) coherentLoaded[model.name] = running;
+    models.add(ModelInfo(
+      id: model.name,
+      local: true,
+      cloudOffloaded: cloud,
+      upstreamRouting: upstream,
+      loaded: running != null,
+      sizeBytes: model.bytes,
+      quant: model.quant,
+      contextTokens: running?.context ?? model.context,
+      vramBytes: running?.vramBytes,
+      tools: model.tools,
+      vision: model.vision,
+      reasoning: model.reasoning == true ? 'reasoning' : null,
+      embedding: model.embedding,
+    ));
+  }
+  final localInstalled =
+      models.where((model) => !model.hasLocalGenerationVeto).toList();
+  final localLoaded = localInstalled.where((model) => model.loaded).toList();
+  final headline =
+      localLoaded.isEmpty ? null : coherentLoaded[localLoaded.first.id];
+  final hasUnresolved = models
+      .any((model) => model.upstreamRouting == UpstreamRouting.unresolved);
+  final hasUpstream =
+      models.any((model) => model.upstreamRouting == UpstreamRouting.declared);
 
   final status = headline == null
       ? localInstalled.isNotEmpty
           ? 'ready - no model loaded'
-          : installed.isNotEmpty
-              ? 'reachable - cloud routes only'
-              : 'reachable - no local models installed'
+          : hasUnresolved
+              ? 'reachable - upstream routing unresolved'
+              : hasUpstream
+                  ? 'reachable - upstream routing declared'
+                  : models.isNotEmpty &&
+                          models.every((model) => model.cloudOffloaded)
+                      ? 'reachable - cloud routes only'
+                      : models.isNotEmpty
+                          ? 'reachable - no generation models'
+                          : 'reachable - no local models installed'
       : [
           shortName(headline.name),
           if (headline.param != null) headline.param,
@@ -489,6 +608,10 @@ ProviderQuota localRuntimeQuota({
         ].join(' ');
 
   final details = <String>[];
+  if (hasUnresolved || hasUpstream) {
+    details.add(
+        'Upstream routing reported; execution location and cost unverified');
+  }
   if (headline != null) {
     final bits = <String>[];
     if (headline.vramBytes != null) {
@@ -506,36 +629,14 @@ ProviderQuota localRuntimeQuota({
       details.add('+${localLoaded.length - 1} more loaded');
     }
   }
-  final totalBytes = installed.fold<int>(0, (s, m) => s + (m.bytes ?? 0));
+  final totalBytes = models
+      .where((model) => !model.hasLocalExecutionVeto)
+      .fold<int>(0, (sum, model) => sum + (model.sizeBytes ?? 0));
   details.add(
     totalBytes > 0
         ? '${installed.length} installed . ${formatCompactBytes(totalBytes)} on disk'
         : '${installed.length} installed',
   );
-
-  // Normalize the installed list into the registry model shape, marking which
-  // are loaded and folding in the loaded entry's live GPU residency/context.
-  final loadedByName = {for (final m in localLoaded) m.name: m};
-  final models = [
-    for (final m in installed)
-      ModelInfo(
-        id: m.name,
-        local: true,
-        cloudOffloaded: m.cloud,
-        loaded: loadedByName.containsKey(m.name),
-        sizeBytes: m.bytes,
-        quant: m.quant,
-        contextTokens: loadedByName[m.name]?.context ?? m.context,
-        vramBytes: loadedByName[m.name]?.vramBytes,
-        // Carried so capability gates can admit a local model the runtime
-        // declares as capable. Null stays null: an undeclared capability must
-        // keep failing a requirement for it.
-        tools: m.tools,
-        vision: m.vision,
-        reasoning: m.reasoning == true ? 'reasoning' : null,
-        embedding: m.embedding,
-      ),
-  ];
 
   return ProviderQuota(
     provider: id,

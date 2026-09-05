@@ -1342,6 +1342,7 @@ class _BarsPainter extends CustomPainter {
       text: TextSpan(
         text: s,
         style: TextStyle(
+          fontFamily: AppType.fontFamily,
           fontSize: AppType.bodySmall,
           fontWeight: weight,
           color: color,
@@ -1369,6 +1370,7 @@ class _BarsPainter extends CustomPainter {
           TextSpan(
             text: pct,
             style: TextStyle(
+              fontFamily: AppType.fontFamily,
               fontSize: AppType.bodySmall,
               fontWeight: FontWeight.w700,
               color: fg,
@@ -1379,6 +1381,7 @@ class _BarsPainter extends CustomPainter {
             TextSpan(
               text: '  $reset',
               style: TextStyle(
+                fontFamily: AppType.fontFamily,
                 fontSize: AppType.label,
                 color: dark ? const Color(0xFF8A91A0) : const Color(0xFF69707E),
               ),
@@ -1470,11 +1473,16 @@ class _DonutPainter extends CustomPainter {
           children: [
             TextSpan(
               text: '${spenders[i].label}  ',
-              style: TextStyle(fontSize: AppType.caption, color: fg),
+              style: TextStyle(
+                fontFamily: AppType.fontFamily,
+                fontSize: AppType.caption,
+                color: fg,
+              ),
             ),
             TextSpan(
               text: '$pct%',
               style: TextStyle(
+                fontFamily: AppType.fontFamily,
                 fontSize: AppType.caption,
                 fontWeight: FontWeight.w700,
                 color: muted,
@@ -1557,6 +1565,7 @@ class _DistPainter extends CustomPainter {
       text: TextSpan(
         text: s,
         style: TextStyle(
+          fontFamily: AppType.fontFamily,
           fontSize: AppType.bodySmall,
           fontWeight: FontWeight.w600,
           color: fg,
@@ -1645,6 +1654,7 @@ class _CalendarPainter extends CustomPainter {
       text: TextSpan(
         text: s,
         style: TextStyle(
+          fontFamily: AppType.fontFamily,
           fontSize: AppType.bodySmall,
           fontWeight: FontWeight.w600,
           color: fg,
@@ -1694,7 +1704,11 @@ class _HeatmapPainter extends CustomPainter {
       final tp = TextPainter(
         text: TextSpan(
           text: _days[r],
-          style: TextStyle(fontSize: AppType.micro, color: muted),
+          style: TextStyle(
+            fontFamily: AppType.fontFamily,
+            fontSize: AppType.micro,
+            color: muted,
+          ),
         ),
         textDirection: TextDirection.ltr,
         textScaler: textScaler,
@@ -1714,7 +1728,11 @@ class _HeatmapPainter extends CustomPainter {
           text: hh == 0
               ? '12a'
               : (hh == 12 ? '12p' : (hh < 12 ? '${hh}a' : '${hh - 12}p')),
-          style: TextStyle(fontSize: AppType.micro, color: muted),
+          style: TextStyle(
+            fontFamily: AppType.fontFamily,
+            fontSize: AppType.micro,
+            color: muted,
+          ),
         ),
         textDirection: TextDirection.ltr,
         textScaler: textScaler,

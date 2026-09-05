@@ -9,6 +9,9 @@ import 'package:flutter/widgets.dart';
 /// screens had grown independently (13 vs 13.5, 12 vs 12.5, 8.5 vs 9) onto one
 /// step each, so the same kind of text is the same size on both screens.
 abstract final class AppType {
+  /// Keep canvas labels aligned with the inherited application typography.
+  static const String fontFamily = 'Segoe UI';
+
   /// Emphasized analytics metric, kept close to the main header scale.
   static const double stat = 14.5;
 

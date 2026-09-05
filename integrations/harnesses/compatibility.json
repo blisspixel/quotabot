@@ -1,12 +1,21 @@
 {
   "schema": "quotabot.harness_examples.v1",
-  "reviewed_on": "2026-09-04",
+  "reviewed_on": "2026-09-05",
   "quotabot_baseline": "0.10.3",
   "cli_mcp_minimum_version": "0.11.0",
   "mcp_protocol": "2025-11-25",
   "protocol_mode": "legacy_initialize",
   "automatic_model_selection": false,
-  "harness_native_smoke": "not_performed",
+  "harness_native_smoke": "not_validated",
+  "native_attempts": [
+    {
+      "harness": "openclaw",
+      "version": "2026.9.1",
+      "platform": "windows_x64",
+      "date": "2026-09-05",
+      "result": "fixture_blocked_before_mcp_initialization"
+    }
+  ],
   "harnesses": [
     {
       "id": "opencode-1",
@@ -22,25 +31,28 @@
     {
       "id": "openclaw",
       "version_reviewed": "2026.9.1",
+      "source_commit": "ad6fe23aecb9b833d68139b0ddc9f239b894d2f1",
       "support": "documented_configuration",
       "transports": ["stdio", "streamable_http_loopback"],
       "configuration_root": "mcp.servers.quotabot",
       "sources": [
         "https://docs.openclaw.ai/cli/mcp",
         "https://docs.openclaw.ai/plugins/bundles",
-        "https://github.com/openclaw/openclaw/blob/v2026.9.1/src/config/types.mcp.ts"
+        "https://github.com/openclaw/openclaw/blob/ad6fe23aecb9b833d68139b0ddc9f239b894d2f1/src/config/types.mcp.ts",
+        "https://github.com/openclaw/openclaw/blob/ad6fe23aecb9b833d68139b0ddc9f239b894d2f1/src/agents/agent-bundle-mcp-runtime.ts"
       ]
     },
     {
       "id": "hermes",
       "version_reviewed": "2026.8.31",
+      "source_commit": "29112bef099274229cadff79cdff7bf7b99c4b77",
       "support": "documented_configuration",
       "transports": ["stdio", "streamable_http_loopback"],
       "configuration_root": "mcp_servers.quotabot",
       "sources": [
         "https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference",
         "https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp",
-        "https://github.com/NousResearch/hermes-agent/blob/v2026.8.31/tools/mcp_tool.py"
+        "https://github.com/NousResearch/hermes-agent/blob/29112bef099274229cadff79cdff7bf7b99c4b77/tools/mcp_tool.py"
       ]
     },
     {

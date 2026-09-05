@@ -525,7 +525,7 @@ Future<List<ProviderQuota>> _collectAllProviders({
   if (retained.any((quota) =>
       quota.isLocal &&
       quota.ok &&
-      quota.models.any((model) => !model.cloudOffloaded))) {
+      quota.models.any((model) => !model.hasLocalExecutionVeto))) {
     try {
       hardware = await readLocalHardware();
     } catch (_) {
@@ -536,7 +536,9 @@ Future<List<ProviderQuota>> _collectAllProviders({
   final sanitized = [
     for (final quota in retained)
       sanitizeProviderQuota(
-        quota.isLocal && hardware != null
+        quota.isLocal &&
+                hardware != null &&
+                quota.models.any((model) => !model.hasLocalExecutionVeto)
             ? quota.withLocalHardware(
                 hardware,
                 detail: _localHardwareDetail(hardware),
