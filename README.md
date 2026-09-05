@@ -6,15 +6,16 @@
 **htop for your agentic-AI quota plans.**
 
 quotabot shows how much included quota remains across AI coding subscriptions
-and recommends where to send the next request. It also reports supported local
-runtimes, so work can fall back locally when subscription caps are low.
+and recommends where to send the next request. It also shows supported local
+models, loaded state, context, and available hardware evidence, so you can use
+on-device capacity directly or fall back when subscription caps are low.
 
 > **Current stable:** 0.10.3. quotabot remains under active 0.x development.
-> **Next:** continue native field validation, Windows and Apple publisher
-> identity provisioning, and one signed lifecycle rehearsal before 1.0. Product
-> breadth remains frozen; the next post-stabilization product candidates are
-> documented without widening default paid routing. See [roadmap
-> Next](ROADMAP.md#next) and the [documentation index](docs/README.md).
+> **Next:** make local-model choices easier to inspect, improve everyday native
+> behavior on Windows, macOS, and Linux, and add tested advisory setup for named
+> agent harnesses. Product development continues while release signing is
+> provisioned. See [roadmap Next](ROADMAP.md#next) and the
+> [documentation index](docs/README.md).
 
 Releases state Windows and macOS signing mode at the top of the
 GitHub release notes. The source workflow now has fail-closed signing paths for
@@ -146,7 +147,11 @@ in [Building from source](docs/BUILDING.md).
 The MCP server supports stdio and authenticated loopback HTTP. Its complete
 tool and schema contract is in [AGENTS.md](AGENTS.md). See the
 [LiteLLM integration](integrations/litellm/) and
-[minimal MCP clients](integrations/mcp_clients/) for working examples.
+[minimal MCP clients](integrations/mcp_clients/) for working examples. The
+[September harness review](docs/research/2026-09-harnesses.md) records the
+versioned OpenClaw, NemoClaw, pi, Hermes, and OpenCode integration plan and its
+current limits. Exposing MCP advice does not automatically switch a harness's
+model or grant API access through a coding subscription.
 
 ## Privacy and trust boundary
 
