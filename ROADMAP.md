@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-09-02. This file is the forward plan. It records brief shipped
+Updated 2026-09-04. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -89,63 +89,100 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Next
 
-**Finish native field validation, provision publisher identities, and run one
-signed 0.10.x lifecycle rehearsal before 1.0.** Feature breadth is frozen.
-Completed release detail belongs in [CHANGELOG.md](CHANGELOG.md); this section
-records the remaining dependency order and why it comes next.
+**Make local-model choices inspectable and useful, then carry the same evidence
+into native desktop workflows and named agent harnesses.** Useful product work
+continues while publisher identities are unavailable. Signing remains a native
+distribution gate before 1.0; store admission is not a product-development gate.
 
-Stable 0.10.3 refreshes provider and model semantics as of 2026-09-02 and makes
-local-runtime readiness lead with loaded model, running context, GPU residency,
-and separately labeled host pressure. It does not broaden routing or treat host
-utilization as model activity. The preceding 0.10.2 release closed the
-corrective updater gate. Its
-[release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
-published the exact immutable 14-asset set, the unpinned GitHub Latest
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
-passed on Windows, macOS, and Ubuntu, and a live Windows installation updated
-from 0.10.2-rc.1 to 0.10.2 before correctly reporting no newer stable release.
-The corrected runtime uses GitHub's dedicated Latest endpoint for stable
-selection and smaller bounded pages for preview selection. The shipped alias
-map remains empty until a real provider rename exists. Stable 0.10.0 remains the
-one-time recovery bootstrap for the immutable rc.16 Windows updater defect.
+Stable 0.10.3 already shows loaded models, running context, GPU residency, and
+separately labeled host pressure. The next work builds on those shipped fields.
+The September research records the current code baseline, primary sources,
+uncertainties, and concrete tests for [local models](docs/research/2026-09-local-models.md),
+[native platforms](docs/research/2026-09-platform-quality.md), and
+[agent harnesses](docs/research/2026-09-harnesses.md). Those reports are dated
+evidence; this section owns the execution order.
 
-1. Keep the reproducible correctness and credential-lifecycle inventory empty,
-   pass the complete three-OS project gate from clean `main`, complete the
-   required live grant-flow smoke and remaining provider-shape validation that
-   does not depend on signed artifacts, and keep recovery guidance current.
-   Correct current human labels that call loaded model residency `in use` when
-   the runtime exposes no direct busy or streaming evidence; use `loaded` for
-   residency alone. Lead local summaries with the loaded model, running context,
-   and model GPU residency. Keep installed inventory secondary. Host RAM, VRAM,
-   and optional supported host GPU utilization may be displayed only as separately
-   labeled, bounded, passive host evidence and must never be attributed to one
-   runtime or model.
-   Compatibility work for an already claimed provider may improve truthful
-   detection, but must not invent quota or depend on an undocumented private
-   endpoint.
-2. Provision the Windows Public Trust identity, Apple Developer Program
-   membership, Developer ID Application identity, notary credential, and the
-   exact protected-environment values and secrets. The repository already
-   implements fail-closed signing paths and protects both signing environments
-   with maintainer review plus exact `main` and `v*` deployment restrictions.
-3. Pass both protected native rehearsals before activating either repository
-   signing mode. A deterministic signer-path test is not evidence that an owner
-   credential, trust chain, timestamp, or notarization service works in the
-   protected environment.
-4. Activate both modes for one 0.10.x release candidate and run the complete
-   signed lifecycle through fresh download, install, launch, update, rollback,
-   data-preserving uninstall, checksum, provenance, and immutable publication.
-5. Repeat native provider, recommendation, accessibility, and operator-failure
-   evidence on the exact signed artifacts, then repeat the complete boring
-   lifecycle on the frozen 1.0 candidate. Reopen product breadth only after
-   every 0.10.x exit criterion passes.
+**Build in this order**
 
-Do not delay corrective stabilization on external identity procurement. Retain
-the explicit unsigned disclosure until the exact artifacts have native signing
-evidence. Repository readiness is not activation, and deterministic tests are
-not a successful protected rehearsal.
+1. **Repair local evidence before exposing it more widely.** Preserve unknown
+   capabilities, distinguish running context from a model's advertised maximum,
+   and propagate supported declared reasoning capabilities. Do not call a
+   32-bit Windows compatibility counter authoritative VRAM capacity. A local
+   endpoint, loaded model, or host GPU counter must not prove on-device
+   execution, active generation, or per-model utilization respectively. Check
+   remote-runtime evidence, including LM Studio LM Link, before expanding any
+   local-only routing claim.
+2. **Ship an inspectable local-model view.** Add keyboard-accessible model detail
+   to desktop and `top`, reusing the registry's loaded state, capability gates,
+   and advisory hardware fit. Answer: what can run here, what is loaded, which
+   context and capabilities are known, why a model is eligible or excluded, and
+   what to do when evidence is missing. Show loaded models first, installed
+   inventory second, and host pressure separately. Keep useful detail readable
+   at narrow widths and larger text sizes.
+3. **Make everyday native use dependable.** Prioritize honest GPU evidence and
+   runtime reachability, Linux behavior when a tray host is absent, coalesced
+   freshness recovery after sleep or foregrounding, and Windows/WSL/host scope.
+   Extend supported AMD, NVIDIA, and Apple unified-memory probes only when a
+   bounded documented source and native evidence exist. Exercise mixed DPI,
+   monitor changes, keyboard, screen reader, startup, quit, and offline recovery
+   on the platforms being claimed. Hosted builds and simulated states do not
+   establish every hardware or desktop-environment claim.
+4. **Make named harness support real.** Start with versioned, tested advisory
+   recipes for OpenClaw, OpenCode, Hermes, pi, and NemoClaw. Each recipe must name
+   the actual transport or CLI entry point, supported version, OS/runtime
+   boundary, model identifier mapping, spend class, and failure behavior. Pin
+   the shipped `2025-11-25` protocol and verify legacy compatibility for each
+   harness while preparing the published `2026-07-28` revision through a
+   separate dual-version test matrix. MCP access provides advice; it does not
+   prove automatic model switching. After
+   advisory setup works, add an explicit local-only model-selection command
+   through a documented harness API, beginning with the smallest verified
+   extension surface. Never inspect a task or silently rewrite harness state.
+5. **Broaden insights from demonstrated decisions.** Add shared local model
+   comparisons, supported hardware evidence, and a bounded llama.cpp metadata
+   adapter when the first four steps show a real need. Passive availability and
+   readiness histories need a declared user question, bounded retention, and
+   explicit source/scope. Keep inferred fit separate from observed behavior;
+   do not manufacture throughput, quality rankings, or future prompt counts.
 
-**0.10.x completion criteria before 1.0**
+Correctness, credential-lifecycle defects, and broken CI take precedence within
+each step. Deliver one reviewable behavior change at a time with its docs and
+regression evidence. Steps may overlap where their inputs are independent;
+unavailable signing identities or native hardware do not block work that can be
+implemented and truthfully validated now.
+
+**Done for each product increment**
+
+- A user can complete the stated job from the default surface and inspect its
+  evidence, unknowns, rejection reason, and actionable recovery.
+- Collector line coverage remains at least 90 percent and desktop line coverage
+  at least 80 percent. Relevant regressions, format, analysis, integrations,
+  security, packaging, and the full required three-OS CI pass on the exact change.
+- Stable JSON and routing policies remain compatible. No inference call,
+  prompt/code read, silent paid fallback, or host credential/state-file write is
+  introduced by a collector or integration diagnostic.
+- Merge through a short-lived first-party branch after required checks pass,
+  return to one current `main`, and remove the merged branch. Publish coherent
+  increments as immutable releases with fresh-download and upgrade evidence;
+  update release-facing docs only for what those artifacts actually contain.
+
+**September and near-future review**
+
+Use the current research to start implementation now. Recheck primary sources
+when touching a runtime or harness, and review the next quarter's candidates
+after each shipped milestone. Protocol revisions, new hardware counters, and
+new runtime support are contingent on published interfaces and reproducible
+evidence, not calendar predictions. Additional providers and paid-credit
+visibility keep their separate admission and typed-pool requirements.
+
+**Why this progression:** local capability evidence already exists, but a user
+still needs to connect it to an actual model choice. Making that choice visible
+improves the daily product and supplies the same trustworthy input to harness
+integrations. Native recovery and hardware truth make that experience dependable
+on the machines people own. These outcomes can be shipped and measured before
+owner-dependent release signing closes.
+
+**Remaining 1.0 release criteria**
 
 - No open reproducible correctness or credential-lifecycle defect. Every fixed
   bug has a regression at the lowest deterministic layer and, when applicable,
@@ -158,19 +195,12 @@ not a successful protected rehearsal.
   tests cannot complete. A provider consent page alone is never accepted as
   evidence of a successful authorization.
 - Windows and macOS artifacts satisfy the signed-release completion criteria
-  below after fresh download of the exact draft assets.
+  below after fresh download of the exact draft assets. Keep the explicit
+  unsigned disclosure on interim releases until those artifacts have native
+  signing evidence; repository readiness is not activation.
 - README, setup, building, distribution, and troubleshooting guidance describe
   current behavior and actionable recovery without asking users to weaken a
   platform protection.
-
-**Why this progression:** quotabot is an evidence and routing tool. A
-contradictory fallback, silently partial cache, incomplete logout, or broken
-login directly weakens the product's trust claim. Correctness and recovery must
-be quiet and predictable before signing freezes the artifacts used for final
-native evidence. The provider-ID migration follows its lock prerequisite because
-a rename path that loses a mixed-version write, invalidates analytics evidence,
-or broadens quarantine would violate that trust contract even while the alias
-map is still empty.
 
 ### Signed release readiness
 
@@ -264,8 +294,9 @@ Apple requires Developer ID signing before notarization and recommends hardened
 runtime, a secure timestamp, notarization, and ticket stapling for direct
 distribution. Microsoft documents Authenticode signing and RFC 3161 SHA-256
 timestamping as the authenticity and integrity path for downloaded executables.
-Testing installation and accessibility first would validate artifacts that must
-still change.
+Product and native accessibility work should continue before signing. Repeat
+the final acquisition and native evidence on the exact signed candidate because
+the artifact bytes and platform launch path will change.
 
 Sources: [Apple notarization guidance, accessed 2026-08-20](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
 [Microsoft Windows code-signing options, accessed 2026-08-20](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options),
@@ -278,20 +309,20 @@ Sources: [Apple notarization guidance, accessed 2026-08-20](https://developer.ap
 The repository workflow and deterministic verification work are prepared, but
 final closure requires the project owner to provision a Windows code-signing
 identity, Apple Developer Program membership, a Developer ID identity, protected
-release credentials, and successful native rehearsals. After it closes, proceed
-through native macOS and Linux provider records, native accessibility smoke,
-dated idle-machine validation of the Claude and Codex grants, then the frozen
-1.0 rehearsal.
+release credentials, and successful native rehearsals. Continue native macOS
+and Linux provider records, native accessibility smoke, and dated idle-machine
+validation of the Claude and Codex grants now; repeat the required evidence on
+the signed candidate before the frozen 1.0 rehearsal.
 
-### Local-resource visibility after stabilization
+### Local-resource visibility
 
 The stabilization line now includes the narrow, bounded first slice of
 content-blind local-resource visibility: loaded model, running context,
 model GPU residency, host RAM and VRAM pressure, and optional host GPU
 utilization. It is truth and quality-of-life refinement for existing local
-runtimes, not a new routing input. After the frozen 0.10.x release and signed
-lifecycle complete, extend this evidence across supported hardware and operating
-systems.
+runtimes, not a new routing input. Extend this evidence through the product
+increments in [Next](#next), with each supported hardware and operating-system
+claim backed by the corresponding native evidence.
 Expose additional host-scoped CPU, GPU, VRAM, and NPU gauges separately from
 runtime-scoped loaded, busy, streaming, and model-residency evidence. Prefer
 documented runtime metadata and supported vendor or operating-system counters;
@@ -382,9 +413,10 @@ calibration moat (0.8). Those
 implementation milestones are not the same as closing every 1.0 evidence gate.
 The core product surface exists: CLI, `top`, desktop, analytics, MCP, loopback
 HTTP, model registry, profiles, alerts, reports, leases, LiteLLM integration,
-verification commands, release automation, and cross-platform CI. New breadth
-is frozen until the remaining field validation, accessibility, signing, and
-native release evidence below are complete.
+verification commands, release automation, and cross-platform CI. Local-model
+insights, native quality, and named harness support now advance through the
+bounded product increments in [Next](#next). Field validation, accessibility,
+signing, and exact native release evidence remain 1.0 gates.
 The table is a status index; detailed scope and acceptance criteria live in the
 milestone sections below.
 
@@ -402,8 +434,9 @@ milestone sections below.
 | Release rehearsal | Stable 0.10.3 baseline complete | The stable release completed the tag, exact 14-asset set, checksum, provenance, fresh download, install, upgrade, state, exact self-update, source setup, immutable publication, unpinned Latest acquisition, and installed stable-channel assertion | Run a signed 0.10.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
-shipped together in 0.8.0, and 0.9.0 followed. Run focused 0.10.x stabilization
-patches as needed, then cut 1.0 when the evidence gates pass.
+shipped together in 0.8.0, and 0.9.0 followed. Use 0.10.x patches for corrective
+work and subsequent 0.x minor releases for coherent new product capabilities.
+Cut 1.0 when its evidence gates pass.
 
 ## Version plan
 
@@ -425,12 +458,15 @@ self-tuning decision engine grounded in longitudinal local history no competitor
 keeps. An exceptional 1.0 therefore ships that engine, not only a hardened meter,
 which is why calibration lands before 1.0 rather than after it.
 
-- **0.10.x, now - stable hardening and signed 1.0 readiness.** Keep the shipped
+- **0.10.x - stable hardening and signed 1.0 readiness.** Keep the shipped
   explanation and decision-receipt work stable while taking focused corrective
   patches for provider truth, cross-machine correctness, install and update,
   desktop robustness, and documentation. Activate the implemented signing paths
-  only after owner provisioning and successful protected rehearsals. No new
-  breadth. Keep the line focused until the 0.10.x completion criteria pass.
+  only after owner provisioning and successful protected rehearsals. Corrective
+  patches continue while the next additive product milestone is built.
+- **Next 0.x minor - local models and agent workflows.** Deliver the local-model
+  detail, capability truth, native quality, and versioned harness-advice work in
+  [Next](#next), with one shared evidence core and no automatic paid routing.
 - **0.6 - Truthful substrate, core shipped.** Every advertised route means
   exactly what it says on every admitted provider. The remaining field evidence
   and migration hardening listed below are 1.0 acceptance work, not a second
@@ -458,8 +494,8 @@ which is why calibration lands before 1.0 rather than after it.
   until the cut is boring, and cut.
 - **1.x - stabilization, then ranked outcomes.** The first 30 days are
   stabilization only (below). After that, the remaining ranked outcomes land
-  additively without breaking a published 1.x contract: the next final MCP revision
-  adopted deliberately, quota modeled as a typed shared pool before any weighted
+  additively without breaking a published 1.x contract: MCP compatibility
+  maintained deliberately, quota modeled as a typed shared pool before any weighted
   coding plan, multi-agent reservations hardened at volume, then distribution
   channels and admission-gated providers.
 - **2.0 - only to change an invariant or a stable contract.** No 2.0 is planned;
@@ -801,7 +837,8 @@ and is always explained; machine detail stays complete.
 provider change, corrupt or stale local state, and clean installation. Users get
 an actionable recovery path instead of a plausible-looking partial success.
 
-- Freeze new provider, transport, analytics, and routing-policy breadth.
+- Keep corrective releases focused; develop the admitted local-model, native,
+  and harness improvements in [Next](#next) as coherent additive increments.
 - Resolve the complete confirmed post-0.9.9 defect inventory with focused
   regressions, starting with Claude authorization and credential lifecycle.
 - Clear actionable dependency advisories from shipped and documented optional
@@ -824,11 +861,11 @@ an actionable recovery path instead of a plausible-looking partial success.
   0.10.x candidate for the native install, update, rollback, provider, and
   accessibility evidence pass.
 
-Acceptance: every 0.10.x completion criterion in [Next](#next) passes. There is no
+Acceptance: every applicable increment criterion in [Next](#next) passes. There is no
 open reproducible correctness or credential-lifecycle defect, no unresolved
 actionable dependency advisory in scope, all required CI is green from clean
-main, and exact downloaded Windows and macOS draft assets pass native signature
-verification.
+main. Signing readiness is tracked independently until exact downloaded Windows
+and macOS draft assets pass native signature verification for the 1.0 gate.
 
 ### 1.0 - Exceptional and rock-solid, then rehearse and cut
 
@@ -948,14 +985,19 @@ can be biased. Relevant methods are summarized in
 [Forecasting: Principles and Practice](https://otexts.com/fpp3/tscv.html) and
 [Mitigating Bias in Calibration Error Estimation](https://proceedings.mlr.press/v151/roelofs22a.html).
 
-### P1. Adopt the next final MCP revision deliberately
+### P1. Maintain explicit MCP revision compatibility
 
-The [release candidate for the planned `2026-07-28` MCP specification](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
-is a breaking protocol revision. Keep current final `2025-11-25` behavior until
-the new revision is final and the Dart SDK and conformance path are ready. Then
-add a dual-version compatibility matrix before changing initialization,
-sessions, subscriptions, caching, trace context, or JSON Schema behavior. Trace
-metadata must remain content-free.
+The [`2026-07-28` MCP specification was published on July 28](https://blog.modelcontextprotocol.io/posts/2026-07-28/).
+The stateless core changes initialization, sessions, discovery, and request
+metadata. quotabot currently implements `2025-11-25`; documentation must not
+call that the latest revision or imply support for the new wire contract.
+
+The harness work in [Next](#next) must verify legacy compatibility now and
+prepare a dual-version matrix against supported Dart SDK and client releases.
+Preserve existing clients while validating discovery, subscriptions, caching,
+authorization, and JSON Schema on the new path. Trace metadata stays
+content-free. Continue that matrix after stabilization whenever dependencies
+or supported harness versions change.
 
 ### P1. Model quota as a typed shared pool
 

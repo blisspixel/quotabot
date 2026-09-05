@@ -258,10 +258,19 @@ leaves the machine.
 
 ## Using it from coding agents
 
-Any OpenAI-compatible coding tool can sit in front of this proxy. Configure it
-to send `LITELLM_MASTER_KEY` as its API key:
+A coding harness can use this proxy only when its configured client supports
+the proxy's exact API protocol and logical model names. Configure that client
+to use `http://127.0.0.1:4000` and send `LITELLM_MASTER_KEY` as its API key;
+verify the harness version and provider configuration before use.
 
-- OpenCode / Claude Code / aider: set the API base to the proxy
-  (`http://127.0.0.1:4000`) and call the logical model names.
-- The proxy then applies quota-aware routing transparently, so a single config
-  balances all your agents across subscriptions and local models.
+The routing policy selects only separately configured deployments. An API key
+does not inherit a Claude, Codex, or other coding subscription's included quota.
+Use `quota_plan` only for an actual included-quota deployment with verified
+account matching and disabled overages. Otherwise the deployment is `paid_api`
+and stays excluded until the explicit paid opt-in. Local deployments still need
+known on-device execution and exact model mapping.
+
+For advisory integration that does not put a proxy in the request path, use the
+[MCP clients](../mcp_clients/) and the
+[versioned harness plan](../../docs/research/2026-09-harnesses.md). MCP access
+does not automatically change a harness's selected model.

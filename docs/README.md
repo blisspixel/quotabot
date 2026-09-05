@@ -4,14 +4,15 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.10.3. The next work in the focused
-0.10.x hardening line is native field validation, owner signing setup, and one
-signed lifecycle rehearsal before 1.0. The bounded
+The current verified stable release is 0.10.3. The next work makes local-model
+choices inspectable, improves everyday Windows, macOS, and Linux behavior, and
+adds versioned advisory setup for agent harnesses. The bounded
 provider-ID cache coordinator passed ordinary hosted CI plus the complete
 release, install, update, and source-setup lifecycle on Windows, macOS, and
 Linux; the shipped alias map remains empty. The current line includes bounded
-local readiness and host-pressure refinement. Expanded resource sampling and
-explicit paid fallback balance visibility remain post-stabilization tracks.
+local readiness and host-pressure refinement. Further local insight and native
+validation proceed through the roadmap's product increments. Explicit paid
+fallback balance visibility retains its typed-pool and admission prerequisites.
 Stable 0.10.2 retains the verified 0.10.0 updater foundation. Its immutable
 [release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
 and unpinned GitHub Latest
@@ -32,8 +33,8 @@ remain unsigned; owner identity and credential provisioning, successful
 protected rehearsals, mode activation, and signed fresh-download evidence
 remain. The
 [roadmap Next section](../ROADMAP.md#next) owns the exact behavior, guardrails,
-completion criteria, rationale, and place ahead of the remaining native 1.0
-evidence gates.
+completion criteria, and rationale. Owner-dependent signing remains a 1.0
+release gate while useful product development continues.
 
 Completed candidate detail, including the live-confirmed Claude OAuth recovery,
 belongs in [CHANGELOG.md](../CHANGELOG.md).
@@ -73,6 +74,10 @@ belongs in [CHANGELOG.md](../CHANGELOG.md).
   external evidence, including the reason behind the roadmap order.
 - [../ROADMAP.md](../ROADMAP.md): the sole immediate priority, ordered work, and
   release gates.
+- September 2026 research: [local models](research/2026-09-local-models.md),
+  [native platform quality](research/2026-09-platform-quality.md), and
+  [agent harness compatibility](research/2026-09-harnesses.md). Each records
+  current evidence separately from proposed work and untested support.
 - [../CONTRIBUTING.md](../CONTRIBUTING.md): contribution and validation rules.
 - [../SECURITY.md](../SECURITY.md): trust boundaries and private vulnerability
   reporting.

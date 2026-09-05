@@ -1,6 +1,6 @@
 # Product strategy
 
-Updated 2026-08-30. Revisit this document when provider quota models, the MCP
+Updated 2026-09-04. Revisit this document when provider quota models, the MCP
 specification, or the product's acquisition path changes materially. The
 execution order and single immediate priority live in
 [ROADMAP.md](../ROADMAP.md#next); this document explains the product reasoning
@@ -18,17 +18,18 @@ content-blind capacity decision system that combines subscription windows,
 local-runtime readiness, source provenance, fail-soft behavior, and concurrent
 agent reservations without becoming a proxy.
 
-The immediate product constraint is trust, not feature depth. Quota stretch
-shipped in 0.9.6, closing the policy gap between subscription-first and
-always-local routing without weakening the no-surprise-spend boundary. The
-focused 0.10.x train now resolves field-discovered correctness, recovery, and
-quality-of-life defects and repeats native validation. Fail-closed Windows and
-macOS signing paths are implemented in the repository with run-scoped policy,
-pinned Apple tooling, exact notarization chains, and final verified-archive
-digest binding. Owner provisioning, successful protected rehearsals, mode
-activation, and signed fresh-download evidence follow when that
-developer-controlled inventory is quiet, before final native-host, account, and
-accessibility evidence on the signed 1.0 candidate.
+The next product gains come from making existing evidence useful in everyday
+work: inspectable local-model choices, dependable native behavior, and explicit
+connections to the agent harnesses people use. Stable 0.10.3 already improves
+loaded-model, context, residency, and host-pressure summaries. Per-model detail,
+capability truth, connection diagnostics, and versioned harness support can now
+build on that foundation without broadening default paid routing.
+
+Release signing remains a trust requirement for 1.0. Both signing paths are
+implemented; owner identities and successful protected rehearsals remain open.
+Those external dependencies do not freeze local-model, platform, or integration
+improvements. Continue coherent 0.x releases, preserve unsigned disclosures,
+and repeat final native evidence against the eventual signed artifacts.
 
 ## User jobs
 
@@ -155,6 +156,12 @@ turns into paid API spend.
 
 ### Friction now
 
+- Per-model fit and capability evidence is richer in the registry than in the
+  desktop and terminal detail surfaces. Unknown context, authentication, and
+  execution location need clearer explanations before adding more charts.
+- Named harnesses have different MCP, CLI, selection, and sandbox contracts.
+  A generic MCP example does not establish a working model handoff or prove
+  that a subscription is usable through another harness.
 - Published portable assets remain unsigned even though both repository signing
   paths are implemented. Owner identities, successful protected rehearsals, mode
   activation, and a signed fresh-download lifecycle remain the largest
@@ -172,7 +179,7 @@ turns into paid API spend.
 
 ### Too much relative to current need
 
-- More analytics visualizations before first-run and recommendation clarity.
+- Charts that cannot answer a local readiness, capacity, or recovery question.
 - Provider count without a strict admission and maintenance test.
 - More routing mathematics without an offline outcome and invariant benchmark.
 - Spend-ledger depth that weakens the included-quota focus.
@@ -208,17 +215,17 @@ quota. The scoped pool gates Fable without blocking unrelated Claude models. A
 dated plan announcement can
 classify expected inclusion, but it cannot prove what remains in an account now.
 
-### MCP is about to change substantially
+### MCP now requires an explicit revision compatibility plan
 
-The MCP 2026-07-28 release candidate removes protocol sessions and the
-initialize handshake, adds discovery and cache semantics, formalizes extensions,
-hardens authorization, and moves tool schemas to full JSON Schema 2020-12. The
-project states that the final specification is planned for 2026-07-28 and that
-the release is breaking. quotabot should preserve current-final compatibility,
-prepare a boundary and test matrix, and implement only after the final spec and
-supported Dart path exist.
+The final MCP `2026-07-28` revision was published on July 28. Its stateless core
+replaces the initialization handshake and transport sessions, with new discovery,
+request metadata, caching, and authorization behavior. quotabot still implements
+the `2025-11-25` contract. Preserve that working path and verify each named
+harness's legacy compatibility while preparing a tested dual-version migration
+against supported Dart and client SDKs. Publication of a standard alone is not
+evidence that the installed server implements it.
 
-Source: [MCP 2026-07-28 release candidate, published 2026-05-21](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/).
+Source: [MCP 2026-07-28 final release, checked 2026-09-04](https://blog.modelcontextprotocol.io/posts/2026-07-28/).
 
 MCP tool annotations affect client approval and retry behavior. Current MCP
 guidance treats `readOnlyHint` as a signal that a client may skip confirmation,
@@ -285,13 +292,42 @@ and content-blind integration contracts.
 ## Strategy behind the roadmap order
 
 The [roadmap Next section](../ROADMAP.md#next) owns the exact execution order.
-The rationale for that order is:
+The September research is linked from that section and records current source
+evidence, versions, and uncertainty. The rationale for the order is:
 
-### Immediate acquisition priority: sign the release artifacts
+### Immediate product priority: useful local-model choices
 
-Quota stretch closed the remaining repository-unblocked routing-policy gap in
-v0.9.6. The largest remaining acquisition defect is now outside the advisor
-core: Windows executables are not Authenticode-signed, and the macOS app is not
+A person with several installed models should be able to inspect what is loaded,
+what capabilities are known, whether a context requirement is met, and why a
+model fits or is excluded. The existing registry already contains much of this
+evidence. Exposing it through one shared presentation seam improves the desktop,
+terminal, and eventual harness setup without inventing a second routing policy.
+
+Truthful hardware and execution scope come first. Windows compatibility counters
+can misstate modern VRAM, unified memory cannot be counted twice, and a runtime
+listening on localhost may route elsewhere. The
+[local-model research](research/2026-09-local-models.md) and
+[platform research](research/2026-09-platform-quality.md) identify the concrete
+source and test requirements. Native recovery and accessibility work can proceed
+before signing and be revalidated on the final artifacts.
+
+### Then connect that evidence to actual harness workflows
+
+Start with versioned advisory setup, then explicit local model selection through
+a documented harness API. Detection, advisory connectivity, target mapping,
+availability, and applied model selection are distinct states. The
+[harness review](research/2026-09-harnesses.md) records differences among
+OpenClaw, OpenCode, pi, Hermes, and NemoClaw, including unsupported sandbox
+topologies and diagnostics that can make inference calls. Support requires
+reproducible metadata-only tests, not a universal integration badge.
+
+The first near-future runtime candidate is a bounded llama.cpp metadata profile
+because multiple harnesses now offer that local workflow. Runtime admission,
+passive insight, and automatic routing remain independently validated changes.
+
+### Independent acquisition priority: sign the release artifacts
+
+Windows executables are not Authenticode-signed, and the macOS app is not
 Developer ID-signed or notarized. A correct recommendation engine still fails
 its first-run promise if platform trust controls warn about or refuse its
 download.
@@ -308,10 +344,10 @@ Sources: [Apple notarization guidance, accessed 2026-07-27](https://developer.ap
 [Microsoft Authenticode timestamping guidance, accessed 2026-07-27](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures),
 [GitHub artifact attestation guidance, accessed 2026-07-27](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
-Signing comes before the remaining native evidence because it changes the exact
-artifacts and platform launch path under test. Clean-install, accessibility,
-provider, and lifecycle evidence collected first would need to be repeated after
-signing. Repository work now establishes immutable candidate handoffs, isolated
+Signing comes before the final native release evidence because it changes the
+exact artifacts and platform launch path under test. Earlier clean-install,
+accessibility, provider, and lifecycle work still improves the product; repeat
+the required checks after signing. Repository work establishes immutable candidate handoffs, isolated
 signer jobs, fail-closed platform verification, bounded receipts,
 credential-free packaging, and final digest-bound fresh-download checks.
 Credential-free macOS CI also exercises real Apple signing tools with hardened
@@ -332,8 +368,8 @@ must be repeated against the frozen, signed 1.0 candidate.
 ### After 1.0 stabilization: improve decision evidence
 
 Grow deterministic conformance, rolling-origin replay, calibration uncertainty,
-and mutation evaluation around the shared decision receipt; adopt the next final
-MCP revision through a dual-version test matrix; and harden multi-agent leases
+and mutation evaluation around the shared decision receipt; maintain the MCP
+dual-version compatibility matrix; and harden multi-agent leases
 under an explicit state model plus concurrent and corrupt-state stress. Typed
 shared-pool semantics, admission-gated providers, package-manager distribution,
 and additional exports remain later work and enter only when they pass the

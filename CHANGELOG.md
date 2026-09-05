@@ -4,6 +4,18 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Changed
+
+- The September product plan prioritizes inspectable local-model choices,
+  everyday Windows, macOS, and Linux quality, and versioned advisory support for
+  OpenClaw, NemoClaw, pi, Hermes, and OpenCode. Dated primary-source research
+  records the implementation gaps, compatibility limits, and acceptance tests.
+  Useful product development continues while publisher identities are
+  provisioned; native signing and exact-artifact validation remain 1.0 gates.
+- MCP planning now records the published `2026-07-28` revision separately from
+  quotabot's implemented `2025-11-25` contract. Integration guidance no longer
+  implies that an API key inherits a coding subscription's included quota.
+
 ## 0.10.3 - 2026-09-02
 
 ### Added
