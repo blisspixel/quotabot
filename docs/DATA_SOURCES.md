@@ -592,6 +592,11 @@ format overhead can differ from the estimate.
   (tool use, vision, and explicitly declared `thinking`) and its architecture-prefixed
   `<arch>.context_length`. Honors `OLLAMA_HOST`, default
   `http://127.0.0.1:11434`.
+  Existing tags/show metadata also supplies upstream configuration. A valid
+  `remote_host` / `remote_model` pair becomes `upstream_routing: "declared"`;
+  incomplete or invalid declarations remain `"unresolved"`.
+  Only the bounded evidence state is retained. quotabot never contacts the
+  declared upstream or publishes its address and target model name.
 - LM Studio: `GET /api/v1/models` (the current native REST API, 0.4.0+), which
   reports loaded instances with the running context length, on-disk size,
   object-shaped quantization, a real parameter size (`params_string`), and
@@ -626,7 +631,8 @@ A runtime also states each model's kind, and quotabot uses it in the opposite
 direction from a capability. Ollama declares `completion` for every model that
 can generate text, LM Studio types a model `embedding`, and Lemonade labels
 embedding-only entries `embeddings`. A model declared that way stays listed for
-inspection but is never recommended as a generation route. Here an absent
+inspection but is never recommended as a generation route, including a provider
+fallback whose only models are embeddings. Here an absent
 statement is never read as a denial: a runtime that says nothing about kind keeps
 its models routable, so a listing that publishes only names loses nothing. That
 asymmetry is deliberate. Requiring a capability must fail closed, because acting
@@ -667,6 +673,13 @@ are not contacted and are retained only as non-routable configuration errors.
 
 Current compatibility limits:
 
+- Ollama can route aliases to private or public upstreams independently of the
+  model's name. Declared or unresolved upstreams do not qualify local/quota
+  budgets, readiness preference, provider fallback, or host hardware fit.
+  Declared configuration remains inspectable under `any`; unresolved
+  configuration is unavailable there too. This additional exclusion does not
+  prove on-device execution when upstream fields are absent. Tunnels, WSL,
+  LM Link, and composite backends still need explicit scope evidence.
 - Ollama can expose cloud-offloaded models through its local daemon (a `-cloud`
   tag suffix, e.g. `qwen3-coder:480b-cloud`); these execute on ollama.com, not
   on-device. quotabot detects the suffix, flags the model `cloud_offloaded`, and

@@ -112,13 +112,18 @@ def render_config(
             },
         }
 
-    server["tools"] = {"include": list(ADVISORY_TOOLS)}
     if harness == "openclaw":
+        server["toolFilter"] = {"include": list(ADVISORY_TOOLS)}
         server["transport"] = "stdio" if transport == "stdio" else "streamable-http"
         server["connectionTimeoutMs"] = 30000
         server["requestTimeoutMs"] = 30000
         return {"mcp": {"servers": {"quotabot": server}}}
 
+    server["tools"] = {
+        "include": list(ADVISORY_TOOLS),
+        "resources": False,
+        "prompts": False,
+    }
     server["protocol"] = "legacy"
     server["connect_timeout"] = 30
     server["timeout"] = 30

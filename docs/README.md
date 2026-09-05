@@ -4,9 +4,11 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.11.0. It adds inspectable local-model
-details, Ollama reasoning evidence, conservative Windows GPU discovery, and
-versioned harness and Agent Plugins setup through `quotabot mcp`. Further work
+The current verified stable release is 0.11.1. It separates fresh quota from
+slower advisory analytics and excludes upstream-configured models from
+local/quota advice. It retains inspectable model detail, conservative hardware
+evidence, and versioned harness and Agent Plugins setup through `quotabot mcp`.
+Further work
 improves everyday Windows, macOS, and Linux behavior and verifies each named
 harness on its installed version. The bounded
 provider-ID cache coordinator passed ordinary hosted CI plus the complete
@@ -15,15 +17,15 @@ Linux; the shipped alias map remains empty. The current line includes bounded
 local readiness and host-pressure refinement. Further local insight and native
 validation proceed through the roadmap's product increments. Explicit paid
 fallback balance visibility retains its typed-pool and admission prerequisites.
-Stable 0.10.2 retains the verified 0.10.0 updater foundation. Its immutable
-[release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
+The completed 0.11.0
+[release run](https://github.com/blisspixel/quotabot/actions/runs/33956459889)
 and unpinned GitHub Latest
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33959135481)
 cover exact-tag installation, transactional activation, installed-version
 verification, stable-channel discovery, canonical acquisition, and the existing
-cross-platform lifecycle gate. It replaces oversized stable release-list
-discovery with GitHub's dedicated Latest endpoint and shrinks preview pages. The
-repository now
+cross-platform lifecycle gate. A live Windows self-update from 0.10.3 to 0.11.0
+and matching desktop installation passed fresh-download payload checks. Stable
+discovery uses GitHub's dedicated Latest endpoint. The repository
 contains fail-closed Windows and macOS signing paths for CLI and desktop assets.
 They capture one signing policy per release, pin the Apple build toolchain,
 enforce exact unsigned-to-signed tree deltas, and bind signed native-verification

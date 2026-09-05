@@ -245,17 +245,29 @@ class _ModelDetail extends StatelessWidget {
   Widget build(BuildContext context) {
     final model = entry.model;
     final lastObserved = entry.stale || !entry.available;
-    final residency = model.loaded ? 'Loaded' : 'Cold';
+    final upstream = model.upstreamRouting;
+    final residency = upstream != UpstreamRouting.notReported
+        ? model.loaded
+              ? 'Runtime reports loaded'
+              : 'No runtime residency reported'
+        : model.loaded
+        ? 'Loaded'
+        : 'Cold';
     final exclusions = <String>[
       if (model.cloudOffloaded)
         'Cloud-offloaded. Excluded from local and quota budgets.',
+      if (upstream == UpstreamRouting.declared && !model.cloudOffloaded)
+        'Upstream configured. Execution location and cost are unverified. '
+            'Excluded from local and quota budgets.',
+      if (upstream == UpstreamRouting.unresolved)
+        'Upstream configuration is unresolved. Excluded from routing.',
       if (model.embedding == true)
         'Embedding model. Excluded from generation routing.',
       if (entry.stale)
         'Stale inventory. Excluded from routing.'
       else if (entry.driftReason != null)
         'Untrusted inventory. Excluded from routing.'
-      else if (!entry.available)
+      else if (!entry.available && upstream != UpstreamRouting.unresolved)
         'Runtime unavailable. Excluded from routing.',
     ];
     final contextLabel = model.contextTokens == null
@@ -344,6 +356,9 @@ String _reasoningLabel(String? value) {
 String _fitLabel(ModelEntry entry) {
   if (entry.model.cloudOffloaded) {
     return 'Advisory host fit: not applicable to cloud execution.';
+  }
+  if (entry.model.upstreamRouting != UpstreamRouting.notReported) {
+    return 'Advisory host fit: unavailable for upstream configuration.';
   }
   final fit = entry.hardwareFit;
   final prefix = entry.stale || !entry.available

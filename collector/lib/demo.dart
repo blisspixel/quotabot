@@ -80,6 +80,7 @@ List<ProviderQuota> demoProviders(int now) {
         expiresAt: null,
         context: ctx,
         cloud: false,
+        upstreamRouting: UpstreamRouting.notReported,
         tools: tools,
         vision: vision,
         reasoning: null,

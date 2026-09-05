@@ -38,7 +38,7 @@ import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.11.0';
+const quotabotMcpVersion = '0.11.1';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
@@ -1167,6 +1167,12 @@ final _modelEntrySchema = JsonSchema.object(
     ),
     'cloud_offloaded': JsonSchema.boolean(
       description: 'True when a local daemon executes this model in its cloud.',
+    ),
+    'upstream_routing': JsonSchema.string(
+      description: 'Bounded upstream configuration evidence, independent of '
+          'public cloud or cost. Declared or unresolved excludes local/free '
+          'capacity; not_reported or omission does not prove on-device execution.',
+      enumValues: UpstreamRouting.wireValues,
     ),
     'source': JsonSchema.string(
       description: 'Data source of the gating provider, e.g. "manual" for '
@@ -2566,15 +2572,15 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     description:
         'Return model candidates for providers represented in the current '
         'registry, each tagged with its known budget gate and capability hints. '
-        'On-device local entries include passive hardware-fit evidence. '
+        'Eligible local-runtime entries include passive hardware-fit evidence. '
         'Non-local providers without quota windows and providers without catalog '
         'models are omitted; known entries may remain with available=false. '
         'Local-runtime inventory is read live and cloud capability hints come '
-        'from a refreshable catalog. budget=local limits results to on-device '
-        'local-runtime models; a cloud-offloaded local model (flagged '
-        'cloud_offloaded by Ollama or Lemonade) is excluded because it runs '
-        'remotely, not on this machine. budget=quota allows measured '
-        'quota plans plus on-device local-runtime models.',
+        'from a refreshable catalog. budget=local excludes cloud-offloaded '
+        'models and declared or unresolved upstream routing. Missing upstream '
+        'evidence preserves legacy eligibility and does not prove execution '
+        'location. budget=quota allows measured quota plans plus eligible '
+        'local-runtime models.',
     inputSchema: _modelFilterInputSchema,
     outputSchema: listModelsOutputSchema,
     annotations: _liveCollection,

@@ -21,6 +21,7 @@ ProviderQuota _quota(
       asOf: _now,
       kind: kind,
       source: source,
+      models: kind.isLocal ? const [ModelInfo(id: 'installed:7b')] : const [],
       windows: kind.isLocal
           ? const []
           : [
@@ -39,6 +40,133 @@ Insights _insights() => Insights.from([
     ], _now);
 
 void main() {
+  test('upstream and embedding inventory reports reachable without readiness',
+      () {
+    for (final model in const [
+      ModelInfo(
+          id: 'private',
+          loaded: true,
+          upstreamRouting: UpstreamRouting.declared),
+      ModelInfo(
+          id: 'partial',
+          loaded: true,
+          upstreamRouting: UpstreamRouting.unresolved),
+      ModelInfo(id: 'cloud', loaded: true, cloudOffloaded: true),
+      ModelInfo(id: 'embedding', loaded: true, embedding: true),
+    ]) {
+      for (final active in [true, false]) {
+        final provider = ProviderQuota(
+            provider: 'ollama',
+            displayName: 'Ollama',
+            account: 'fixture',
+            asOf: _now,
+            kind: ProviderQuotaKind.local,
+            models: [model],
+            active: active);
+        final report = buildQuotaHealthReport(
+            [provider], _now, suggestRoute([provider], _now));
+        expect(report.providers.single.state, 'local reachable');
+        expect(report.providers.single.toJson()['state'], 'local reachable');
+        final markdown = report.toMarkdown();
+        expect(markdown, contains('reachable, local runtime'));
+        expect(markdown, isNot(contains('local active')));
+        expect(markdown, isNot(contains('local ready')));
+        expect(markdown, isNot(contains('loaded, local runtime')));
+        if (model.hasLocalExecutionVeto) {
+          expect(markdown, contains('location/cost unverified'));
+        }
+      }
+    }
+  });
+
+  test('local report state preserves failure, stale and clock precedence', () {
+    final cases = [
+      (
+        state: 'unavailable',
+        trust: 'error',
+        fields: <String, Object?>{
+          'ok': false,
+          'stale': true,
+        }
+      ),
+      (
+        state: 'unavailable',
+        trust: 'error',
+        fields: <String, Object?>{
+          'error': 'metadata read failed',
+        }
+      ),
+      (
+        state: 'cached',
+        trust: 'cached',
+        fields: <String, Object?>{
+          'stale': true,
+        }
+      ),
+      (
+        state: 'unverified',
+        trust: 'unverified',
+        fields: <String, Object?>{
+          'as_of': _now + 3600,
+        }
+      ),
+      (
+        state: 'provider drift',
+        trust: 'provider drift',
+        fields: <String, Object?>{
+          'drift_reason': 'metadata shape changed',
+          'ok': false,
+          'stale': true,
+        }
+      ),
+    ];
+    for (final fixture in cases) {
+      final provider = ProviderQuota.fromJson({
+        ...ProviderQuota(
+            provider: 'ollama',
+            displayName: 'Ollama',
+            account: 'fixture',
+            asOf: _now,
+            kind: ProviderQuotaKind.local,
+            active: true,
+            models: const [
+              ModelInfo(
+                  id: 'private',
+                  loaded: true,
+                  upstreamRouting: UpstreamRouting.declared),
+            ]).toJson(),
+        ...fixture.fields,
+      });
+      final report = buildQuotaHealthReport(
+          [provider], _now, suggestRoute([provider], _now));
+      expect(report.providers.single.state, fixture.state);
+      expect(report.toMarkdown(), contains('${fixture.trust}, local runtime'));
+      expect(report.toMarkdown(), isNot(contains('local ready')));
+      expect(report.toMarkdown(), isNot(contains('local active')));
+    }
+  });
+
+  test('represented local generation keeps loaded and cold report states', () {
+    for (final loaded in [true, false]) {
+      final provider = ProviderQuota(
+          provider: 'ollama',
+          displayName: 'Ollama',
+          account: 'fixture',
+          asOf: _now,
+          kind: ProviderQuotaKind.local,
+          active: !loaded,
+          models: [
+            ModelInfo(id: 'ordinary', loaded: loaded),
+          ]);
+      final report = buildQuotaHealthReport(
+          [provider], _now, suggestRoute([provider], _now));
+      expect(report.providers.single.state,
+          loaded ? 'local active' : 'local ready');
+      expect(report.toMarkdown(),
+          contains(loaded ? 'loaded, local runtime' : 'ready, local runtime'));
+    }
+  });
+
   test('a drifted provider reads as drift in the report, not live', () {
     // Regression: report _state omitted the driftReason check that top and the
     // desktop app apply first, so a held-during-drift snapshot was mislabeled as
@@ -289,7 +417,8 @@ void main() {
     );
     expect(markdown, contains('| 3d usable |'));
     expect(markdown, contains('Manual entries are self-reported'));
-    expect(markdown, contains('Local runtimes are fallback capacity'));
+    expect(markdown,
+        contains('Local-runtime fallback excludes reported upstream'));
     expect(markdown, contains('## Weekly calendar'));
     expect(markdown, contains('claude (account):'));
     expect(markdown, contains('## Best sampled windows'));
@@ -415,7 +544,7 @@ void main() {
     expect(
       report.toMarkdown(),
       contains(
-          '| Ollama | installed | unavailable | error, local runtime, cold, captured just now |'),
+          '| Ollama | installed | unavailable | error, local runtime, captured just now |'),
     );
   });
 }

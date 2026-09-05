@@ -11,7 +11,8 @@ import time
 import unittest
 from pathlib import Path
 
-from render_config import ADVISORY_TOOLS, ROOT, render_config
+from render_config import ROOT, render_config
+from test_harness_tool_visibility import EXPECTED_ADVICE, source_derived_visible_tools
 
 
 def native_dart() -> str | None:
@@ -145,9 +146,23 @@ class McpEntrypointTests(unittest.TestCase):
                 send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
                 tools = response(2)["tools"]
                 names = {tool["name"] for tool in tools}
-                self.assertTrue(set(ADVISORY_TOOLS).issubset(names))
+                self.assertTrue(EXPECTED_ADVICE.issubset(names))
                 self.assertIn("reserve_provider", names)
                 self.assertIn("release_provider", names)
+                # Apply the independent pinned contract to this real server
+                # catalog. This is still not execution of either harness.
+                for harness in ("openclaw", "hermes"):
+                    with self.subTest(harness=harness):
+                        fragment = render_config(harness, "stdio", dart=DART)
+                        self.assertEqual(
+                            source_derived_visible_tools(
+                                harness,
+                                fragment,
+                                names,
+                                initialized["capabilities"],
+                            ),
+                            EXPECTED_ADVICE,
+                        )
                 assert process.stdin is not None
                 process.stdin.close()
                 self.assertEqual(process.wait(timeout=5), 0)

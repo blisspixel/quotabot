@@ -15,7 +15,12 @@ import 'models.dart';
 ///   is unavailable, so the plan is still named.
 /// - `metered plan`: any other provider with a measured window.
 String? providerSpendClass(ProviderQuota q) {
-  if (q.isLocal) return q.active ? 'loaded' : 'cold';
+  if (q.isLocal) {
+    return q.localGenerationReadiness ??
+        (q.models.any((model) => model.hasLocalExecutionVeto)
+            ? 'location/cost unverified'
+            : null);
+  }
   if (q.isManual || q.sourceClass == ProviderSourceClass.statusOnly) {
     return null;
   }

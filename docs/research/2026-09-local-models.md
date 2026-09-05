@@ -267,3 +267,26 @@ local/quota fallback until a supported positive source is admitted. Keep the
 caller's original choice when no safe route exists. Audit positive Ollama and
 Lemonade producers before claiming their fallback is preserved; an absent cloud
 flag must not silently turn unknown into on-device evidence.
+
+### Follow-up: explicit upstream configuration
+
+Static review of Ollama v0.33.3 confirms that cloud-name suffixes are an
+incomplete exclusion. Its [wire types](https://github.com/ollama/ollama/blob/b79067b0db7417f20108363bc22adb97f35c966a/api/types.go#L737)
+and [inventory producer](https://github.com/ollama/ollama/blob/b79067b0db7417f20108363bc22adb97f35c966a/server/model_list_cache.go#L322)
+carry `remote_host` and `remote_model`. Aliases can therefore name an upstream
+route without containing `-cloud`. Private upstreams are supported: the
+[dispatch test](https://github.com/ollama/ollama/blob/b79067b0db7417f20108363bc22adb97f35c966a/server/routes_generate_test.go#L673)
+configures a private HTTP server and permits it through `OLLAMA_REMOTES`.
+That test was inspected, not executed.
+
+The bounded correction preserves declared or unresolved upstream configuration
+as an independent exclusion from local-only and included-quota advice. It must
+not label every private server as public cloud, paid, or free. Malformed,
+partial, or conflicting declarations remain excluded. Raw upstream addresses
+and model names are unnecessary for the public exclusion reason.
+
+This correction adds negative evidence. It does not turn missing declarations
+into positive collector-local execution proof. The shared scope resolver above
+remains necessary, particularly for tunnels, WSL, LM Link, and composite
+Lemonade recipes. No additional probe or inference call is needed to preserve
+the upstream fields already present in inventory metadata.

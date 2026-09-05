@@ -362,7 +362,7 @@ snapshots but do not contribute `models` entries.
 Some provider models with temporary included-quota terms can include
 `quota_included_until`; after that epoch, quotabot no longer marks the model
 `quota_backed` for `--budget=quota` routing unless the provider exposes a normal
-quota-backed path for it. Local-runtime entries also include
+quota-backed path for it. Eligible local-runtime entries also include
 `local_readiness` (`loaded` or `cold`), `size_bytes`, loaded-model
 `vram_bytes`, and `quant` when the runtime exposes them, so routers can
 distinguish ready-now models from installed models that may need a cold start.
@@ -386,6 +386,23 @@ Lemonade `recipe: "cloud"` or `cloud_provider` field. Such a model is excluded
 from `--budget=local` and free budgets, though it stays listed under
 `--budget=any`; it remains `local: true` because it is reached through the local
 daemon.
+Ollama models with declared upstream configuration also carry
+`upstream_routing: "declared"`; partial or malformed declarations
+carry `"unresolved"`. This field records configuration evidence independently
+of `cloud_offloaded`, never a price or physical-device claim. Both states exclude
+the model from local and quota budgets, provider fallback, local readiness
+preference, and host hardware fit. A declared upstream remains inspectable
+under `any`, with execution location and cost unverified. An unresolved upstream
+stays visible but unavailable even under `any`. Runtime-reported `loaded` can
+remain in inventory; it does not supply `local_readiness` or `hardware_fit` for
+these entries. Raw upstream addresses and target model identifiers are omitted.
+The state does not compare upstream target identities or prove a dispatch.
+Two different well-formed target declarations still establish upstream
+configuration and keep the local/quota exclusion.
+Missing `upstream_routing` retains legacy `not_reported` behavior and is not
+positive on-device evidence. Unknown or malformed present cache values decode
+as unresolved, so decoding cannot silently remove the exclusion. An
+embedding-only inventory also cannot qualify a provider as a generation fallback.
 Model registry listing defaults to `any` for inspection. Concrete CLI and MCP
 model suggestions default to `quota`; `any` must be explicit before a suggestion
 can select credit-backed or paid catalog entries.

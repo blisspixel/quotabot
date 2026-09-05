@@ -154,16 +154,19 @@ class QuotaAlert {
 /// steady spent window never re-fires. A stale or integrity-rejected identity
 /// holds its prior armed state without firing because it is not trusted current
 /// evidence. Local runtimes are never alerted on; they have no quota to spend.
+/// [includeRoute] can suppress the optional alternative while its advisory
+/// checks are incomplete; crossing detection and arming remain unchanged.
 ({List<QuotaAlert> fired, Set<String> armed}) computeAlerts({
   required List<ProviderQuota> snapshot,
   required RouteSuggestion suggestion,
   required int now,
   Set<String> armed = const {},
   Set<AlertSeverity> alertOn = kDefaultAlertOn,
+  bool includeRoute = true,
 }) {
   final fired = <QuotaAlert>[];
   final next = <String>{};
-  final rec = suggestion.recommended;
+  final rec = includeRoute ? suggestion.recommended : null;
   for (final q in snapshot) {
     if (q.isLocal) continue;
     final key = quotaIdentityKeyFor(q);

@@ -212,7 +212,8 @@ class QuotaHealthReport {
       lines
         ..add('')
         ..add(
-          'Local runtimes are fallback capacity and do not spend subscription quota.',
+          'Local-runtime fallback excludes reported upstream, cloud, and embedding '
+          'models. Execution location and cost still require separate verification.',
         );
     }
     final calendars = providers
@@ -321,7 +322,7 @@ QuotaHealthProviderLine _providerLine(
 ) {
   final headroom = provider.isLocal ? null : providerHeadroom(provider, now);
   final binding = provider.isLocal ? null : bindingWindow(provider, now);
-  final state = _state(provider, headroom);
+  final state = _state(provider, headroom, now);
   final scheduleHint = provider.isLocal || insights == null
       ? null
       : weekHourScheduleHint(
@@ -402,7 +403,7 @@ bool _reportAccountNeedsRedaction(QuotaHealthProviderLine provider) {
   return provider.account != 'simulated';
 }
 
-String _state(ProviderQuota provider, double? headroom) {
+String _state(ProviderQuota provider, double? headroom, int now) {
   // Drift is the top-priority read state, as it is in `top` and the desktop app:
   // a provider whose live read disagreed with its trusted history is showing a
   // held snapshot, and that must not be mislabeled as an ordinary live/cached
@@ -410,7 +411,18 @@ String _state(ProviderQuota provider, double? headroom) {
   // as drift.
   if (provider.driftReason != null) return 'provider drift';
   if (!provider.ok) return 'unavailable';
-  if (provider.isLocal) return provider.active ? 'local active' : 'local ready';
+  if (provider.isLocal) {
+    if (provider.error != null || provider.sourceClassViolation != null) {
+      return 'unavailable';
+    }
+    if (provider.stale) return 'cached';
+    if (!isLocalRuntimeReachableAt(provider, now)) return 'unverified';
+    return switch (provider.localGenerationReadiness) {
+      'loaded' => 'local active',
+      'cold' => 'local ready',
+      _ => 'local reachable',
+    };
+  }
   if (provider.stale) return 'cached';
   if (headroom == null) return 'unknown';
   if (headroom <= kSpentHeadroomFloor) return 'spent';
@@ -433,7 +445,13 @@ String _trustReadState(QuotaHealthProviderLine provider) {
   if (provider.state == 'provider drift') return 'provider drift';
   if (provider.state == 'unavailable') return 'error';
   if (provider.kind.isLocal) {
-    return provider.state == 'local active' ? 'loaded' : 'ready';
+    return switch (provider.state) {
+      'local active' => 'loaded',
+      'local ready' => 'ready',
+      'local reachable' => 'reachable',
+      'cached' => 'cached',
+      _ => 'unverified',
+    };
   }
   return switch (provider.state) {
     'cached' => 'cached',
