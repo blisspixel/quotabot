@@ -21,6 +21,7 @@ The value is a fixed sequential-hex placeholder that exercises the token length 
 check; it authenticates nothing and is never read from a credential store."""
 condition = "AND"
 paths = [
+  '''collector/test/cli_mcp_test\.dart''',
   '''collector/test/mcp_server_cli_test\.dart''',
   '''collector/test/mcp_http_test\.dart''',
 ]
