@@ -41,22 +41,22 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 
 ## Project status and execution order
 
-The current verified stable release is 0.11.1. Fresh quota publishes before
-advisory analytics complete, and upstream-configured models are excluded from
-local/quota advice. It retains per-model desktop details, Ollama reasoning,
-conservative Windows GPU evidence, and versioned harness and Agent Plugins
-setup through the release CLI's `mcp` command. Local-runtime evidence leads with
-loaded model, running context, GPU
-residency, and separately labeled host pressure. The
-shipped routing policies are `balanced`,
-`local_first`, and opt-in `quota_stretch`. The bounded provider-ID cache
-coordinator passed the complete release, install, update, and source-setup
-lifecycle on Windows, macOS, and Linux; the shipped alias map remains empty. The
-next work makes local models inspectable, improves native platform quality, and
-adds versioned advisory support for named agent harnesses. Useful product work
-continues while publisher identities are provisioned; signed native evidence
-remains a 1.0 release gate. Credit-backed balances retain their separate typed
-pool and explicit-spend requirements. The
+The current verified stable release is 0.11.2. Automatic refresh confirms reset
+boundaries without inventing quota. Claude, Codex and Grok coordinate supported
+metadata reads and retry deadlines per identity and purpose. Codex admission
+denial preserves measured balance while vetoing advice and leases; scoped model
+denials never qualify a local fallback. Grok uses current first-party CLI billing
+metadata and proved opaque personal/team pool identities.
+
+Fresh quota publishes before advisory analytics. Inspectable local models,
+conservative hardware evidence, and versioned harness and Agent Plugins setup
+remain available through the release CLI's `mcp` command. The shipped policies
+are `balanced`, `local_first`, and opt-in `quota_stretch`. Credit-backed balances
+retain their separate typed-pool and explicit-spend requirements. Next work
+closes independent credential-refresh lifecycle gaps, polishes native controls
+and identity, and validates named harnesses. Useful product work continues while
+publisher identities are provisioned; signed native evidence remains a 1.0 gate.
+The
 [roadmap Next section](ROADMAP.md#next) is the sole source for its
 behavior, guardrails, completion criteria, and rationale.
 
@@ -190,6 +190,12 @@ for that surface.
   bodies are closed without waiting for the sender.
 
 ## The routing contract
+
+Optional `request_admission` is distinct from measured quota. `denied` and
+`unresolved` make the provider or matching model unavailable. An `allowed`
+flag never overrides exhausted, expired, stale or drifted quota. Missing
+admission metadata makes no new access claim. Keep the measured percentage
+visible when explaining a denial.
 
 1. Prefer the metered subscription with the most remaining headroom, as long as
    it is above a comfort threshold.

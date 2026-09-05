@@ -4,6 +4,60 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.2 - 2026-09-05
+
+### Fixed
+
+- Smart refresh checks current quota within five minutes subject to provider
+  retry delays, including weekly-only plans and off-cycle resets. A recently
+  expired pool receives bounded renewal
+  checks, and returning to a visible desktop coalesces recovery with any active
+  read. Old percentages remain unavailable until a fresh response confirms the
+  replacement window.
+- Claude, Codex and Grok coordinate quota reads across processes by supported
+  credential/account identity and metadata purpose. Retry delays survive normal
+  restarts, and a timed-out caller cannot release an active request's guard.
+  Healthy accounts can refresh independently. Fixed intervals retain explicit
+  retry floors for transports without this coordination; very long waits no
+  longer overflow desktop, terminal or MCP subscription timers.
+- Codex collection and identity discovery honor `CODEX_HOME`. Explicit provider
+  or model admission denial preserves measured quota while blocking advice,
+  availability and new or reused leases. Unknown serialized admission remains
+  unavailable. A blocked local model cannot qualify provider fallback, while
+  healthy sibling models retain their own readiness.
+- Claude classifies both responses in its single malformed-response retry,
+  preserving a subsequent throttle, permission failure or service error.
+  Bounded credential-to-pool associations preserve the correct last-known card
+  across collection workers without proving fresh identity or entitlement.
+- Grok reads the current first-party CLI included-credit billing surface. It
+  verifies personal/team principal identity, discovers independently owned
+  grants, and keeps an optional grant failure from hiding a usable host account.
+  Paid, prepaid and on-demand values are not added to included quota.
+- Desktop collection reuses one managed worker. Refresh publishes bounded
+  results immediately; cooperative close waits for original adapters and usage
+  reads before closing pooled connections. Only full-application Quit may end
+  the process after its grace period.
+- Desktop and terminal recovery labels distinguish a failed metadata check
+  from spent quota. Measured balances stay visible beside access denial, and
+  collapsed provider cards retain the reason they are unavailable.
+
+### Compatibility
+
+- Grok now identifies proved pools with opaque personal/team identities. Saved
+  profiles using old email-based Grok selectors must select the current account
+  again; quotabot does not silently widen an exact account filter.
+- JSON adds optional `request_admission` evidence. Existing schema versions and
+  routing policies remain compatible. OAuth token-exchange lifetime and bounded
+  MCP shutdown are separate follow-up work described in the September review.
+
+### Validation
+
+- Isolated regressions cover reset confirmation, manual and foreground refresh,
+  cooldowns across processes, delayed request settlement, credential replacement,
+  admission across CLI/MCP/HTTP and desktop, modern Grok metadata, and long-lived
+  subscription timers. They do not establish the cause of an individual user's
+  earlier display disagreement or certify an installed third-party harness.
+
 ## 0.11.1 - 2026-09-05
 
 ### Changed
