@@ -17,6 +17,7 @@ import 'analysis.dart';
 import 'drift.dart';
 import 'insights.dart';
 import 'model_catalog.dart';
+import 'model_quota_matching.dart';
 import 'models.dart';
 import 'parsing.dart' show resetLabel;
 import 'plan_evidence.dart';
@@ -88,6 +89,9 @@ class ModelEntry {
   final ProviderSourceClass sourceClass;
   final bool quotaBacked;
 
+  /// Combined shared and matching model-pool admission for this entry.
+  final RequestAdmission requestAdmission;
+
   /// Passive fit evidence for an on-device local model. Null for cloud models
   /// and cloud-offloaded entries reached through a local daemon.
   final LocalModelHardwareFit? hardwareFit;
@@ -131,6 +135,7 @@ class ModelEntry {
     required this.source,
     required this.sourceClass,
     required this.quotaBacked,
+    this.requestAdmission = RequestAdmission.notReported,
     this.hardwareFit,
     required this.headroomPercent,
     required this.resetsAt,
@@ -157,6 +162,8 @@ class ModelEntry {
         if (driftReason != null) 'drift_reason': driftReason,
         if (driftObservedAt != null) 'drift_observed_at': driftObservedAt,
         'quota_backed': quotaBacked,
+        if (requestAdmission != RequestAdmission.notReported)
+          'request_admission': requestAdmission.wireName,
         if (localReadiness != null) 'local_readiness': localReadiness,
         if (hardwareFit != null) ...hardwareFit!.toJson(),
         if (source != null) 'source': source,
@@ -565,11 +572,16 @@ class ModelCapabilityGates {
   /// Callers may use it instead of that summary for a capability-scoped route.
   final Map<String, double> headroomByQuotaKey;
 
+  /// Admission veto when every matching capability alternative is blocked.
+  /// One denied model never blocks another eligible alternative.
+  final Map<String, RequestAdmission> requestAdmissionByQuotaKey;
+
   const ModelCapabilityGates({
     required this.knownQuotaKeys,
     required this.availableQuotaKeys,
     this.budgetResetByQuotaKey = const {},
     this.headroomByQuotaKey = const {},
+    this.requestAdmissionByQuotaKey = const {},
   });
 }
 
@@ -583,10 +595,12 @@ ModelCapabilityGates modelCapabilityGates(
   final available = <String>{};
   final budgetResets = <String, int>{};
   final routeHeadroom = <String, double>{};
+  final admissions = <String, List<RequestAdmission>>{};
   for (final entry in buildModelRegistry(snapshot, now, catalog: catalog)) {
     if (entry.local || !meetsRequirements(entry, requirements)) continue;
     final key = quotaIdentityKey(entry.provider, entry.account);
     known.add(key);
+    admissions.putIfAbsent(key, () => []).add(entry.requestAdmission);
     if (entry.available) {
       available.add(key);
       // Antigravity's provider window is the tightest display summary across
@@ -618,6 +632,14 @@ ModelCapabilityGates modelCapabilityGates(
     availableQuotaKeys: available,
     budgetResetByQuotaKey: budgetResets,
     headroomByQuotaKey: routeHeadroom,
+    requestAdmissionByQuotaKey: {
+      for (final entry in admissions.entries)
+        if (entry.value.every((admission) => admission.blocksRequests))
+          entry.key: entry.value
+                  .every((admission) => admission == RequestAdmission.denied)
+              ? RequestAdmission.denied
+              : RequestAdmission.unresolved,
+    },
   );
 }
 
@@ -658,6 +680,7 @@ List<ModelEntry> buildModelRegistry(
         q.windows.isNotEmpty &&
         kQuotaPlanProviders.contains(q.provider);
     for (final m in models) {
+      final admission = q.requestAdmissionForModel(m);
       final sparseScopedQuota =
           q.provider == claudeProviderId || q.provider == codexProviderId
               ? _matchingModelQuota(q, m, now)
@@ -687,19 +710,21 @@ List<ModelEntry> buildModelRegistry(
         source: q.source,
         sourceClass: q.sourceClass,
         quotaBacked: quotaBacked,
+        requestAdmission: admission,
         hardwareFit: q.isLocal && !m.hasLocalExecutionVeto
             ? localModelHardwareFit(m, q.localHardware)
             : null,
         headroomPercent: budget?.headroomPercent,
         resetsAt: budget?.resetsAt,
         gatingWindow: budget?.gatingWindow,
-        available: q.isLocal
-            ? m.upstreamRouting == UpstreamRouting.unresolved
-                ? false
-                : m.hasLocalExecutionVeto
-                    ? isLocalRuntimeReachableAt(q, now)
-                    : isLocalRuntimeAvailableAt(q, now)
-            : budget?.available ?? false,
+        available: !admission.blocksRequests &&
+            (q.isLocal
+                ? m.upstreamRouting == UpstreamRouting.unresolved
+                    ? false
+                    : m.hasLocalExecutionVeto
+                        ? isLocalRuntimeReachableAt(q, now)
+                        : isLocalRuntimeAvailableAt(q, now)
+                : budget?.available ?? false),
         stale: q.stale,
         driftReason: q.driftReason,
         driftObservedAt: q.driftObservedAt,
@@ -868,24 +893,7 @@ ModelQuota? _matchingModelQuota(
   ModelInfo model,
   int now,
 ) {
-  final modelKeys = _modelIdentityKeys(model.id, model.displayName);
-  final best = <ModelQuota>[];
-  var bestScore = 0;
-  for (final modelQuota in quota.modelQuotas) {
-    final score = _modelQuotaMatchScore(
-      _modelQuotaKey(modelQuota.model),
-      modelKeys,
-      provider: quota.provider,
-    );
-    if (score > bestScore) {
-      best
-        ..clear()
-        ..add(modelQuota);
-      bestScore = score;
-    } else if (score > 0 && score == bestScore) {
-      best.add(modelQuota);
-    }
-  }
+  final best = quota.matchingModelQuotas(model);
   if (best.isEmpty) return null;
   if (best.length == 1) return best.single;
   return _conservativeModelQuota(best, now);
@@ -898,7 +906,8 @@ ModelQuota? _matchingModelQuota(
 ModelQuota _conservativeModelQuota(List<ModelQuota> matches, int now) {
   final ordered = List<ModelQuota>.of(matches)
     ..sort((a, b) {
-      final byKey = _modelQuotaKey(a.model).compareTo(_modelQuotaKey(b.model));
+      final byKey = modelQuotaIdentityKey(a.model)
+          .compareTo(modelQuotaIdentityKey(b.model));
       return byKey != 0 ? byKey : a.model.compareTo(b.model);
     });
   final representative = ordered.first;
@@ -925,6 +934,9 @@ ModelQuota _conservativeModelQuota(List<ModelQuota> matches, int now) {
 
   return ModelQuota(
     model: representative.model,
+    requestAdmission: ordered
+        .map((quota) => quota.requestAdmission)
+        .reduce((current, next) => current.combine(next)),
     usedPercent: usedPercent,
     resetsAt: resetsAt,
     windowLabel: ordered.every(
@@ -937,38 +949,9 @@ ModelQuota _conservativeModelQuota(List<ModelQuota> matches, int now) {
   );
 }
 
-int _modelQuotaMatchScore(
-  String quotaKey,
-  Set<String> modelKeys, {
-  required String provider,
-}) {
-  if (modelKeys.contains(quotaKey)) return 3;
-  if (modelKeys.any((modelKey) => quotaKey.startsWith(modelKey))) return 2;
-  if (_isProviderFamilyQuotaKey(quotaKey) &&
-      modelKeys.any((modelKey) => modelKey.startsWith(quotaKey))) {
-    return 1;
-  }
-  if (provider == claudeProviderId &&
-      _claudeScopedFamilies.any(
-        (family) =>
-            quotaKey == family &&
-            modelKeys.any((modelKey) => modelKey.contains(family)),
-      )) {
-    return 1;
-  }
-  return 0;
-}
-
-const Set<String> _claudeScopedFamilies = {
-  'fable',
-  'opus',
-  'sonnet',
-  'haiku',
-};
-
 String? _claudeScopedFamily(ModelInfo model) {
-  final keys = _modelIdentityKeys(model.id, model.displayName);
-  for (final family in _claudeScopedFamilies) {
+  final keys = modelQuotaIdentityKeys(model.id, model.displayName);
+  for (final family in claudeScopedQuotaFamilies) {
     if (keys.any((key) => key.contains(family))) return family;
   }
   return null;
@@ -979,7 +962,7 @@ bool _requiresLiveScopedQuota(String provider, ModelInfo model) {
     return _claudeScopedFamily(model) == 'fable';
   }
   if (provider == codexProviderId) {
-    final keys = _modelIdentityKeys(model.id, model.displayName);
+    final keys = modelQuotaIdentityKeys(model.id, model.displayName);
     return keys.any((key) => key.contains('codexspark'));
   }
   return false;
@@ -1012,17 +995,6 @@ bool _modelPlanIsIncludedQuota(
   );
   return evidence?.includedQuota ?? false;
 }
-
-Set<String> _modelIdentityKeys(String id, String? displayName) => {
-      _modelQuotaKey(id),
-      if (displayName != null) _modelQuotaKey(displayName),
-    };
-
-String _modelQuotaKey(String label) =>
-    label.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
-
-bool _isProviderFamilyQuotaKey(String key) =>
-    key == 'gemini' || key == 'claude' || key == 'gptoss';
 
 /// The registry as the `quotabot.models.v1` JSON envelope, shared by the CLI
 /// `models` command and the MCP `list_models` tool so both speak one shape.
@@ -1285,7 +1257,15 @@ ModelSuggestion suggestModel(
               ? 'Models match, but provider drift leaves only stale '
                   'last-trusted quota evidence; run quotabot verify before '
                   'routing.'
-              : 'Models match but none has budget right now; wait for a reset.')
+              : ranked.any((entry) =>
+                      !entry.stale &&
+                      entry.driftReason == null &&
+                      entry.requestAdmission.blocksRequests &&
+                      (entry.headroomPercent ?? 0) > kSpentHeadroomFloor)
+                  ? 'Models match, but request admission is denied or unresolved '
+                      'for routes with measured quota. Check the provider before '
+                      'retrying.'
+                  : 'Models match but none has budget right now; wait for a reset.')
       : _recommendReason(
           pick,
           expiringQuota: _entryExpiringSignal(

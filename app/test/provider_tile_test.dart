@@ -3,6 +3,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/main.dart';
+import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
 
 ProviderQuota _q(double usedPercent, {int? resetsAt}) => ProviderQuota(
@@ -55,6 +56,124 @@ double _contrastRatio(Color foreground, Color background) {
 }
 
 void main() {
+  for (final value in ['denied', 'future-admission']) {
+    testWidgets('$value stays visible on a collapsed measured provider tile', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final quota = ProviderQuota.fromJson({
+        'provider': 'codex',
+        'display_name': 'Codex',
+        'account': 'fixture',
+        'as_of': now,
+        'request_admission': value,
+        'windows': [
+          {'label': 'weekly', 'used_percent': 50, 'resets_at': now + 3600},
+        ],
+      });
+      final expected = value == 'denied'
+          ? 'requests denied'
+          : 'request status unverified';
+      await tester.pumpWidget(
+        _wrap(
+          SizedBox(
+            width: 340,
+            child: ProviderTile(
+              quota: quota,
+              cardColor: const Color(0xFF1A1A1A),
+              onToggle: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(WindowBar), findsOneWidget);
+      expect(find.textContaining('50%'), findsWidgets);
+      expect(find.textContaining('50% free'), findsOneWidget);
+      expect(find.text(expected), findsOneWidget);
+      expect(
+        tester
+            .renderObject<RenderParagraph>(find.text(expected))
+            .didExceedMaxLines,
+        isFalse,
+      );
+      expect(
+        tester.widget<WindowBar>(find.byType(WindowBar)).requestsBlocked,
+        isTrue,
+      );
+      expect(find.bySemanticsLabel(RegExp(expected)), findsWidgets);
+      expect(find.textContaining('spent'), findsNothing);
+      expect(providerStatus(quota, now).hasData, isTrue);
+      expect(providerStatus(quota, now).blocked, isFalse);
+      expect(providerAvailability(quota, now).available, isFalse);
+      expect(tester.takeException(), isNull);
+      semantics.dispose();
+    });
+  }
+
+  testWidgets('denied spent quota names the reset without promising access', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: 'codex',
+      displayName: 'Codex',
+      account: 'fixture',
+      asOf: now,
+      requestAdmission: RequestAdmission.denied,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: now + 3600),
+      ],
+    );
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota,
+          cardColor: const Color(0xFF1A1A1A),
+          onToggle: () {},
+        ),
+      ),
+    );
+    expect(find.text('requests denied'), findsOneWidget);
+    expect(find.text('weekly spent'), findsOneWidget);
+    expect(find.textContaining('was spent'), findsNothing);
+    expect(find.textContaining('available '), findsNothing);
+    expect(find.textContaining('reset '), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('named admission label stays with its measured model pool', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: 'codex',
+      displayName: 'Codex',
+      account: 'fixture',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: now + 3600),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'GPT-5.3-Codex-Spark',
+          usedPercent: 40,
+          resetsAt: now + 3600,
+          requestAdmission: RequestAdmission.denied,
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: quota, cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
+    expect(find.textContaining('80%'), findsWidgets);
+    expect(find.textContaining('60%'), findsWidgets);
+    expect(find.textContaining('requests denied'), findsWidgets);
+    expect(providerAvailability(quota, now).available, isTrue);
+  });
+
   testWidgets('expanded subscription cards show usage-view details', (
     tester,
   ) async {
@@ -817,7 +936,9 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a slow read says provider slow, not throttled', (tester) async {
+  testWidgets('a slow read reports a delay without claiming a rate limit', (
+    tester,
+  ) async {
     // A timeout retains last-known quota but does not claim an HTTP rate limit.
     final throttled = ProviderQuota.fromJson({
       ..._q(60).toJson(),
@@ -834,7 +955,7 @@ void main() {
 
     expect(find.text('40% last known'), findsOneWidget);
     expect(
-      find.text('provider slow - retrying, showing last known'),
+      find.text('quota check delayed, showing last known'),
       findsOneWidget,
     );
     expect(
@@ -842,44 +963,52 @@ void main() {
       findsNothing,
     );
     expect(
-      find.bySemanticsLabel(RegExp('provider slow', caseSensitive: false)),
+      find.bySemanticsLabel(
+        RegExp('quota check delayed', caseSensitive: false),
+      ),
       findsWidgets,
     );
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a degraded read says provider error, not throttled', (
-    tester,
-  ) async {
-    final degraded = ProviderQuota.fromJson({
-      ..._q(60).toJson(),
-      'stale': true,
-      'ok': false,
-      'error': 'Antigravity fetchAvailableModels request returned HTTP 503',
-      'pipe_health': 'degraded',
-    });
+  testWidgets(
+    'a degraded read reports a service error without a retry promise',
+    (tester) async {
+      final degraded = ProviderQuota.fromJson({
+        ..._q(60).toJson(),
+        'stale': true,
+        'ok': false,
+        'error': 'Antigravity fetchAvailableModels request returned HTTP 503',
+        'pipe_health': 'degraded',
+      });
 
-    await tester.pumpWidget(
-      _wrap(ProviderTile(quota: degraded, cardColor: Colors.white)),
-    );
-    await tester.pump();
+      await tester.pumpWidget(
+        _wrap(ProviderTile(quota: degraded, cardColor: Colors.white)),
+      );
+      await tester.pump();
 
-    expect(find.text('40% last known'), findsOneWidget);
-    expect(
-      find.text('provider error - retrying, showing last known'),
-      findsOneWidget,
-    );
-    expect(find.text('throttled - retrying, showing last known'), findsNothing);
-    expect(
-      find.bySemanticsLabel(RegExp('provider error', caseSensitive: false)),
-      findsWidgets,
-    );
-    expect(
-      find.bySemanticsLabel(RegExp('throttled', caseSensitive: false)),
-      findsNothing,
-    );
-    expect(tester.takeException(), isNull);
-  });
+      expect(find.text('40% last known'), findsOneWidget);
+      expect(
+        find.text('quota service error, showing last known'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('throttled - retrying, showing last known'),
+        findsNothing,
+      );
+      expect(
+        find.bySemanticsLabel(
+          RegExp('quota service error', caseSensitive: false),
+        ),
+        findsWidgets,
+      );
+      expect(
+        find.bySemanticsLabel(RegExp('throttled', caseSensitive: false)),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   for (final failure
       in <
@@ -898,7 +1027,7 @@ void main() {
           pipeHealth: providerPipeHealthThrottled,
           httpStatus: null,
           retryAfterSeconds: null,
-          summary: 'provider slow - retrying',
+          summary: 'quota check delayed',
         ),
         (
           name: 'rate limit',
@@ -906,7 +1035,7 @@ void main() {
           pipeHealth: providerPipeHealthThrottled,
           httpStatus: 429,
           retryAfterSeconds: 120,
-          summary: 'rate limited - retrying in 2m',
+          summary: 'quota check rate limited',
         ),
         (
           name: 'service error',
@@ -914,7 +1043,7 @@ void main() {
           pipeHealth: providerPipeHealthDegraded,
           httpStatus: 503,
           retryAfterSeconds: 45,
-          summary: 'provider error - retrying in 45s',
+          summary: 'quota service error',
         ),
       ]) {
     testWidgets('first-read ${failure.name} leads with recovery', (

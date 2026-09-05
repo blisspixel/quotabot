@@ -26,6 +26,65 @@ void main() {
     return runCollectCli(args, environment: {'LOCALAPPDATA': temp.path});
   }
 
+  for (final state in ['denied', 'cached-unresolved']) {
+    test(
+        'check $state preserves the balance and explicitly refuses availability',
+        () async {
+      final configuredHome = Directory('${temp.path}/codex')..createSync();
+      File('${configuredHome.path}/auth.json').writeAsStringSync(jsonEncode({
+        'tokens': {
+          'access_token': 'synthetic-token',
+          'account_id': 'cli-projection'
+        },
+      }));
+      Future<ProcessResult> invoke(bool json) => Process.run(
+            Platform.resolvedExecutable,
+            [
+              '--packages=.dart_tool/package_config.json',
+              'test/fixtures/cli_request_admission.dart',
+              state,
+              'check',
+              'codex',
+              json ? '--json' : '--no-color'
+            ],
+            workingDirectory: Directory.current.path,
+            environment: {
+              ...Platform.environment,
+              'CODEX_HOME': configuredHome.path,
+              'USERPROFILE': temp.path,
+              'HOME': temp.path,
+              'LOCALAPPDATA': '${temp.path}/${json ? "json" : "text"}',
+              'APPDATA': '${temp.path}/roaming',
+              'XDG_CONFIG_HOME': '${temp.path}/config',
+              'XDG_DATA_HOME': '${temp.path}/data',
+              'QUOTABOT_DEMO': '0',
+              'NO_COLOR': '1',
+            },
+          );
+      final json = await invoke(true);
+      expectExitCode(json, 69);
+      final body = jsonDecode(json.stdout as String) as Map<String, dynamic>;
+      expect(body['schema'], 'quotabot.check.v1');
+      expect(body['available'], isFalse);
+      expect(body['headroom_percent'], 50);
+      expect(body['request_admission'],
+          state == 'denied' ? 'denied' : 'unresolved');
+      expect(body['stale'], state != 'denied');
+      expect(body['live_read_succeeded'], state == 'denied');
+      final text = await invoke(false);
+      expectExitCode(text, 69);
+      expect(text.stdout, contains('50%'));
+      expect(text.stdout, contains('unavailable'));
+      expect(
+          text.stdout,
+          contains(state == 'denied'
+              ? 'The provider denies requests'
+              : 'Request availability could not be verified'));
+      expect(
+          text.stdout, contains(state == 'denied' ? '% free' : '% last known'));
+    });
+  }
+
   test('doctor does not call temporary transport failures a login problem', () {
     const cases = [
       ('Claude usage read timed out', providerPipeHealthThrottled, null),

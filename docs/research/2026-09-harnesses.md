@@ -6,6 +6,48 @@ metadata. No harness inference, account login, host configuration change, or
 sandbox mutation was performed. Upstream documentation describes possibilities;
 it is not evidence that quotabot has tested those integrations.
 
+September 5 follow-up: the versioned advisory pack and release CLI `quotabot mcp`
+entrypoint shipped in 0.11.0. The original recommendations below retain their
+review baseline; current support is recorded in the
+[compatibility manifest](../../integrations/harnesses/compatibility.json).
+[ROADMAP Next](../../ROADMAP.md#next) owns the execution order and keeps quota
+recovery ahead of optional model selection.
+
+## September 5 findings and reusable patterns
+
+Official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) is
+a distinct `dsh` integration candidate, currently a developer preview with
+expected breaking changes. It is separate from a DeepSeek model endpoint and
+LangChain Deep Agents. Its current
+[MCP bridge](https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/mcp/mcp-client/README.md)
+supports stdio and Streamable HTTP tools, with bounded reconnect attempts;
+resources and prompts are not bridged. quotabot has not validated a native
+DeepSeek Harness load. A future recipe needs an immutable client revision,
+actual protocol negotiation, and a metadata-only tool-discovery test.
+
+The practical improvements to adopt are:
+
+| Pattern | Apply it to quotabot | Acceptance evidence |
+|---|---|---|
+| Separate configuration, reachability, readiness and quota eligibility. | Reuse existing doctor and provider evidence to name the failed boundary and repair. | A reachable daemon or loaded tool cannot make expired quota usable. |
+| One lifecycle owner and connection generation. | Keep coalesced refresh, bounded advisory work and return/pause recovery; invalidate old results. | Event bursts, replacement and cancellation never create overlapping workers or publish old-profile advice. |
+| Test actual capabilities. | Record documented configuration, native launch, client-loaded tools, protocol and OS independently. | Source-derived filters and raw server catalogs are distinct from an actual harness load. |
+| Separate saved defaults from effective account and execution scope. | Require exact operator-supplied target mappings before applying advice. | Changing a default cannot relabel a running session; host reachability cannot prove sandbox reachability. |
+| Make a bounded refresh incident inspectable. | Offer an explicit metadata-only copy action with version, attempt/capture times and due reason. | No collection, telemetry, credentials, account labels, response bodies or arbitrary exceptions in the export. |
+
+These are adaptations inferred from the
+[OpenClaw health model](https://docs.openclaw.ai/gateway/health),
+[Hermes MCP capabilities](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp),
+[pi lifecycle API](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md),
+and the DeepSeek connection contract above. They do not certify compatibility.
+
+The isolated Windows OpenClaw 2026.9.1 attempt reached its real probe command,
+then stopped at a fixture subprocess guard before MCP initialization. Its
+purpose was tool discovery, with no agent turn. Keep native compatibility
+unverified until that bootstrap is understood and the actual client loads the
+expected tools. The corrected OpenClaw `toolFilter.include` and Hermes
+resource/prompt settings have separate pinned source-derived regression tests.
+
 ## Recommended direction
 
 Make quotabot easy to consult from the tools people already use, then make its

@@ -7,7 +7,8 @@ These tools change often. Treat this as a starting point and verify against each
 vendor's official docs (linked per provider). For exactly where quotabot reads
 each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
 
-**Last verified: 2026-09-02.**
+**Last broad review: 2026-09-02. Claude, Codex, and Grok interfaces rechecked
+2026-09-05.**
 
 The provider command is only one part of the trust statement. quotabot also
 emits a normalized `source_class`: Claude and live Codex, Grok, and Antigravity
@@ -33,6 +34,13 @@ and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
   endpoint directly so collection remains content-blind and uses zero inference.
   Extra-usage credits on that same response can appear as display-only card
   detail; they are not plan windows.
+- `claude auth status` checks authentication, not remaining quota. Current
+  [status-line input](https://code.claude.com/docs/en/statusline) can supply
+  quota percentages and reset times after an existing session receives an API
+  response. Missing windows are unknown. A future metadata-only bridge must
+  allowlist those fields without reading transcripts or initiating a model turn.
+  A quota-endpoint HTTP 429 describes a throttled metadata check, not proof that
+  the user's included plan is spent.
 - Quota shape: a rolling 5-hour window plus a weekly cap, shared across Claude
   Code, Claude.ai, and related products. Anthropic doubled the five-hour Claude
   Code allowance for Pro, Max, Team, and seat-based Enterprise on 2026-05-06
@@ -74,9 +82,19 @@ account id enters quota output.
 
 ## Codex (OpenAI)
 
-- Official docs: https://developers.openai.com/codex/cli
-- Check usage yourself: `/status` during a Codex CLI session shows your current
-  limits.
+- Official docs: [Codex CLI](https://learn.chatgpt.com/docs/cli) and
+  [app-server rate limits](https://learn.chatgpt.com/docs/app-server#6-rate-limits-chatgpt).
+- Check usage in the current product's account/usage surface. The documented
+  CLI `/status` summarizes session configuration and token activity; extension
+  surfaces can also show rate limits. This is a version-sensitive cross-check,
+  not a promise that `/status` forces fresh quota collection. See the
+  [developer command reference](https://learn.chatgpt.com/docs/developer-commands?surface=cli#inspect-the-session-with-status).
+- The documented programmatic quota method is `account/rateLimits/read`, with
+  `account/rateLimits/updated` notifications. Token activity uses the separate
+  `account/usage/read`. A host-owned bridge could reduce polling, but quotabot
+  does not spawn app-server against the host profile: managed authentication
+  can refresh or persist credentials. Neither `refreshToken: false` nor a
+  command called status proves a complete launch is host-write-free.
 - Quota shape: the endpoint labels each shared pool by its reported duration.
   Current Pro responses can expose one weekly primary pool, an explicit null
   secondary pool, and a separate named GPT-5.3-Codex-Spark weekly pool. The
@@ -90,7 +108,8 @@ account id enters quota output.
   windows, not cash or API credit. quotabot keeps the stable JSON field
   `reset_credits_available` and labels the value as banked resets to users.
 - quotabot reads: the ChatGPT usage endpoint, reusing the OAuth access token
-  Codex stores locally, or a self-refreshing grant from `quotabot login codex`
+  in the configured `CODEX_HOME/auth.json` (default `~/.codex/auth.json`), or a
+  self-refreshing grant from `quotabot login codex`
   when that token is expired. The grant path is designed to keep an idle machine
   live. Inspect it there with `quotabot doctor`, and use scoped
   `quotabot verify --require-live` when automation must enforce freshness. Dated
@@ -129,19 +148,22 @@ account id enters quota output.
 - Official docs: https://docs.x.ai, the
   [shared-pool FAQ](https://docs.x.ai/grok/faq), and the console at
   https://console.x.ai .
-  Open-source coding CLI: https://github.com/superagent-ai/grok-cli
-- Check usage yourself: `/usage` in the Grok TUI tracks token and credit use.
-  Do not automate this as `grok usage` or `grok -p /usage`: a positional
-  argument is an initial prompt and spends usage tokens. Headless mode is
-  `grok -p "..."`; ACP mode is `grok agent stdio`. quotabot reads the billing
-  metadata endpoint instead, including the Imagine / Chat / Build split as
-  display-only detail.
-- Quota shape: paid-plan usage is a shared weekly usage pool. The Usage tab's
-  Imagine, Chat, and Build percentages are category breakdowns inside that
-  shared pool (SuperGrok / Premium+ raise the limits).
-- quotabot reads: the gRPC-web billing endpoint, reusing the token the Grok CLI
-  stores. `quotabot login grok` can keep a matching account live with a separate
-  grant, but the local Grok account file must still exist for discovery.
+  Official Grok Build source: https://github.com/xai-org/grok-build .
+- Check billing with `/usage` in the Grok TUI. The current
+  [`grok usage <session-id>` implementation](https://github.com/xai-org/grok-build/blob/72a61251fcffb464bcc687aeb5a998e5a98ec0c9/crates/codegen/xai-grok-pager/src/usage_cmd.rs)
+  reads historical session token/cost totals. Those totals are not remaining
+  included quota and can require session-content access, so quotabot does not
+  invoke it. Never send `/usage` through a prompt or headless generation mode.
+  See [current commands](https://docs.x.ai/build/modes-and-commands).
+- Quota shape: the billing response reports included usage as a percentage and
+  a typed weekly or monthly period. Prepaid and on-demand balances are separate.
+- quotabot reads the first-party CLI proxy's JSON billing metadata. A supported
+  host token starts independently of optional owned grants; `quotabot login
+  grok` grants are discoverable even without a host file. Exact personal/team
+  identity is required before joining credentials. Usage and account discovery
+  enforce separate cooldowns. Legacy WebLogin records receive a re-login step.
+  See the [source and compatibility contract](DATA_SOURCES.md#grok-xai) and
+  [dated reliability review](research/2026-09-provider-reliability.md).
 
 ## NVIDIA NIM
 

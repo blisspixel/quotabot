@@ -5,6 +5,7 @@ library;
 import 'dart:async';
 
 import 'models.dart';
+import 'refresh_timer.dart';
 
 /// Keeps the previous snapshot visible after a whole-refresh failure while
 /// ensuring no previously current row remains routable or looks live.
@@ -35,7 +36,8 @@ class TopRefreshCoordinator<T> {
   final Future<T> Function() collect;
   final void Function(T value) apply;
   final void Function()? onFailure;
-  final Duration Function() nextDelay;
+  final Duration Function()? nextDelay;
+  final int Function()? nextDelaySeconds;
   final TopRefreshTimerFactory timerFactory;
 
   Timer? _timer;
@@ -47,10 +49,15 @@ class TopRefreshCoordinator<T> {
   TopRefreshCoordinator({
     required this.collect,
     required this.apply,
-    required this.nextDelay,
+    this.nextDelay,
+    this.nextDelaySeconds,
     this.onFailure,
     TopRefreshTimerFactory? timerFactory,
-  }) : timerFactory = timerFactory ?? Timer.new;
+  }) : timerFactory = timerFactory ?? Timer.new {
+    if ((nextDelay == null) == (nextDelaySeconds == null)) {
+      throw ArgumentError('provide exactly one refresh delay source');
+    }
+  }
 
   bool get isDisposed => _disposed;
   bool get isRefreshing => _inFlight != null;
@@ -85,10 +92,15 @@ class TopRefreshCoordinator<T> {
 
     _inFlight = null;
     if (_disposed || generation != _generation) return;
-    _timer = timerFactory(nextDelay(), () {
+    void onTimer() {
       _timer = null;
       unawaited(refreshNow());
-    });
+    }
+
+    _timer = nextDelaySeconds == null
+        ? timerFactory(nextDelay!(), onTimer)
+        : RefreshTimer.seconds(nextDelaySeconds!(), onTimer,
+            timerFactory: timerFactory);
   }
 
   void dispose() {

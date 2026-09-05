@@ -23,6 +23,7 @@ import 'package:quotabot_collector/mcp_server_entrypoint.dart';
 import 'package:quotabot_collector/mcp_server_options.dart';
 import 'package:quotabot_collector/provenance.dart';
 import 'package:quotabot_collector/provider_id_migration.dart';
+import 'package:quotabot_collector/refresh_timer.dart';
 import 'package:quotabot_collector/route_render.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/updater.dart';
@@ -2254,10 +2255,10 @@ Future<void> _runTop(
       draw();
     },
     // Keep retrying after a transient collection error.
-    nextDelay: () => Duration(
-      seconds: fixedInterval ??
-          nextRefreshSeconds(data, nowEpoch(), failStreak: failStreak),
-    ),
+    nextDelaySeconds: () => nextRefreshSeconds(data, nowEpoch(),
+        failStreak: failStreak,
+        fixedIntervalSeconds: fixedInterval,
+        providersWithUsageCooldowns: providersWithMetadataUsageCooldowns()),
   );
 
   final priorEcho = stdin.echoMode;
@@ -2966,9 +2967,11 @@ Future<void> _runWatch(
     if (healthMessage != null) {
       stderr.writeln(healthMessage);
     }
-    final secs = fixedInterval ??
-        nextRefreshSeconds(data, nowEpoch(), failStreak: health.failStreak);
-    timer = Timer(Duration(seconds: secs), loop);
+    final secs = nextRefreshSeconds(data, nowEpoch(),
+        failStreak: health.failStreak,
+        fixedIntervalSeconds: fixedInterval,
+        providersWithUsageCooldowns: providersWithMetadataUsageCooldowns());
+    timer = RefreshTimer.seconds(secs, loop);
   };
 
   await loop();
@@ -3225,6 +3228,8 @@ Future<void> _check(
       'ok': q.ok,
       'live_read_succeeded': verification.liveReadSucceeded,
       'available': available,
+      if (q.requestAdmission != RequestAdmission.notReported)
+        'request_admission': q.requestAdmission.wireName,
       'headroom_percent': head,
       'resets_at': reset,
       'stale': q.stale,
@@ -3274,6 +3279,8 @@ Future<void> _check(
     '${style.bold('${q.displayName}$accountTag')}: '
     '$label$pct$rs$staleTag$sourceTag',
   );
+  final admissionDetail = requestAdmissionDetail(q.requestAdmission);
+  if (admissionDetail != null) stdout.writeln('  $admissionDetail');
   if (q.driftReason != null) {
     stdout.writeln(
       style.red(
@@ -3483,6 +3490,8 @@ List<String> _providerProvenanceParts(
     _providerReadStateLabel(state),
     q.sourceClass.label,
   ];
+  final admission = requestAdmissionLabel(q.requestAdmission);
+  if (admission != null) parts.add(admission);
   final spendClass = providerSpendClass(q);
   if (spendClass != null) parts.add(spendClass);
   if (includeAccount && providerHasDoctorProvenanceIdentity(q)) {
@@ -4646,6 +4655,8 @@ String _modelEntryProvenance(ModelEntry e, int decisionAsOf) {
 String _modelEntryReadState(ModelEntry entry) {
   if (entry.driftReason != null) return 'provider drift';
   if (entry.stale) return 'cached';
+  final admission = requestAdmissionLabel(entry.requestAdmission);
+  if (admission != null) return admission;
   if (entry.local &&
       entry.model.upstreamRouting == UpstreamRouting.unresolved) {
     return 'unverified';
@@ -4662,6 +4673,8 @@ String _modelEntryReadState(ModelEntry entry) {
 
 String _modelAvailabilitySuffix(ModelEntry entry) {
   if (entry.available) return '';
+  final admission = requestAdmissionLabel(entry.requestAdmission);
+  if (admission != null) return style.dim('  $admission');
   final headroom = entry.headroomPercent;
   if (!entry.local &&
       !entry.stale &&

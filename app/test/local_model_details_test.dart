@@ -97,6 +97,46 @@ Finder _model(String id) => find.byWidgetPredicate(
 );
 
 void main() {
+  for (final value in ['denied', 'future-admission']) {
+    testWidgets(
+      '$value local inventory retains metadata with the access exclusion',
+      (tester) async {
+        final quota = ProviderQuota.fromJson({
+          ..._quota(
+            models: const [
+              ModelInfo(
+                id: 'inspected-model',
+                local: true,
+                loaded: true,
+                sizeBytes: _gib,
+              ),
+            ],
+          ).toJson(),
+          'request_admission': value,
+        });
+        await _open(tester, quota);
+        expect(_model('inspected-model'), findsOneWidget);
+        expect(find.textContaining('Model size:'), findsOneWidget);
+        expect(
+          find.textContaining(
+            value == 'denied'
+                ? 'The provider denies requests'
+                : 'Request availability could not be verified',
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('Loaded'), findsOneWidget);
+        expect(find.textContaining('last observed'), findsNothing);
+        expect(find.textContaining('Last observed advisory fit'), findsNothing);
+        expect(
+          find.text('Runtime unavailable. Excluded from routing.'),
+          findsNothing,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('shows loaded and cold models with reported capabilities', (
     tester,
   ) async {

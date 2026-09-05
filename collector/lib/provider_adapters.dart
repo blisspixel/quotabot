@@ -38,7 +38,7 @@ enum ProviderFixtureKind {
   codexUsage,
   claudeUsage,
   antigravityQuota,
-  grokGrpcBytes,
+  grokBilling,
   kiroUsageState,
   cursorState,
   windsurfState,
@@ -56,6 +56,10 @@ class ProviderAdapterRegistration {
   final ProviderCollector collect;
   final bool multiAccount;
   final bool cached;
+
+  /// Every normal usage read enforces its own durable metadata cooldown. This
+  /// does not cover credential discovery or OAuth grant refresh.
+  final bool metadataUsageCooldowns;
   final CurrentAccountsReader? currentAccounts;
   final ProviderFixtureKind fixtureKind;
   final String fixtureFile;
@@ -70,6 +74,7 @@ class ProviderAdapterRegistration {
     required this.fixtureFile,
     this.multiAccount = false,
     this.cached = true,
+    this.metadataUsageCooldowns = false,
     this.currentAccounts,
   });
 
@@ -88,6 +93,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     adapterClass: ProviderAdapterClass.subscription,
     sourceClasses: kAuthoritativeLiveSourceClasses,
     collect: collectClaudeProviderAccounts,
+    metadataUsageCooldowns: true,
     multiAccount: true,
     currentAccounts: _claudeCurrentAccounts,
     fixtureKind: ProviderFixtureKind.claudeUsage,
@@ -99,6 +105,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     adapterClass: ProviderAdapterClass.subscription,
     sourceClasses: kAuthoritativeLiveSourceClasses,
     collect: collectCodexProviderAccounts,
+    metadataUsageCooldowns: true,
     multiAccount: true,
     currentAccounts: _codexCurrentAccounts,
     fixtureKind: ProviderFixtureKind.codexUsage,
@@ -177,10 +184,11 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     adapterClass: ProviderAdapterClass.subscription,
     sourceClasses: kAuthoritativeLiveSourceClasses,
     collect: _collectGrok,
+    metadataUsageCooldowns: true,
     multiAccount: true,
     currentAccounts: _grokCurrentAccounts,
-    fixtureKind: ProviderFixtureKind.grokGrpcBytes,
-    fixtureFile: 'grok_message_bytes.json',
+    fixtureKind: ProviderFixtureKind.grokBilling,
+    fixtureFile: 'grok_billing.json',
   ),
   ProviderAdapterRegistration(
     id: antigravityProviderId,
@@ -194,6 +202,16 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     fixtureFile: 'antigravity_quota.json',
   ),
 ];
+
+/// Scheduling may leave these usage deadlines to the registered transports.
+/// Custom collectors must opt in explicitly; snapshot fields cannot claim it.
+Set<String> providersWithMetadataUsageCooldowns({
+  Iterable<ProviderAdapterRegistration> registry = kProviderAdapterRegistry,
+}) =>
+    Set<String>.unmodifiable([
+      for (final entry in registry)
+        if (entry.metadataUsageCooldowns) entry.id,
+    ]);
 
 ProviderAdapterRegistration? providerAdapterById(String id) {
   // Canonicalize so a persisted record under a retired id still resolves to the

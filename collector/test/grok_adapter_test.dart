@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -10,729 +9,725 @@ import 'package:quotabot_collector/auth/provider_disconnect.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/provider_read_gate.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
+
+const _reset = '2026-09-12T00:00:00Z';
+Map<String, dynamic> _billing([num percent = 73]) => {
+      'config': {
+        'creditUsagePercent': percent,
+        'currentPeriod': {
+          'type': 'USAGE_PERIOD_TYPE_WEEKLY',
+          'start': '2026-09-05T00:00:00Z',
+          'end': _reset,
+        },
+        'prepaidBalance': {'val': 9000},
+        'onDemandCap': {'val': 5000},
+        'onDemandUsed': {'val': 10},
+        'productUsage': [
+          {'creditUsagePercent': 4}
+        ],
+      },
+    };
+
+Map<String, dynamic> _host(
+        {String token = 'host-token', String user = 'user-a'}) =>
+    {
+      'key': token,
+      'email': 'same@example.invalid',
+      'user_id': user,
+      'auth_mode': 'oidc',
+      'oidc_issuer': XaiAuth.issuer,
+      'oidc_client_id': XaiAuth.publicClientId,
+    };
+
+String _pool(String principal, {bool team = false}) => opaqueCredentialIdentity(
+    'grok', 'grok-principal-v1:${team ? 'Team' : 'User'}:$principal');
+http.Response _json(Object body) => http.Response(jsonEncode(body), 200,
+    headers: {'content-type': 'application/json'});
+
+class _StreamClient extends http.BaseClient {
+  _StreamClient(this.handler);
+  final Future<http.StreamedResponse> Function(http.BaseRequest) handler;
+  bool closed = false;
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) =>
+      handler(request);
+  @override
+  void close() {
+    closed = true;
+  }
+}
 
 void main() {
   late Directory temp;
   late File authFile;
-
+  late int clock;
   setUp(() {
-    temp = Directory.systemTemp.createTempSync('quotabot_grok_adapter_');
+    temp = Directory.systemTemp.createTempSync('quotabot_grok_');
     setQuotabotDirOverrideForTesting(temp);
-    authFile = File('${temp.path}/auth.json');
+    setTokenPermissionHardeningForTesting(
+        directoryHardener: (_) {}, fileHardener: (_) {});
+    authFile = File('${temp.path}/host-auth.json');
+    clock = nowEpoch();
   });
-
-  tearDown(() {
+  tearDown(() async {
+    await ProviderReadGate.drainActive();
+    setTokenPermissionHardeningForTesting();
     setQuotabotDirOverrideForTesting(null);
-    if (temp.existsSync()) temp.deleteSync(recursive: true);
+    temp.deleteSync(recursive: true);
   });
 
-  void writeAuth(Map<String, dynamic> body) {
-    authFile.writeAsStringSync(jsonEncode(body));
-  }
-
-  Uint8List grokMessage(double percent, int timestamp) {
-    final out = <int>[0x0d];
-    final f = ByteData(4)..setFloat32(0, percent, Endian.little);
-    out.addAll(f.buffer.asUint8List());
-    out.add(0x20);
-    var t = timestamp;
-    while (true) {
-      final b = t & 0x7f;
-      t >>= 7;
-      if (t == 0) {
-        out.add(b);
-        break;
-      }
-      out.add(b | 0x80);
+  void writeHost([Map<String, dynamic>? record]) => authFile
+      .writeAsStringSync(jsonEncode({XaiAuth.hostScope: record ?? _host()}));
+  void own(String owner,
+      {String token = 'owned-token', bool defaultOnly = false}) {
+    final tokens = Tokens(
+        accessToken: token,
+        refreshToken: 'refresh-$token',
+        expiresAt: nowEpoch() + 3600);
+    if (defaultOnly) {
+      TokenStore.saveDefaultOwnedBy('grok', tokens, owner);
+    } else {
+      TokenStore.save('grok', tokens, account: owner);
     }
-    return Uint8List.fromList(out);
   }
 
-  Uint8List grpcFrame(Uint8List payload, {int flag = 0}) {
-    final len = payload.length;
-    return Uint8List.fromList([
-      flag,
-      (len >> 24) & 0xff,
-      (len >> 16) & 0xff,
-      (len >> 8) & 0xff,
-      len & 0xff,
-      ...payload,
-    ]);
-  }
+  ProviderReadGate gate() => ProviderReadGate(
+      directory: Directory('${temp.path}/read-gates'),
+      clock: () => clock,
+      jitter: (_) => 0,
+      hardenDirectory: (_) {},
+      hardenFile: (_) {});
+  GrokAdapter adapter(http.Client client,
+          {GrokTokenResolver? resolver,
+          Duration timeout = const Duration(seconds: 5)}) =>
+      GrokAdapter(
+          authFile: authFile,
+          client: client,
+          readGate: gate(),
+          tokenResolver: resolver,
+          requestTimeout: timeout,
+          grantResolutionDeadline: const Duration(milliseconds: 30));
 
-  test('disconnect blocks every host account before token or quota work',
+  test('disconnect blocks host and independently owned grants before all reads',
       () async {
-    writeAuth({
-      'first': {'email': 'first@example.com', 'key': 'host-first'},
-      'second': {'email': 'second@example.com', 'key': 'host-second'},
-    });
-    var tokenReads = 0;
-    var usageReads = 0;
-    final quotas = await GrokAdapter(
-      authFile: authFile,
-      disconnectReader: () => true,
-      tokenResolver: (_, __) async {
-        tokenReads++;
-        return 'quotabot-token';
-      },
-      usageFetcher: (_, __) async {
-        usageReads++;
-        return QuotaWindow(label: 'weekly', usedPercent: 20);
-      },
-    ).collectAccounts();
-
-    expect(quotas, hasLength(1));
-    expect(quotas.single.error, providerDisconnectedMessage(GrokAdapter.id));
-    expect(tokenReads, 0);
-    expect(usageReads, 0);
-  });
-
-  test('collectAccounts reads every account in auth.json', () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
-      'b': {'email': 'b@example.com', 'key': 'token-b'},
-    });
-    final tokens = <String>[];
-    final resolverCalls = <String>[];
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (account, allowDefault) async {
-        resolverCalls.add('$account:$allowDefault');
-        return null;
-      },
-      usageFetcher: (token, asOf) async {
-        tokens.add(token);
-        return QuotaWindow(
-          label: 'monthly',
-          usedPercent: token.endsWith('a') ? 10 : 20,
-        );
-      },
-    ).collectAccounts();
-
-    expect(q.map((p) => p.account).toList(), [
-      'a@example.com',
-      'b@example.com',
-    ]);
-    expect(q.map((p) => p.windows.single.usedPercent).toList(), [10, 20]);
-    expect(tokens, unorderedEquals(['token-a', 'token-b']));
-    // With more than one account, the default grant is offered to none of them,
-    // so neither resolver call permits it.
+    writeHost();
+    own('owner');
+    var reads = 0;
+    final subject = GrokAdapter(
+        authFile: authFile,
+        disconnectReader: () => true,
+        client: MockClient((_) async {
+          reads++;
+          return _json(_billing());
+        }));
+    expect(subject.accountIndex, isEmpty);
     expect(
-      resolverCalls,
-      unorderedEquals(['a@example.com:false', 'b@example.com:false']),
-    );
+        (await subject.collect()).error, providerDisconnectedMessage('grok'));
+    expect(reads, 0);
   });
 
-  test('collectAccounts overlaps live reads for several accounts', () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
-      'b': {'email': 'b@example.com', 'key': 'token-b'},
+  test(
+      'modern billing GET uses exact identity headers and leaves host immutable',
+      () async {
+    writeHost();
+    final before = authFile.readAsBytesSync();
+    final client = _StreamClient((request) async {
+      expect(request.method, 'GET');
+      expect(request.url.toString(),
+          'https://cli-chat-proxy.grok.com/v1/billing?format=credits');
+      expect(request.followRedirects, isFalse);
+      expect(request.headers['Authorization'], 'Bearer host-token');
+      expect(request.headers['X-XAI-Token-Auth'], 'xai-grok-cli');
+      expect(request.headers['x-userid'], 'user-a');
+      expect(await request.finalize().toBytes(), isEmpty);
+      return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode(_billing()))), 200);
     });
-    final started = <String>[];
-    final release = Completer<void>();
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      usageFetcher: (token, asOf) async {
-        started.add(token);
-        if (started.length == 2) release.complete();
-        await release.future;
-        return QuotaWindow(
-          label: 'monthly',
-          usedPercent: token.endsWith('a') ? 10 : 20,
-        );
-      },
-    ).collectAccounts();
-
-    expect(q.map((p) => p.account).toList(), [
-      'a@example.com',
-      'b@example.com',
-    ]);
-    expect(q.map((p) => p.windows.single.usedPercent).toList(), [10, 20]);
+    final q = await adapter(client).collect();
+    expect(q.account, _pool('user-a'));
+    expect(q.windows.single.usedPercent, 73);
+    expect(q.windows.single.percent, 73);
+    expect(q.plan, isNull);
+    expect(q.windows.single.resetsAt, 1789171200);
+    expect(authFile.readAsBytesSync(), before);
+    expect(client.closed, isFalse);
+    final public = jsonEncode(q.toJson());
+    for (final private in [
+      'host-token',
+      'user-a',
+      'same@example.invalid',
+      'prepaidBalance',
+      'productUsage'
+    ]) {
+      expect(public, isNot(contains(private)));
+    }
   });
 
-  test('collect returns the first account snapshot', () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
-      'b': {'email': 'b@example.com', 'key': 'token-b'},
+  for (final mode in ['oidc', 'external']) {
+    test('pinned first-party $mode record is eligible', () async {
+      writeHost(_host()..['auth_mode'] = mode);
+      expect(
+          (await adapter(MockClient((_) async => _json(_billing(0)))).collect())
+              .windows
+              .single
+              .percent,
+          0);
     });
-
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      usageFetcher: (_, __) async =>
-          QuotaWindow(label: 'monthly', usedPercent: 12),
-    ).collect();
-
-    expect(q.account, 'a@example.com');
-    expect(q.windows.single.usedPercent, 12);
-  });
-
-  test('account grant wins before the CLI token', () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
-      'b': {'email': 'b@example.com', 'key': 'token-b'},
+  }
+  for (final change in <String, Object?>{
+    'auth_mode': 'api_key',
+    'oidc_issuer': 'https://customer.example',
+    'oidc_client_id': 'other-client',
+    'principal_type': 'Other',
+    'principal_id': 'untyped',
+    'team_id': 'untyped-team',
+    'user_id': 'bad\r\nheader',
+    'key': 'bad\r\ntoken',
+    'expires_at': 'invalid',
+  }.entries) {
+    test('ineligible ${change.key} never forwards the host token', () async {
+      writeHost(_host()..[change.key] = change.value);
+      var reads = 0;
+      final subject = adapter(MockClient((_) async {
+        reads++;
+        return _json(_billing());
+      }));
+      expect(subject.accountIndex, isEmpty);
+      expect((await subject.collect()).windows, isEmpty);
+      expect(reads, 0);
     });
-    final tokens = <String>[];
-
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (account, _) async =>
-          account == 'a@example.com' ? 'own-a' : null,
-      usageFetcher: (token, asOf) async {
-        tokens.add(token);
-        return QuotaWindow(label: 'monthly', usedPercent: 5);
-      },
-    ).collectAccounts();
-
-    expect(q.length, 2);
-    expect(tokens, ['own-a', 'token-b']);
-  });
-
-  test('the default grant is never lent across multiple accounts', () async {
-    // With several accounts the ownerless default grant must not stand in for
-    // any of them: account a would otherwise be read under b's or another
-    // account's token and mislabeled. Only b, which has its own slot, reads.
-    TokenStore.clear(XaiAuth.provider);
-    TokenStore.clearAccounts(XaiAuth.provider);
-    addTearDown(() {
-      TokenStore.clear(XaiAuth.provider);
-      TokenStore.clearAccounts(XaiAuth.provider);
-    });
-    final expiry = nowEpoch() + 3600;
-    TokenStore.save(
-      XaiAuth.provider,
-      Tokens(accessToken: 'default-token', expiresAt: expiry),
-    );
-    TokenStore.save(
-      XaiAuth.provider,
-      Tokens(accessToken: 'b-token', expiresAt: expiry),
-      account: 'b@example.com',
-    );
-    writeAuth({
-      'a': {'email': 'a@example.com'},
-      'b': {'email': 'b@example.com'},
-      'c': {'email': 'c@example.com'},
-    });
-    final tokens = <String>[];
-
-    final q = await GrokAdapter(
-      authFile: authFile,
-      usageFetcher: (token, asOf) async {
-        tokens.add(token);
-        return QuotaWindow(label: 'monthly', usedPercent: 9);
-      },
-    ).collectAccounts();
-
-    expect(tokens, ['b-token']);
-    expect(q.map((p) => p.account).toList(), [
-      'a@example.com',
-      'b@example.com',
-      'c@example.com',
-    ]);
-    expect(q.first.error, 'no token - run: quotabot login grok');
-    expect(q.last.error, 'no token - run: quotabot login grok');
-  });
-
-  test('the default grant stands in for a single account', () async {
-    TokenStore.clear(XaiAuth.provider);
-    TokenStore.clearAccounts(XaiAuth.provider);
-    addTearDown(() {
-      TokenStore.clear(XaiAuth.provider);
-      TokenStore.clearAccounts(XaiAuth.provider);
-    });
-    TokenStore.saveDefaultOwnedBy(
-      XaiAuth.provider,
-      Tokens(accessToken: 'default-token', expiresAt: nowEpoch() + 3600),
-      'a@example.com',
-    );
-    writeAuth({
-      'a': {'email': 'a@example.com'},
-    });
-    final tokens = <String>[];
-
-    final q = await GrokAdapter(
-      authFile: authFile,
-      usageFetcher: (token, asOf) async {
-        tokens.add(token);
-        return QuotaWindow(label: 'monthly', usedPercent: 9);
-      },
-    ).collectAccounts();
-
-    expect(tokens, ['default-token']);
-    expect(q.single.account, 'a@example.com');
-    expect(q.single.windows.single.usedPercent, 9);
-  });
-
-  test('a default grant stamped for another account is not lent out', () async {
-    TokenStore.clear(XaiAuth.provider);
-    TokenStore.clearAccounts(XaiAuth.provider);
-    addTearDown(() {
-      TokenStore.clear(XaiAuth.provider);
-      TokenStore.clearAccounts(XaiAuth.provider);
-    });
-    // The default grant belongs to account a, but the CLI now holds only
-    // account b. b must read with its own CLI token, never a's default grant,
-    // or b's row would show a's usage.
-    TokenStore.saveDefaultOwnedBy(
-      XaiAuth.provider,
-      Tokens(accessToken: 'a-default', expiresAt: nowEpoch() + 3600),
-      'a@example.com',
-    );
-    writeAuth({
-      'b': {'email': 'b@example.com', 'key': 'token-b'},
-    });
-    final tokens = <String>[];
-
-    final q = await GrokAdapter(
-      authFile: authFile,
-      usageFetcher: (token, asOf) async {
-        tokens.add(token);
-        return QuotaWindow(label: 'monthly', usedPercent: 4);
-      },
-    ).collectAccounts();
-
-    expect(tokens, ['token-b']);
-    expect(q.single.account, 'b@example.com');
-  });
-
-  test('a default grant stamped for the sole account is lent to it', () async {
-    TokenStore.clear(XaiAuth.provider);
-    TokenStore.clearAccounts(XaiAuth.provider);
-    addTearDown(() {
-      TokenStore.clear(XaiAuth.provider);
-      TokenStore.clearAccounts(XaiAuth.provider);
-    });
-    TokenStore.saveDefaultOwnedBy(
-      XaiAuth.provider,
-      Tokens(accessToken: 'a-default', expiresAt: nowEpoch() + 3600),
-      'a@example.com',
-    );
-    writeAuth({
-      'a': {
-        'email': 'a@example.com'
-      }, // no CLI key: relies on the default grant
-    });
-    final tokens = <String>[];
-
-    final q = await GrokAdapter(
-      authFile: authFile,
-      usageFetcher: (token, asOf) async {
-        tokens.add(token);
-        return QuotaWindow(label: 'monthly', usedPercent: 4);
-      },
-    ).collectAccounts();
-
-    expect(tokens, ['a-default']);
-    expect(q.single.account, 'a@example.com');
-  });
-
-  test('expired billing tokens keep the account visible', () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
-    });
-
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      usageFetcher: (_, __) async => null,
-    ).collectAccounts();
-
-    expect(q.single.account, 'a@example.com');
-    expect(q.single.ok, isTrue);
-    expect(q.single.windows, isEmpty);
-    expect(
-        q.single.error, 'token expired (open Grok to refresh) - account only');
-  });
-
-  test('fetches Grok billing metadata over gRPC-web', () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
-    });
-    const now = 1782000000;
-    final client = MockClient((req) async {
-      expect(req.method, 'POST');
-      expect(req.headers['Authorization'], 'Bearer token-a');
-      expect(req.headers['Content-Type'], 'application/grpc-web+proto');
-      expect(req.headers['x-grpc-web'], '1');
-      expect(req.bodyBytes, [0, 0, 0, 0, 0]);
-      return http.Response.bytes(
-        grpcFrame(grokMessage(17.0, now + 3600)),
-        200,
-        headers: {'grpc-status': '0'},
-      );
-    });
-
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      client: client,
-    ).collectAccounts();
-
-    expect(q.single.windows.single.usedPercent, 17);
-    expect(q.single.windows.single.resetsAt, now + 3600);
-    expect(q.single.sourceClass, ProviderSourceClass.authoritativeLive);
-  });
-
-  test('non-auth Grok billing failures keep their exact status', () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
-      'b': {'email': 'b@example.com', 'key': 'token-b'},
-    });
-    var calls = 0;
+  }
+  test('arbitrary scopes and legacy web login do not reach either endpoint',
+      () async {
+    var reads = 0;
     final client = MockClient((_) async {
-      calls += 1;
-      if (calls == 1) {
-        return http.Response(
-          'throttled',
-          429,
-          headers: {'retry-after': '90'},
-        );
-      }
-      return http.Response.bytes(
-        Uint8List.fromList([0, 0, 0, 0, 0]),
-        200,
-        headers: {'grpc-status': '16'},
-      );
+      reads++;
+      return _json(_billing());
     });
-
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      client: client,
-    ).collectAccounts();
-
-    expect(q, hasLength(2));
-    expect(q[0].account, 'a@example.com');
-    expect(q[0].ok, isFalse);
-    expect(q[0].error, 'HTTP 429');
-    expect(q[0].pipeHealth, providerPipeHealthThrottled);
-    expect(q[0].httpStatus, 429);
-    expect(q[0].retryAfterSeconds, 90);
-    expect(q[1].account, 'b@example.com');
-    expect(q[1].ok, isTrue);
+    authFile.writeAsStringSync(jsonEncode({'other': _host()}));
+    expect((await adapter(client).collect()).error, contains('first-party'));
+    authFile.writeAsStringSync(jsonEncode({
+      'https://accounts.x.ai/sign-in': _host()..['auth_mode'] = 'web_login'
+    }));
+    expect((await adapter(client).collect()).error, contains('sign in again'));
+    expect(reads, 0);
+  });
+  test('missing malformed and oversized auth remain bounded account errors',
+      () async {
+    final client =
+        MockClient((_) async => throw StateError('unexpected metadata'));
     expect(
-      q[1].error,
-      'token expired (open Grok to refresh) - account only',
-    );
-    expect(q[1].httpStatus, 200);
+        (await adapter(client).collect()).error, contains('no Grok account'));
+    for (final body in ['[]', '{invalid', ' ' * (256 * 1024 + 1)]) {
+      authFile.writeAsStringSync(body);
+      expect((await adapter(client).collect()).error, isNotNull);
+    }
   });
 
-  test('Grok HTTP 403 is not diagnosed as an expired login', () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
+  for (final fails in ['throw', 'delay']) {
+    test(
+        'optional grant $fails cannot suppress or postpone starting host billing',
+        () async {
+      writeHost();
+      own('optional-owner');
+      final started = Completer<void>();
+      final unresolved = Completer<String?>();
+      final client = MockClient((request) async {
+        expect(request.url.path, '/v1/billing');
+        started.complete();
+        return _json(_billing(20));
+      });
+      final subject = adapter(client, resolver: (_, __) async {
+        await started.future;
+        if (fails == 'throw') throw StateError('private grant error');
+        return unresolved.future;
+      });
+      final result = subject.collectAccounts();
+      await started.future;
+      final rows = await result;
+      expect(
+          rows
+              .firstWhere((q) => q.account == _pool('user-a'))
+              .windows
+              .single
+              .percent,
+          20);
+      expect(rows.where((q) => q.error != null), hasLength(1));
+      expect(jsonEncode(rows.map((q) => q.toJson()).toList()),
+          isNot(contains('private grant error')));
+      unresolved.complete(null);
     });
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      client: MockClient((_) async => http.Response('denied', 403)),
-    ).collectAccounts();
+  }
 
-    expect(q.single.ok, isFalse);
-    expect(q.single.error, 'HTTP 403');
-    expect(q.single.httpStatus, 403);
-    expect(q.single.pipeHealth, isNull);
-    expect(q.single.error, isNot(contains('token expired')));
-  });
-
-  test('Grok usage timeouts are throttled rather than expired logins',
+  for (final defaultOnly in [false, true]) {
+    test(
+        'owned ${defaultOnly ? 'default' : 'scoped'} account works without a host file',
+        () async {
+      own('login-label', defaultOnly: defaultOnly);
+      final requests = <String>[];
+      final client = MockClient((request) async {
+        requests.add(request.url.path);
+        expect(request.headers['authorization'], 'Bearer owned-token');
+        if (request.url.path == '/v1/user') {
+          expect(request.url.queryParameters, {'include': 'subscription'});
+          expect(request.headers.containsKey('x-userid'), isFalse);
+          return _json({
+            'userId': 'owned-user',
+            'email': 'irrelevant@example.invalid',
+            'subscriptionTier': 'SuperGrok'
+          });
+        }
+        expect(request.headers['x-userid'], 'owned-user');
+        return _json(_billing(40));
+      });
+      final q = await adapter(client).collect();
+      expect(requests, ['/v1/user', '/v1/billing']);
+      expect(q.account, _pool('owned-user'));
+      expect(q.plan, 'SuperGrok');
+      expect(q.planEvidenceSource, ProviderPlanEvidenceSource.providerMetadata);
+      expect(q.windows.single.percent, 40);
+      expect(authFile.existsSync(), isFalse);
+      expect(adapter(client).accountIndex, {_pool('owned-user')});
+    });
+  }
+  test('optional grant discovery failure preserves a usable host account',
       () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
-    });
+    writeHost();
+    Directory('${temp.path}/quotabot').createSync();
+    File('${temp.path}/quotabot/auth')
+        .writeAsStringSync('unusable optional grant directory');
     final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      client: MockClient((_) async => throw TimeoutException('slow')),
-    ).collectAccounts();
-
-    expect(q.single.ok, isFalse);
-    expect(q.single.error, 'Grok usage read timed out');
-    expect(q.single.pipeHealth, providerPipeHealthThrottled);
-    expect(q.single.error, isNot(contains('token expired')));
+        authFile: authFile,
+        disconnectReader: () => false,
+        readGate: gate(),
+        client: MockClient((_) async => _json(_billing()))).collect();
+    expect(q.account, _pool('user-a'));
+    expect(q.windows.single.percent, 73);
+  });
+  test('an ownerless default cannot be lent to a host account', () async {
+    writeHost();
+    TokenStore.save(
+        'grok', Tokens(accessToken: 'unowned', expiresAt: nowEpoch() + 3600));
+    final tokens = <String>[];
+    final rows = await adapter(MockClient((request) async {
+      tokens.add(request.headers['authorization']!);
+      return _json(_billing());
+    })).collectAccounts();
+    expect(rows, hasLength(1));
+    expect(tokens, ['Bearer host-token']);
+  });
+  test('scoped record with a forged owner is not discovered', () async {
+    own('scoped-owner');
+    final record = quotabotDir('auth')
+        .listSync()
+        .whereType<File>()
+        .singleWhere((file) => file.path.endsWith('.json'));
+    final body = jsonDecode(record.readAsStringSync()) as Map<String, dynamic>;
+    body['_account'] = 'someone-else';
+    record.writeAsStringSync(jsonEncode(body));
+    final subject =
+        adapter(MockClient((_) async => throw StateError('no request')));
+    expect(subject.accountIndex, isEmpty);
+    expect((await subject.collect()).windows, isEmpty);
   });
 
-  test('invalid Grok billing payloads are not expired logins', () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
-    });
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      client: MockClient(
-        (_) async => http.Response.bytes(
-          Uint8List.fromList([0, 0, 0, 0, 0]),
-          200,
-          headers: {'grpc-status': '0'},
-        ),
-      ),
-    ).collectAccounts();
-
-    expect(q.single.ok, isFalse);
-    expect(q.single.error, 'invalid Grok usage response');
-    expect(q.single.windows, isEmpty);
-  });
-
-  test('a nonzero gRPC body trailer invalidates an apparent data frame',
+  test('same email never merges independently proved personal and team pools',
       () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
-    });
-    const now = 1782000000;
-    final data = grpcFrame(grokMessage(17.0, now + 3600));
-    final denied = grpcFrame(
-      Uint8List.fromList(utf8.encode('grpc-status: 16\r\n')),
-      flag: 0x80,
-    );
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      client: MockClient((_) async => http.Response.bytes(
-            Uint8List.fromList([...data, ...denied]),
-            200,
-          )),
-    ).collectAccounts();
-
-    expect(q.single.windows, isEmpty);
-    expect(q.single.ok, isTrue);
-    expect(q.single.error, contains('token expired'));
-    expect(q.single.httpStatus, 200);
+    writeHost();
+    own('same@example.invalid');
+    final reads = <String>[];
+    final rows = await adapter(MockClient((request) async {
+      if (request.url.path == '/v1/user') {
+        return _json({
+          'userId': 'user-a',
+          'email': 'same@example.invalid',
+          'principalType': 'Team',
+          'principalId': 'team-a',
+          'teamId': 'team-a'
+        });
+      }
+      reads.add(request.headers['authorization']!);
+      return _json(_billing(
+          request.headers['authorization'] == 'Bearer host-token' ? 20 : 80));
+    })).collectAccounts();
+    expect(rows.map((q) => q.account),
+        unorderedEquals([_pool('user-a'), _pool('team-a', team: true)]));
+    expect(
+        rows.map((q) => q.windows.single.percent), unorderedEquals([80, 20]));
+    expect(reads, hasLength(2));
+  });
+  test('team login placeholder is enriched without mutating the host record',
+      () async {
+    writeHost(_host(user: 'team-a')
+      ..addAll({
+        'principal_type': 'Team',
+        'principal_id': 'team-a',
+        'team_id': 'team-a'
+      }));
+    final before = authFile.readAsBytesSync();
+    final paths = <String>[];
+    final q = await adapter(MockClient((request) async {
+      paths.add(request.url.path);
+      if (request.url.path == '/v1/user') {
+        return _json({
+          'userId': 'real-user',
+          'principalType': 'Team',
+          'principalId': 'team-a',
+          'teamId': 'team-a'
+        });
+      }
+      expect(request.headers['x-userid'], 'real-user');
+      return _json(_billing());
+    })).collect();
+    expect(paths, ['/v1/user', '/v1/billing']);
+    expect(q.account, _pool('team-a', team: true));
+    expect(authFile.readAsBytesSync(), before);
+  });
+  test('host placeholder cannot adopt a different proved pool', () async {
+    writeHost(_host(user: 'team-a')
+      ..addAll({
+        'principal_type': 'Team',
+        'principal_id': 'team-a',
+        'team_id': 'team-a'
+      }));
+    final subject = adapter(MockClient((request) async {
+      expect(request.url.path, '/v1/user');
+      return _json({
+        'userId': 'real-user',
+        'principalType': 'Team',
+        'principalId': 'team-b',
+        'teamId': 'team-b'
+      });
+    }));
+    final rows = await subject.collectAccounts();
+    expect(rows, hasLength(1));
+    expect(rows.single.account, _pool('team-a', team: true));
+    expect(rows.single.error, contains('identity changed'));
+    expect(rows.single.windows, isEmpty);
+    expect(subject.accountIndex, {_pool('team-a', team: true)});
   });
 
-  test('a resource-exhausted gRPC trailer is throttling, not expiry', () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
+  test('two grants for one proved pool share one concurrent billing read',
+      () async {
+    writeHost();
+    own('same-owner');
+    final hostStarted = Completer<void>();
+    final profileDone = Completer<void>();
+    var billingReads = 0;
+    final rows = await adapter(MockClient((request) async {
+      if (request.url.path == '/v1/user') {
+        await hostStarted.future;
+        profileDone.complete();
+        return _json({'userId': 'user-a'});
+      }
+      billingReads++;
+      hostStarted.complete();
+      await profileDone.future;
+      return _json(_billing());
+    })).collectAccounts();
+    expect(rows, hasLength(1));
+    expect(billingReads, 1);
+  });
+  for (final status in [401, 403, 429, 503]) {
+    test(
+        'same-pool alternate credential after HTTP $status obeys authentication-only fallback',
+        () async {
+      writeHost();
+      own('same-owner');
+      final billingTokens = <String>[];
+      final rows = await adapter(MockClient((request) async {
+        if (request.url.path == '/v1/user') return _json({'userId': 'user-a'});
+        final token = request.headers['authorization']!;
+        billingTokens.add(token);
+        if (token == 'Bearer host-token') {
+          return http.Response('private error', status,
+              headers: {'retry-after': '120'});
+        }
+        return _json(_billing());
+      })).collectAccounts();
+      expect(rows, hasLength(1));
+      expect(
+          billingTokens,
+          status == 401
+              ? ['Bearer host-token', 'Bearer owned-token']
+              : ['Bearer host-token']);
+      expect(rows.single.error == null, status == 401);
+      if (status != 401) expect(rows.single.httpStatus, status);
     });
-    const now = 1782000000;
-    final data = grpcFrame(grokMessage(17.0, now + 3600));
-    final exhausted = grpcFrame(
-      Uint8List.fromList(utf8.encode('grpc-status: 8\r\n')),
-      flag: 0x80,
-    );
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      client: MockClient((_) async => http.Response.bytes(
-            Uint8List.fromList([...data, ...exhausted]),
-            200,
-          )),
-    ).collectAccounts();
-
-    expect(q.single.ok, isFalse);
-    expect(q.single.windows, isEmpty);
-    expect(q.single.error, 'gRPC status 8');
-    expect(q.single.pipeHealth, providerPipeHealthThrottled);
+  }
+  test(
+      'recorded expiry skips an expired host credential and allows the owned account',
+      () async {
+    writeHost(_host()..['expires_at'] = '2020-01-01T00:00:00Z');
+    own('same-owner');
+    final tokens = <String>[];
+    final rows = await adapter(MockClient((request) async {
+      tokens.add(request.headers['authorization']!);
+      return _json(
+          request.url.path == '/v1/user' ? {'userId': 'user-a'} : _billing());
+    })).collectAccounts();
+    expect(rows.single.error, isNull);
+    expect(tokens, everyElement('Bearer owned-token'));
   });
 
   test(
-      'a permission denial for a token past its recorded expiry is an '
-      'expired login with the repair steps', () async {
-    writeAuth({
-      'a': {
-        'email': 'a@example.com',
-        'key': 'token-a',
-        'expires_at': '2020-01-01T00:00:00.000000000Z',
-      },
-    });
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      client: MockClient(
-        (_) async => http.Response.bytes(
-          Uint8List(0),
-          200,
-          headers: {'grpc-status': '7'},
-        ),
-      ),
-    ).collectAccounts();
-
-    expect(q.single.ok, isTrue);
-    expect(q.single.windows, isEmpty);
-    expect(q.single.error, contains('token expired'));
-    expect(q.single.error, contains('gRPC status 7'));
-    expect(q.single.error, contains('open Grok to refresh'));
-    expect(q.single.error, contains('run: quotabot login grok'));
-    expect(q.single.httpStatus, 200);
-  });
-
-  test('a permission denial with an unexpired token keeps its exact status',
+      'retry deadline survives a new adapter and does not block another principal',
       () async {
-    writeAuth({
-      'a': {
-        'email': 'a@example.com',
-        'key': 'token-a',
-        'expires_at': '2099-01-01T00:00:00Z',
-      },
+    writeHost();
+    var hostReads = 0;
+    var otherReads = 0;
+    final client = MockClient((request) async {
+      if (request.url.path == '/v1/user') {
+        return _json({'userId': 'other-user'});
+      }
+      if (request.headers['authorization'] == 'Bearer host-token') {
+        hostReads++;
+        return hostReads == 1
+            ? http.Response('', 429, headers: {'retry-after': '120'})
+            : _json(_billing());
+      }
+      otherReads++;
+      return _json(_billing(10));
     });
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      client: MockClient(
-        (_) async => http.Response.bytes(
-          Uint8List(0),
-          200,
-          headers: {'grpc-status': '7'},
-        ),
-      ),
-    ).collectAccounts();
-
-    expect(q.single.ok, isFalse);
-    expect(q.single.error, 'gRPC status 7');
-    expect(q.single.error, isNot(contains('token expired')));
+    expect((await adapter(client).collect()).httpStatus, 429);
+    own('different-owner');
+    clock += 10;
+    final rows = await adapter(client).collectAccounts();
+    expect(hostReads, 1);
+    expect(otherReads, 1);
+    expect(rows.first.retryAfterSeconds, 110);
+    expect(rows.last.windows.single.percent, 10);
+    clock += 111;
+    expect((await adapter(client).collectAccounts()).first.error, isNull);
+    expect(hostReads, 2);
   });
-
-  test('a permission denial without a recorded expiry keeps its exact status',
+  test(
+      'profile cooldown cannot produce billing evidence or borrow a cached pool',
       () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
+    own('owner');
+    var profileReads = 0;
+    var billingReads = 0;
+    final client = MockClient((request) async {
+      if (request.url.path == '/v1/user') {
+        profileReads++;
+        return profileReads == 1
+            ? _json({'userId': 'owned-user'})
+            : http.Response('', 503, headers: {'retry-after': '120'});
+      }
+      billingReads++;
+      return _json(_billing());
     });
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      client: MockClient(
-        (_) async => http.Response.bytes(
-          Uint8List(0),
-          200,
-          headers: {'grpc-status': '7'},
-        ),
-      ),
-    ).collectAccounts();
-
-    expect(q.single.ok, isFalse);
-    expect(q.single.error, 'gRPC status 7');
-    expect(q.single.error, isNot(contains('token expired')));
+    expect((await adapter(client).collect()).account, _pool('owned-user'));
+    final failed = await adapter(client).collect();
+    expect(failed.account, _pool('owned-user'));
+    expect(failed.windows, isEmpty);
+    expect(failed.plan, isNull);
+    final retry = await adapter(client).collect();
+    expect(retry.windows, isEmpty);
+    expect(profileReads, 2);
+    expect(billingReads, 1);
+    own('owner', token: 'replacement');
+    expect(adapter(client).accountIndex, isNot(contains(_pool('owned-user'))));
+    TokenStore.clearAccounts('grok');
+    expect(adapter(client).accountIndex, isEmpty);
   });
-
-  test('a locally expired token does not reclassify throttling', () async {
-    writeAuth({
-      'a': {
-        'email': 'a@example.com',
-        'key': 'token-a',
-        'expires_at': '2020-01-01T00:00:00Z',
-      },
+  for (final profile in <Map<String, dynamic>>[
+    {'email': 'owner'},
+    {'userId': 'user-a', 'principalType': 'Team'},
+    {
+      'userId': 'user-a',
+      'principalType': 'Team',
+      'principalId': 'a',
+      'teamId': 'b'
+    },
+    {'userId': 'user-a', 'teamId': 'a'},
+    {'userId': 'user-a', 'principalType': 'unknown'},
+  ]) {
+    test(
+        'incomplete or contradictory principal never authorizes owned billing $profile',
+        () async {
+      own('owner');
+      final q = await adapter(MockClient((request) async {
+        expect(request.url.path, '/v1/user');
+        return _json(profile);
+      })).collect();
+      expect(q.windows, isEmpty);
+      expect(q.plan, isNull);
+      expect(q.account, isNot(_pool('user-a')));
     });
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      client: MockClient(
-        (_) async => http.Response.bytes(
-          Uint8List(0),
-          200,
-          headers: {'grpc-status': '8'},
-        ),
-      ),
-    ).collectAccounts();
+  }
 
-    expect(q.single.ok, isFalse);
-    expect(q.single.error, 'gRPC status 8');
-    expect(q.single.pipeHealth, providerPipeHealthThrottled);
-    expect(q.single.error, isNot(contains('token expired')));
-  });
-
-  test('an HTTP 403 for a token past its recorded expiry is an expired login',
+  test(
+      'redirect and malformed modern response have no legacy transport fallback',
       () async {
-    writeAuth({
-      'a': {
-        'email': 'a@example.com',
-        'key': 'token-a',
-        'expires_at': '2020-01-01T00:00:00Z',
-      },
+    writeHost();
+    for (final status in [302, 200]) {
+      var calls = 0;
+      final q = await adapter(MockClient((request) async {
+        calls++;
+        expect(request.method, 'GET');
+        expect(request.url.host, 'cli-chat-proxy.grok.com');
+        return http.Response('secret-body', status,
+            headers: {'location': 'https://other.invalid'});
+      })).collect();
+      expect(calls, 1);
+      expect(q.windows, isEmpty);
+      expect(q.error, isNot(contains('secret-body')));
+      clock += 1200;
+    }
+  });
+  for (final declared in [false, true]) {
+    test(
+        'response cap stops ${declared ? 'declared' : 'streamed'} oversized body before accumulation',
+        () async {
+      writeHost();
+      var cancelled = false;
+      final stream = StreamController<List<int>>(onCancel: () {
+        cancelled = true;
+      });
+      final client = _StreamClient((_) async {
+        if (!declared) stream.add(List.filled(128 * 1024 + 1, 65));
+        return http.StreamedResponse(stream.stream, 200,
+            contentLength: declared ? 128 * 1024 + 1 : null);
+      });
+      final q = await adapter(client).collect();
+      expect(q.windows, isEmpty);
+      expect(cancelled, isTrue);
+      await stream.close();
     });
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      client: MockClient((_) async => http.Response('denied', 403)),
-    ).collectAccounts();
-
-    expect(q.single.ok, isTrue);
-    expect(q.single.windows, isEmpty);
-    expect(q.single.error, contains('token expired'));
-    expect(q.single.error, contains('HTTP 403'));
-    expect(q.single.error, contains('run: quotabot login grok'));
-    expect(q.single.httpStatus, 403);
+  }
+  test('timeout keeps the raw gate occupied until actual cancellation settles',
+      () async {
+    writeHost();
+    final aborted = Completer<void>();
+    final settle = Completer<void>();
+    var calls = 0;
+    final client = _StreamClient((request) async {
+      calls++;
+      await (request as http.AbortableRequest).abortTrigger;
+      aborted.complete();
+      await settle.future;
+      throw http.RequestAbortedException(request.url);
+    });
+    final first =
+        adapter(client, timeout: const Duration(milliseconds: 10)).collect();
+    await aborted.future;
+    final busy = await adapter(client).collect();
+    expect(busy.error, contains('already in progress'));
+    expect(calls, 1);
+    settle.complete();
+    final failed = await first;
+    expect(failed.error, contains('timed out'));
+    expect(failed.pipeHealth, providerPipeHealthThrottled);
+    final cooldown = await adapter(client).collect();
+    expect(cooldown.error, contains('retry deadline'));
+    expect(calls, 1);
   });
 
   test(
-      'a permission denial on a quotabot grant read keeps its exact status '
-      'even when the unused CLI token is expired', () async {
-    writeAuth({
-      'a': {
-        'email': 'a@example.com',
-        'key': 'token-a',
-        'expires_at': '2020-01-01T00:00:00Z',
-      },
-    });
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => 'own-grant-token',
-      client: MockClient(
-        (_) async => http.Response.bytes(
-          Uint8List(0),
-          200,
-          headers: {'grpc-status': '7'},
-        ),
-      ),
-    ).collectAccounts();
-
-    expect(q.single.ok, isFalse);
-    expect(q.single.error, 'gRPC status 7');
-    expect(q.single.error, isNot(contains('token expired')));
-  });
-
-  test('an account without any token stays visible with a plain note',
+      'a late non-200 result is a timeout and cannot trigger credential fallback',
       () async {
-    writeAuth({
-      'a': {'email': 'a@example.com'},
+    writeHost();
+    final client = _StreamClient((request) async {
+      await (request as http.AbortableRequest).abortTrigger;
+      return http.StreamedResponse(const Stream.empty(), 401);
     });
-
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      usageFetcher: (_, __) async => throw StateError('must not fetch'),
-    ).collectAccounts();
-
-    expect(q.single.account, 'a@example.com');
-    expect(q.single.ok, isTrue);
-    expect(q.single.windows, isEmpty);
-    expect(q.single.error, 'no token - run: quotabot login grok');
+    final q = await adapter(client, timeout: const Duration(milliseconds: 10))
+        .collect();
+    expect(q.httpStatus, isNull);
+    expect(q.error, contains('timed out'));
+    expect(q.pipeHealth, providerPipeHealthThrottled);
   });
 
-  test('missing, empty, and malformed auth files return plain errors',
-      () async {
-    final missing = await GrokAdapter(
-      authFile: File('${temp.path}/missing.json'),
-    ).collectAccounts();
-    expect(missing.single.ok, isFalse);
-    expect(missing.single.error, 'no ~/.grok/auth.json');
-
-    writeAuth({});
-    final empty = await GrokAdapter(authFile: authFile).collectAccounts();
-    expect(empty.single.ok, isFalse);
-    expect(empty.single.error, 'no grok account');
-
-    authFile.writeAsStringSync('{');
-    final malformed = await GrokAdapter(authFile: authFile).collectAccounts();
-    expect(malformed.single.ok, isFalse);
-    expect(malformed.single.error, 'unable to read Grok usage');
-  });
-
-  test('duplicate or malformed account entries are ignored', () async {
-    writeAuth({
-      'a': {'email': 'a@example.com', 'key': 'token-a'},
-      'dup': {'email': 'a@example.com', 'key': 'token-dup'},
-      'bad': 'not an account',
-      'default': {'key': 'token-default'},
+  group('included billing parser', () {
+    for (final percent in [0, 42.5, 100]) {
+      test('preserves exact included usage $percent', () {
+        final q = grokBillingWindowFromJson(_billing(percent))!;
+        expect(q.usedPercent, percent);
+        expect(q.label, 'weekly');
+        expect(q.resetsAt, 1789171200);
+      });
+    }
+    test('monthly modern period retains its declared reset', () {
+      final body = _billing();
+      (body['config']['currentPeriod'] as Map)['type'] =
+          'USAGE_PERIOD_TYPE_MONTHLY';
+      expect(grokBillingWindowFromJson(body)!.label, 'monthly');
     });
-
-    final q = await GrokAdapter(
-      authFile: authFile,
-      tokenResolver: (_, __) async => null,
-      usageFetcher: (_, __) async =>
-          QuotaWindow(label: 'monthly', usedPercent: 1),
-    ).collectAccounts();
-
-    expect(q.map((p) => p.account).toList(), ['a@example.com', 'default']);
+    Map<String, dynamic> oldConfig() => {
+          'monthlyLimit': {'val': 100},
+          'used': {'val': 25},
+          'billingPeriodEnd': _reset
+        };
+    for (final bad in [null, '25', -1, 101, double.nan, double.infinity]) {
+      test('present-invalid modern percentage $bad cannot borrow old quota',
+          () {
+        final config = oldConfig()..['creditUsagePercent'] = bad;
+        expect(grokBillingWindowFromJson({'config': config}), isNull);
+      });
+    }
+    test('a modern period without its percent cannot borrow old quota', () {
+      expect(
+          grokBillingWindowFromJson(
+              {'config': oldConfig()..['currentPeriod'] = <String, dynamic>{}}),
+          isNull);
+    });
+    for (final end in [
+      '2026-02-30T00:00:00Z',
+      '2026-09-12T25:00:00Z',
+      '2026-09-12T00:00:00',
+      '2026-09-12T00:00:00+00:99',
+      'yesterday'
+    ]) {
+      test('rejects invalid or ambiguous reset $end', () {
+        final body = _billing();
+        (body['config']['currentPeriod'] as Map)['end'] = end;
+        expect(grokBillingWindowFromJson(body), isNull);
+      });
+    }
+    test('unknown period and reversed interval do not create headroom', () {
+      final body = _billing();
+      final period = body['config']['currentPeriod'] as Map;
+      period['type'] = 'UNKNOWN';
+      expect(grokBillingWindowFromJson(body), isNull);
+      period['type'] = 'USAGE_PERIOD_TYPE_WEEKLY';
+      period['start'] = _reset;
+      expect(grokBillingWindowFromJson(body), isNull);
+    });
+    test('deprecated included cents require an explicit used field', () {
+      final config = oldConfig();
+      expect(grokBillingWindowFromJson({'config': config})!.usedPercent, 25);
+      config['used'] = <String, dynamic>{};
+      expect(grokBillingWindowFromJson({'config': config})!.usedPercent, 0);
+      config.remove('used');
+      expect(grokBillingWindowFromJson({'config': config}), isNull);
+    });
+    test('invalid deprecated included counts cannot be clamped into quota', () {
+      for (final used in [-1, 101, 9007199254740992, '25']) {
+        expect(
+            grokBillingWindowFromJson({
+              'config': oldConfig()..['used'] = {'val': used},
+            }),
+            isNull);
+      }
+      expect(
+          grokBillingWindowFromJson({
+            'config': oldConfig()..['monthlyLimit'] = <String, dynamic>{},
+          }),
+          isNull);
+    });
+    test(
+        'prepaid on-demand and product usage never substitute for included quota',
+        () {
+      final config = _billing()['config'] as Map;
+      config.remove('creditUsagePercent');
+      config.remove('currentPeriod');
+      expect(grokBillingWindowFromJson({'config': config}), isNull);
+      expect(grokBillingWindowFromJson({'config': null}), isNull);
+      expect(grokBillingWindowFromJson({}), isNull);
+    });
   });
 }

@@ -317,6 +317,8 @@ String _topTrustTag(ProviderQuota q, int now) {
     return ' (${q.sourceClass.label})';
   }
   final parts = <String>[_topReadState(q, now), q.sourceClass.label];
+  final admission = requestAdmissionLabel(q.requestAdmission);
+  if (admission != null) parts.add(admission);
   final spendClass = providerSpendClass(q);
   if (spendClass != null) parts.add(spendClass);
   return ' (${parts.join(', ')})';
@@ -328,6 +330,7 @@ String _topTrustTag(ProviderQuota q, int now) {
 /// and failed rows are never routine: those tags are the whole point.
 bool _isRoutineLiveRead(ProviderQuota q, int now) =>
     q.ok &&
+    !q.requestAdmission.blocksRequests &&
     !q.stale &&
     !q.isLocal &&
     !q.perMachine &&
@@ -1056,12 +1059,22 @@ List<String> renderTopFrame({
     }
     final visibleTags =
         trustTags[q] ?? (trustTag: '', accountTag: accountTagFor(q));
-    lines.addAll(_providerRows(q, now, w, s, p, barW, forecasts[q],
+    final rows = _providerRows(q, now, w, s, p, barW, forecasts[q],
         selected: isSelected(q),
         columns: columns,
         trustTag: visibleTags.trustTag,
         accountTag: visibleTags.accountTag,
-        compact: compact));
+        compact: compact);
+    lines.addAll(rows);
+    final admission = requestAdmissionLabel(q.requestAdmission);
+    if (admission != null && !rows.any((row) => row.contains(admission))) {
+      // A narrow terminal may omit an entire optional provenance tag. Access
+      // denial remains actionable even when that tag cannot fit beside a bar.
+      lines.add(_line([
+        const _Cell('  '),
+        _Cell(admission, (style, text) => style.yellow(text)),
+      ], w, s));
+    }
   }
 
   // Headers only earn their line when they separate something. A fleet that is

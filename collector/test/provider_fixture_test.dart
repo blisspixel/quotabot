@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:quotabot_collector/adapters/grok.dart';
 import 'package:quotabot_collector/adapters/lemonade.dart';
 import 'package:quotabot_collector/adapters/lmstudio.dart';
 import 'package:quotabot_collector/adapters/ollama.dart';
@@ -16,6 +17,17 @@ void main() {
     for (final entry in kProviderAdapterRegistry) {
       _assertFixtureParses(entry, now);
     }
+  });
+
+  test('historical Grok gRPC fixture remains a legacy parser regression', () {
+    final raw = jsonDecode(File('test/fixtures/legacy/grok_message_bytes.json')
+        .readAsStringSync()) as List<dynamic>;
+    final bytes = Uint8List.fromList(raw.cast<int>());
+    final window = grokWindow(bytes, now)!;
+    expect(window.usedPercent, 73);
+    expect(window.resetsAt, 1783379179);
+    expect(grokCategoryDetails(bytes),
+        ['Category split of this weekly pool: 66%, 5%, 2%']);
   });
 }
 
@@ -51,18 +63,14 @@ void _assertFixtureParses(ProviderAdapterRegistration entry, int now) {
       final windows = kiroWindows(_fixtureMap(entry.fixtureFile), now);
       expect(windows.single.label, 'credits');
       expect(windows.single.usedPercent, 82);
-    case ProviderFixtureKind.grokGrpcBytes:
-      // Live shape captured 2026-07-02: pool percent in config field 1,
-      // window end in field 5, per-product breakdowns (66 + 5 + 2 = 73) in
-      // repeated field 7 that must never pose as the pool total.
-      final window = grokWindow(_fixtureBytes(entry.fixtureFile), now);
+    case ProviderFixtureKind.grokBilling:
+      // Synthetic shape from the pinned official client. Purchased balances
+      // and product usage cannot replace the included pool's percentage.
+      final window = grokBillingWindowFromJson(_fixtureMap(entry.fixtureFile));
       expect(window, isNotNull);
       expect(window!.usedPercent, 73);
-      expect(window.resetsAt, 1783379179);
-      expect(
-        grokCategoryDetails(_fixtureBytes(entry.fixtureFile)),
-        ['Category split of this weekly pool: 66%, 5%, 2%'],
-      );
+      expect(window.label, 'weekly');
+      expect(window.resetsAt, 1789171200);
     case ProviderFixtureKind.lmStudioNativeModels:
       final models = lmStudioNativeFromJson(_fixtureMap(entry.fixtureFile));
       expect(models!.installed, hasLength(2));
@@ -101,11 +109,5 @@ void _assertFixtureParses(ProviderAdapterRegistration entry, int now) {
 
 Map<String, dynamic> _fixtureMap(String name) =>
     jsonDecode(_fixture(name).readAsStringSync()) as Map<String, dynamic>;
-
-Uint8List _fixtureBytes(String name) {
-  final values =
-      (jsonDecode(_fixture(name).readAsStringSync()) as List).cast<int>();
-  return Uint8List.fromList(values);
-}
 
 File _fixture(String name) => File('$kProviderFixtureRoot/$name');

@@ -53,9 +53,26 @@ String capturedAgeLabel(int capturedAt, int now) {
   return 'captured ${compactAge(elapsed, suffix: ' ago')}';
 }
 
+/// Access evidence is separate from the measured balance of a quota pool.
+String? requestAdmissionLabel(RequestAdmission admission) => switch (admission) {
+      RequestAdmission.denied => 'requests denied',
+      RequestAdmission.unresolved => 'request status unverified',
+      _ => null,
+    };
+
+String? requestAdmissionDetail(RequestAdmission admission) => switch (admission) {
+      RequestAdmission.denied =>
+        'The provider denies requests for this pool. Remaining quota is still shown as measured.',
+      RequestAdmission.unresolved =>
+        'Request availability could not be verified. Remaining quota alone does not establish availability.',
+      _ => null,
+    };
+
 /// Concise temporary-provider recovery copy derived only from bounded quota
 /// diagnostics. A timeout is not called a rate limit, and a 5xx is not called
-/// throttling. Returns null for auth, parsing, setup, and other failures.
+/// throttling. A provider Retry-After is an earliest allowed request, not the
+/// actual schedule chosen by every caller, so this label never promises a retry
+/// time. Returns null for auth, parsing, setup, and other failures.
 String? providerRetrySummary(
   ProviderQuota quota, {
   bool showingLastKnown = false,
@@ -65,20 +82,14 @@ String? providerRetrySummary(
     // HTTP 200, so the 429 check alone would mislabel it "provider slow".
     providerPipeHealthThrottled => quota.httpStatus == 429 ||
             (quota.error?.contains('gRPC status 8') ?? false)
-        ? 'rate limited'
-        : 'provider slow',
-    providerPipeHealthDegraded => 'provider error',
+        ? 'quota check rate limited'
+        : 'quota check delayed',
+    providerPipeHealthDegraded => 'quota service error',
     _ => null,
   };
   if (cause == null) return null;
-  final retryAfter = quota.retryAfterSeconds;
-  final retry = retryAfter == null
-      ? ''
-      : retryAfter <= 0
-          ? ' now'
-          : ' in ${compactAge(retryAfter)}';
   final evidence = showingLastKnown ? ', showing last known' : '';
-  return '$cause - retrying$retry$evidence';
+  return '$cause$evidence';
 }
 
 /// Primary failure copy for compact user surfaces. Exact request-stage and HTTP

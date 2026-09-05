@@ -234,6 +234,8 @@ String desktopProviderTrustLine(ProviderQuota quota, int now) {
     _desktopProviderReadState(quota, now),
     _desktopSourceLabel(quota.sourceClass),
   ];
+  final admission = requestAdmissionLabel(quota.requestAdmission);
+  if (admission != null) parts.add(admission);
   final spendClass = _desktopProviderSpendClass(quota);
   if (spendClass != null) parts.add(spendClass);
   if (quota.supplementalManualQuota != null) parts.add('manual note');
@@ -299,6 +301,8 @@ String desktopProviderTrustDetail(ProviderQuota quota, int now) {
       'Quota entered manually; it is not provider-measured evidence.',
   };
   final detail = <String>['State: $state.', scope];
+  final admission = requestAdmissionDetail(quota.requestAdmission);
+  if (admission != null) detail.add(admission);
   final manual = quota.supplementalManualQuota;
   if (manual != null) {
     final windows = [
