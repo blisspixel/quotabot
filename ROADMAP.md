@@ -94,8 +94,10 @@ into native desktop workflows and named agent harnesses.** Useful product work
 continues while publisher identities are unavailable. Signing remains a native
 distribution gate before 1.0; store admission is not a product-development gate.
 
-Stable 0.10.3 already shows loaded models, running context, GPU residency, and
-separately labeled host pressure. The next work builds on those shipped fields.
+The 0.11.0 release adds inspectable desktop model detail, declared Ollama reasoning
+capabilities, honest Windows GPU evidence, and tested advisory harness and
+Agent Plugins setup. Further work improves native recovery and execution evidence
+before expanding local-only promises.
 The September research records the current code baseline, primary sources,
 uncertainties, and concrete tests for [local models](docs/research/2026-09-local-models.md),
 [native platforms](docs/research/2026-09-platform-quality.md), and
@@ -104,17 +106,19 @@ evidence; this section owns the execution order.
 
 **Build in this order**
 
-1. **Repair local evidence before exposing it more widely.** Preserve unknown
-   capabilities, distinguish running context from a model's advertised maximum,
-   and propagate supported declared reasoning capabilities. Do not call a
-   32-bit Windows compatibility counter authoritative VRAM capacity. A local
-   endpoint, loaded model, or host GPU counter must not prove on-device
-   execution, active generation, or per-model utilization respectively. Check
-   remote-runtime evidence, including LM Studio LM Link, before expanding any
-   local-only routing claim.
-2. **Ship an inspectable local-model view.** Add keyboard-accessible model detail
-   to desktop and `top`, reusing the registry's loaded state, capability gates,
-   and advisory hardware fit. Answer: what can run here, what is loaded, which
+1. **Establish execution scope before expanding local-only advice.** The
+   explicit upstream veto, declared reasoning support, and conservative Windows
+   GPU correction are in place. Next, require a bounded positive producer and
+   endpoint-scope contract for stronger on-device claims. Preserve unknown
+   capabilities and distinguish running context from a model's advertised
+   maximum. A local endpoint, loaded model, or host GPU counter must not prove
+   on-device execution, active generation, or per-model utilization. Account for
+   LM Studio LM Link, WSL and tunnel forwarding, and Lemonade composites before
+   admitting those cases to a stronger local-only policy.
+2. **Extend inspectable choices across desktop and `top`.** The desktop model
+   detail is shipped. Add keyboard-accessible model detail to `top` and a bounded
+   comparison of reported capabilities and fit, reusing the same registry and
+   displayed snapshot. Answer: what is eligible, what is loaded, which
    context and capabilities are known, why a model is eligible or excluded, and
    what to do when evidence is missing. Show loaded models first, installed
    inventory second, and host pressure separately. Keep useful detail readable
@@ -122,6 +126,8 @@ evidence; this section owns the execution order.
 3. **Make everyday native use dependable.** Prioritize honest GPU evidence and
    runtime reachability, Linux behavior when a tray host is absent, coalesced
    freshness recovery after sleep or foregrounding, and Windows/WSL/host scope.
+   Quota refresh now completes independently of advisory analytics; the next
+   recovery work must retain that separation and discard older completions.
    Extend supported AMD, NVIDIA, and Apple unified-memory probes only when a
    bounded documented source and native evidence exist. Exercise mixed DPI,
    monitor changes, keyboard, screen reader, startup, quit, and offline recovery
@@ -408,7 +414,7 @@ plan semantics remain uneven.
 
 ## Current state
 
-The current line, **0.11.0**, is the stable release version and carries
+The current line, **0.11.1**, is the stable release version and carries
 the latest hardening inventory described in [Next](#next). The stable line
 contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
@@ -423,9 +429,14 @@ bounded product increments in [Next](#next). Field validation, accessibility,
 signing, and exact native release evidence remain 1.0 gates.
 The 0.11.0 increment adds per-model desktop inspection, explicit Ollama
 reasoning capabilities, conservative Windows GPU fallback evidence, and
-versioned quota-advice setup through `quotabot mcp` and Agent Plugins. The
-completed release-lifecycle records below remain dated evidence; each new tag
-must repeat the native build and installation gates.
+versioned quota-advice setup through `quotabot mcp` and Agent Plugins. Its
+[release workflow](https://github.com/blisspixel/quotabot/actions/runs/33956459889)
+and unpinned three-platform
+[install and upgrade smoke](https://github.com/blisspixel/quotabot/actions/runs/33959135481)
+passed, with the matching CLI and desktop installed and verified on Windows.
+The 0.11.1 increment separates refresh from advisory work and closes explicit
+upstream and embedding-only admission gaps. Each new tag must repeat the
+native build and installation gates.
 The table is a status index; detailed scope and acceptance criteria live in the
 milestone sections below.
 

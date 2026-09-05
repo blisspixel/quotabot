@@ -143,8 +143,9 @@ class ModelEntry {
     this.driftObservedAt,
   });
 
-  String? get localReadiness =>
-      local ? (model.loaded ? 'loaded' : 'cold') : null;
+  String? get localReadiness => local && !model.hasLocalGenerationVeto
+      ? (model.loaded ? 'loaded' : 'cold')
+      : null;
 
   Map<String, dynamic> toJson() => {
         ...model.toJson(),
@@ -172,6 +173,12 @@ LocalModelHardwareFit localModelHardwareFit(
   ModelInfo model,
   LocalHardwareInfo? hardware,
 ) {
+  if (model.hasLocalExecutionVeto) {
+    return const LocalModelHardwareFit(
+      status: LocalHardwareFitStatus.unknown,
+      basis: 'local_execution_unverified',
+    );
+  }
   if (model.loaded) {
     return LocalModelHardwareFit(
       status: LocalHardwareFitStatus.loaded,
@@ -510,10 +517,10 @@ bool meetsRequirements(ModelEntry e, ModelRequirements r) {
 }
 
 bool meetsBudgetPolicy(ModelEntry e, ModelBudgetPolicy policy) {
-  // A model reached through a local daemon but executed in the provider's cloud
-  // is neither on-device nor free, so it cannot satisfy a local-only or a
-  // free-or-metered budget promise even though it is nominally local.
-  final localFree = e.local && !e.model.cloudOffloaded;
+  // Known upstream configuration, including unresolved declarations, cannot
+  // satisfy a local/free budget. Its absence preserves legacy eligibility;
+  // it does not prove on-device execution or free upstream service.
+  final localFree = e.local && !e.model.hasLocalExecutionVeto;
   return switch (policy) {
     ModelBudgetPolicy.any => true,
     ModelBudgetPolicy.local => localFree,
@@ -680,16 +687,18 @@ List<ModelEntry> buildModelRegistry(
         source: q.source,
         sourceClass: q.sourceClass,
         quotaBacked: quotaBacked,
-        hardwareFit: q.isLocal && !m.cloudOffloaded
+        hardwareFit: q.isLocal && !m.hasLocalExecutionVeto
             ? localModelHardwareFit(m, q.localHardware)
             : null,
         headroomPercent: budget?.headroomPercent,
         resetsAt: budget?.resetsAt,
         gatingWindow: budget?.gatingWindow,
         available: q.isLocal
-            ? m.cloudOffloaded
-                ? isLocalRuntimeReachableAt(q, now)
-                : isLocalRuntimeAvailableAt(q, now)
+            ? m.upstreamRouting == UpstreamRouting.unresolved
+                ? false
+                : m.hasLocalExecutionVeto
+                    ? isLocalRuntimeReachableAt(q, now)
+                    : isLocalRuntimeAvailableAt(q, now)
             : budget?.available ?? false,
         stale: q.stale,
         driftReason: q.driftReason,
@@ -708,10 +717,12 @@ List<ModelEntry> buildModelRegistry(
     if (x.local != y.local) return x.local ? 1 : -1; // cloud before local
     if (x.local &&
         y.local &&
-        x.model.cloudOffloaded != y.model.cloudOffloaded) {
-      return x.model.cloudOffloaded ? 1 : -1;
+        x.model.hasLocalGenerationVeto != y.model.hasLocalGenerationVeto) {
+      return x.model.hasLocalGenerationVeto ? 1 : -1;
     }
-    if (x.local && y.local && x.model.loaded != y.model.loaded) {
+    if (_localFallbackEntry(x) &&
+        _localFallbackEntry(y) &&
+        x.model.loaded != y.model.loaded) {
       return x.model.loaded ? -1 : 1;
     }
     if (x.local && y.local) {
@@ -1043,7 +1054,8 @@ ExpiringQuotaSignal? _entryExpiringSignal(
 String _quotaSignalKey(String provider, String account) =>
     '$provider\u0000$account';
 
-bool _onDeviceRuntimeEntry(ModelEntry e) => e.local && !e.model.cloudOffloaded;
+bool _localFallbackEntry(ModelEntry e) =>
+    e.local && !e.model.hasLocalGenerationVeto;
 
 /// Recommendation order for picking one model: usable now first, then optionally
 /// soon-expiring included quota, then on-device local-runtime before cloud, then loaded
@@ -1065,8 +1077,8 @@ int _recommendCompare(
       if (waste != 0) return waste;
     }
   }
-  final aOnDevice = _onDeviceRuntimeEntry(a);
-  final bOnDevice = _onDeviceRuntimeEntry(b);
+  final aOnDevice = _localFallbackEntry(a);
+  final bOnDevice = _localFallbackEntry(b);
   if (aOnDevice != bOnDevice) return aOnDevice ? -1 : 1;
   if (aOnDevice && bOnDevice && a.model.loaded != b.model.loaded) {
     return a.model.loaded ? -1 : 1;
@@ -1090,6 +1102,11 @@ String _recommendReason(
   ModelEntry e, {
   ExpiringQuotaSignal? expiringQuota,
 }) {
+  if (e.local && e.model.upstreamRouting != UpstreamRouting.notReported) {
+    return '${e.model.id} on ${e.provider} reports '
+        '${e.model.upstreamRouting.wireName} upstream routing; '
+        'execution location and cost are unverified.';
+  }
   if (e.local && e.model.cloudOffloaded) {
     return '${e.model.id} on ${e.provider} is reachable through a local '
         'daemon but executes in the provider cloud; it is not on-device '

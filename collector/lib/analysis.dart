@@ -231,15 +231,13 @@ bool isLocalRuntimeReachableAt(ProviderQuota quota, int now) =>
     quota.asOf <= now + kQuotaEvidenceClockSkewSeconds &&
     quota.sourceClassViolation == null;
 
-/// Whether a local runtime supplies usable on-device capacity for provider
-/// routing. A runtime whose represented models are all cloud-offloaded must not
-/// satisfy local-first or local-fallback policy. Reachability without at least
-/// one represented on-device model proves only that the daemon answered, not
-/// that it can execute the next request.
+/// Legacy local-runtime eligibility after known execution and generation
+/// vetoes. Reachability, absent upstream declarations, and absent embedding
+/// declarations do not establish positive physical execution scope.
 bool isLocalRuntimeAvailableAt(ProviderQuota quota, int now) =>
     isLocalRuntimeReachableAt(quota, now) &&
     quota.error == null &&
-    quota.models.any((model) => !model.cloudOffloaded);
+    quota.localGenerationReadiness != null;
 
 /// Whether any provider can take work right now: a running local runtime, or a
 /// metered subscription with headroom left. Lets a shell or agent branch on "is
@@ -1580,11 +1578,7 @@ RouteSuggestion suggestRoute(
       available: q.isLocal
           ? isLocalRuntimeAvailableAt(q, now)
           : routeAvailable && !capabilityBlocked,
-      localReadiness: q.isLocal
-          ? q.models.any((model) => !model.cloudOffloaded && model.loaded)
-              ? 'loaded'
-              : 'cold'
-          : null,
+      localReadiness: q.localGenerationReadiness,
       leaseDiscount: leaseDiscount,
       pipeDiscount: pipeDiscount,
       capabilityLimited: capabilityLimited,

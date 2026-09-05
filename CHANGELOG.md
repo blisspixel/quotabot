@@ -4,6 +4,24 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.1 - 2026-09-05
+
+### Fixed
+
+- Desktop refresh publishes collected quota before reading advisory analytics.
+  One background worker retains only the newest queued snapshot, and late
+  results cannot overwrite newer quota or profile state. Pending or unavailable
+  adjustments are visible; low-quota alerts still arrive promptly without an
+  unqualified alternative account.
+- Ollama aliases with declared or unresolved upstream configuration no longer
+  qualify local/quota budgets, readiness preference, or advisory host fit.
+  Private upstreams remain distinct from paid or public-cloud claims, and the
+  desktop and CLI explain the exclusion without exposing target addresses.
+  Embedding-only inventory also cannot qualify a provider generation fallback.
+- A CLI schedule-hint test now keeps its supported slot ahead of a possible
+  startup hour boundary, with a fixed-clock regression preserving strict
+  before-reset scheduling.
+
 ## 0.11.0 - 2026-09-05
 
 ### Added

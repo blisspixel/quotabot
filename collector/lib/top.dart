@@ -355,10 +355,11 @@ String _topReadState(ProviderQuota q, int now) {
     if (!isLocalRuntimeReachableAt(q, now) || q.error != null) {
       return 'unavailable';
     }
-    if (q.active) return 'loaded';
-    return q.models.any((model) => !model.cloudOffloaded)
-        ? 'ready'
-        : 'reachable';
+    return switch (q.localGenerationReadiness) {
+      'loaded' => 'loaded',
+      'cold' => 'ready',
+      _ => 'reachable',
+    };
   }
   if (q.stale) {
     return _cachedTopState(q, now);
@@ -783,7 +784,9 @@ List<String> _localRows(
           status,
           (s, t) => !q.ok || q.error != null
               ? s.red(t)
-              : (available && q.active ? s.cyan(t) : s.dim(t))),
+              : (available && q.localGenerationReadiness == 'loaded'
+                  ? s.cyan(t)
+                  : s.dim(t))),
       if (showTrust) ...[
         const _Cell('  '),
         _Cell(trustTag, (s, t) => s.dim(t)),

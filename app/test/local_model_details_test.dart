@@ -243,6 +243,139 @@ void main() {
     expect(find.text('Loaded'), findsNothing);
   });
 
+  testWidgets(
+    'private upstream stays inspectable without a local fit promise',
+    (tester) async {
+      await _open(
+        tester,
+        _quota(
+          models: const [
+            ModelInfo(
+              id: 'upstream-alias',
+              local: true,
+              loaded: true,
+              sizeBytes: 4 * _gib,
+              upstreamRouting: UpstreamRouting.declared,
+            ),
+          ],
+          hardware: const LocalHardwareInfo(
+            asOf: _now,
+            systemMemoryTotalBytes: 32 * _gib,
+            systemMemoryAvailableBytes: 24 * _gib,
+          ),
+        ),
+      );
+
+      expect(_model('upstream-alias'), findsOneWidget);
+      expect(find.text('Runtime reports loaded'), findsOneWidget);
+      expect(
+        find.text(
+          'Upstream configured. Execution location and cost are unverified. '
+          'Excluded from local and quota budgets.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Advisory host fit: unavailable for upstream configuration.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Cloud-offloaded.'), findsNothing);
+      expect(find.textContaining('Advisory fit: comfortable'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'unresolved upstream explains exclusion without blaming runtime',
+    (tester) async {
+      await _open(
+        tester,
+        _quota(
+          models: const [
+            ModelInfo(
+              id: 'unresolved-alias',
+              local: true,
+              upstreamRouting: UpstreamRouting.unresolved,
+            ),
+          ],
+        ),
+      );
+
+      expect(_model('unresolved-alias'), findsOneWidget);
+      expect(
+        find.text(
+          'Upstream configuration is unresolved. Excluded from routing.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Advisory host fit: unavailable for upstream configuration.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Runtime unavailable. Excluded from routing.'),
+        findsNothing,
+      );
+      expect(find.text('Cold'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final model in const [
+    ModelInfo(
+      id: 'configured-upstream',
+      local: true,
+      loaded: true,
+      upstreamRouting: UpstreamRouting.declared,
+    ),
+    ModelInfo(
+      id: 'cloud-only',
+      local: true,
+      loaded: true,
+      cloudOffloaded: true,
+    ),
+    ModelInfo(id: 'embedding-only', local: true, loaded: true, embedding: true),
+  ]) {
+    testWidgets('${model.id} cannot make the runtime card look locally ready', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_wrap(_tile(_quota(models: [model]))));
+
+      expect(find.text('reachable'), findsOneWidget);
+      expect(find.text('No eligible generation model'), findsOneWidget);
+      expect(find.text('ready'), findsNothing);
+      expect(find.text('loaded'), findsNothing);
+      expect(find.byType(LocalModelDetailsButton), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('loaded upstream does not upgrade a cold eligible model', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        _tile(
+          _quota(
+            models: const [
+              ModelInfo(
+                id: 'loaded-upstream',
+                local: true,
+                loaded: true,
+                upstreamRouting: UpstreamRouting.declared,
+              ),
+              ModelInfo(id: 'cold-local', local: true),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('ready'), findsOneWidget);
+    expect(find.text('loaded'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('unavailable runtime inventory remains inspectable', (
     tester,
   ) async {

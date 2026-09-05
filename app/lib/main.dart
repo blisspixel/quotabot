@@ -29,6 +29,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'chrome_controls.dart';
 import 'demo.dart';
+import 'desktop_analytics.dart';
 import 'desktop_notification_policy.dart';
 import 'desktop_readiness.dart';
 import 'first_run.dart';
@@ -587,15 +588,6 @@ typedef ProfileSaver = void Function(QuotaProfile profile);
 
 typedef TrayInitializer = Future<void> Function();
 
-typedef AnalyticsStorageCollector =
-    Future<
-      ({
-        List<AnalyticsStorageNotice> notices,
-        AnalyticsIncidentInventory inventory,
-      })
-    >
-    Function(List<ProviderQuota> active);
-
 typedef UpdateChecker = Future<QuotabotUpdateStatus> Function();
 
 typedef ReleaseOpener = Future<void> Function(String url);
@@ -628,7 +620,9 @@ class Dashboard extends StatefulWidget {
   @visibleForTesting
   final Future<List<ProviderQuota>> Function()? collector;
   @visibleForTesting
-  final AnalyticsStorageCollector? analyticsStorageCollector;
+  final DesktopAnalyticsJobStarter? analyticsJobStarter;
+  @visibleForTesting
+  final Duration analyticsDeadline;
   @visibleForTesting
   final List<QuotaProfile>? testProfiles;
   @visibleForTesting
@@ -660,7 +654,8 @@ class Dashboard extends StatefulWidget {
       _demoModeOverride = null,
       initialAnalytics = false,
       collector = null,
-      analyticsStorageCollector = null,
+      analyticsJobStarter = null,
+      analyticsDeadline = const Duration(seconds: 30),
       testProfiles = null,
       alertPoster = null,
       prefsSaver = null,
@@ -685,7 +680,8 @@ class Dashboard extends StatefulWidget {
     bool demoMode = true,
     this.initialAnalytics = false,
     this.collector,
-    this.analyticsStorageCollector,
+    this.analyticsJobStarter,
+    this.analyticsDeadline = const Duration(seconds: 30),
     this.testProfiles,
     this.alertPoster,
     this.prefsSaver,
@@ -745,6 +741,9 @@ class _DashboardState extends State<Dashboard>
   bool _firstRunReviewOpen = false;
   late final FirstRunSession _firstRunSession;
   late final DesktopNotificationClient? _notificationClient;
+  late final DesktopAnalyticsScheduler? _analyticsScheduler;
+  DesktopAnalyticsState _analyticsState = DesktopAnalyticsState.ready;
+  int _quotaRevision = 0;
   final FocusNode _routeExplanationFocusNode = FocusNode(
     debugLabel: 'Route explanation',
   );
@@ -983,6 +982,16 @@ class _DashboardState extends State<Dashboard>
         ? widget.notificationClient ??
               (widget._hostIntegration ? _desktopNotificationClient : null)
         : null;
+    final analyticsStarter =
+        widget.analyticsJobStarter ??
+        (widget._hostIntegration ? IsolateDesktopAnalyticsJob.new : null);
+    _analyticsScheduler = analyticsStarter == null
+        ? null
+        : DesktopAnalyticsScheduler(
+            start: analyticsStarter,
+            onUpdate: _applyAnalytics,
+            deadline: widget.analyticsDeadline,
+          );
     _defaultHidden = {...widget.prefs.hidden};
     _defaultSort = widget.prefs.sort;
     _profiles = _loadProfiles();
@@ -1145,6 +1154,7 @@ class _DashboardState extends State<Dashboard>
   @override
   void dispose() {
     _windowGeometryRevision++;
+    _analyticsScheduler?.dispose();
     if (widget._hostIntegration) {
       windowManager.removeListener(this);
       trayManager.removeListener(this);
@@ -1403,46 +1413,89 @@ class _DashboardState extends State<Dashboard>
     }
   }
 
-  /// Analytics storage notices for [active], computed off the UI isolate when
-  /// that is possible. Advisory data must not be able to fail a refresh that has
-  /// already collected quota, so an isolate that cannot spawn falls back to this
-  /// isolate, and a failure there degrades to no notices rather than throwing.
-  Future<
-    ({
-      List<AnalyticsStorageNotice> notices,
-      AnalyticsIncidentInventory inventory,
-    })
-  >
-  _collectAnalyticsStorage(List<ProviderQuota> active) async {
-    final injectedCollector = widget.analyticsStorageCollector;
-    if (injectedCollector != null) return injectedCollector(active);
-    Future<
-      ({
-        List<AnalyticsStorageNotice> notices,
-        AnalyticsIncidentInventory inventory,
-      })
-    >
-    compute() async => (
-      notices: analyticsStorageNoticesForQuotas(active),
-      inventory: await analyticsStorageIncidentInventory(active),
+  String? get _analyticsStatusLine {
+    if (_analyticsScheduler == null || _loading) return null;
+    return switch (_analyticsState) {
+      DesktopAnalyticsState.pending => 'Recent usage checks pending',
+      DesktopAnalyticsState.unavailable => 'Recent usage checks unavailable',
+      DesktopAnalyticsState.ready => null,
+    };
+  }
+
+  String? get _analyticsAdviceNote => _analyticsStatusLine == null
+      ? null
+      : 'Advice uses the displayed quota and active reservations. '
+            'Recent usage and connection history adjustments are '
+            '${_analyticsState == DesktopAnalyticsState.pending ? 'pending' : 'unavailable'}.';
+
+  String _qualifiedRouteDetail(String detail) {
+    final note = _analyticsAdviceNote;
+    return note == null ? detail : '$note\n$detail';
+  }
+
+  void _clearAnalytics(DesktopAnalyticsState state) {
+    _analyticsState = state;
+    _history = {};
+    _insights = {};
+    _heatmaps = {};
+    _buckets = {};
+    _burnStats = {};
+    _routeSummary = emptyRoutedRequestSummary;
+    _analyticsStorageNotices = const [];
+    _analyticsStorageIncidents = const [];
+    _analyticsIncidentInventoryPartial = false;
+    _analyticsIncidentUncertainProviders = const {};
+    _analyticsIncidentGlobalUncertainty = false;
+  }
+
+  void _applyAnalytics(
+    DesktopAnalyticsRequest request,
+    DesktopAnalyticsState state,
+    DesktopAnalyticsData? data,
+  ) {
+    if (!mounted || request.revision != _quotaRevision) return;
+    setState(() {
+      _analyticsState = state;
+      if (data == null || state != DesktopAnalyticsState.ready) return;
+      _history = data.history;
+      _insights = data.insights;
+      _heatmaps = data.heatmaps;
+      _buckets = data.buckets;
+      _burnStats = data.burnStats;
+      _routeSummary = data.routedRequests;
+      _analyticsStorageNotices = data.notices;
+      _analyticsStorageIncidents = [
+        for (final incident in data.inventory.incidents)
+          if (!incident.exactAccountInSnapshot) incident,
+      ];
+      _analyticsIncidentInventoryPartial = data.inventory.state == 'partial';
+      _analyticsIncidentUncertainProviders = data.inventory.uncertainProviders;
+      _analyticsIncidentGlobalUncertainty = data.inventory.globalUncertainty;
+    });
+    // Advisory completion never changes the quota, profile, checked time, or
+    // refresh button. The current profile derives its own view of these maps.
+    _applySize();
+  }
+
+  void _queueAnalytics(List<ProviderQuota> active, int now) {
+    final scheduler = _analyticsScheduler;
+    if (scheduler == null) return;
+    final accountCounts = distinctProviderAccountCounts(active);
+    scheduler.submit(
+      DesktopAnalyticsRequest(
+        revision: _quotaRevision,
+        targets: [
+          for (final quota in active)
+            DesktopAnalyticsTarget(
+              quota: quota,
+              displayKey: quotaDisplayKey(quota),
+              fallbackToProvider: accountCounts[quota.provider] == 1,
+            ),
+        ],
+        now: now,
+        timeZoneOffset: DateTime.now().timeZoneOffset,
+      ),
     );
-    // Bounded: this runs after quota is already in hand, and a stalled
-    // directory scan on a redirected or roaming profile would otherwise
-    // hold the refresh open forever, leaving _refreshInFlight set so every
-    // later refresh returns the same dead future and auto-polling stops.
-    const budget = Duration(seconds: 30);
-    try {
-      return await Isolate.run(compute).timeout(budget);
-    } catch (_) {
-      try {
-        return await compute().timeout(budget);
-      } catch (_) {
-        return (
-          notices: const <AnalyticsStorageNotice>[],
-          inventory: const AnalyticsIncidentInventory.suppressed(),
-        );
-      }
-    }
   }
 
   Future<void> _refresh() {
@@ -1466,69 +1519,27 @@ class _DashboardState extends State<Dashboard>
     }
     setState(() => _isRefreshing = true);
     try {
-      // A hard deadline over the whole collect: adapters carry their own
-      // per-provider deadlines, but if anything ever hangs past them, the
-      // refresh loop must recover rather than freeze all future refreshes.
-      //
-      // It must stay above a realistic slow fleet read, not just a healthy one.
-      // Adapters run concurrently but their owner-only file hardening shells out
-      // synchronously on Windows, which serializes the fleet: a full read of a
-      // large fleet there is measured in tens of seconds, well past the 45s this
-      // once allowed. A deadline under the real worst case is worse than no
-      // deadline, because a cold start has no previous snapshot to fall back on,
-      // so every retry times out and the dashboard stays permanently empty
-      // instead of merely stale. Keep this comfortably above one adapter
-      // deadline (30s) plus that serialized write cost.
+      // Keep the existing fleet deadline and collector coalescing. Advisory
+      // history work runs separately and cannot hold this future open.
+      // Leave room for a real slow fleet: provider deadlines plus synchronous
+      // owner-only file hardening on Windows can take tens of seconds.
       final results = await _collectProviders().timeout(
         const Duration(seconds: 180),
       );
-      final routeSummary = widget._hostIntegration
-          ? loadRoutedRequestSummary()
-          : emptyRoutedRequestSummary;
       if (!mounted) return;
       final active = widget._hostIntegration
           ? visibleProviderRows(results, detectInstalledAgenticTools())
           : results;
       final setupRows = providerSetupRows(results);
       final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      // Analytics notices are advisory: they annotate quota that has already
-      // been collected successfully. So this must never be able to fail the
-      // refresh that produced it. An isolate can fail to spawn on some machines
-      // - the collect above guards for exactly that - and letting the throw
-      // escape here would discard a good fleet read, retain nothing on a cold
-      // start, and leave the dashboard permanently empty while reporting a
-      // failed refresh. Fall back to the main isolate, then to no notices.
-      final analyticsStorage =
-          widget._hostIntegration || widget.analyticsStorageCollector != null
-          ? await _collectAnalyticsStorage(active)
-          : (
-              notices: const <AnalyticsStorageNotice>[],
-              inventory: const AnalyticsIncidentInventory.suppressed(),
-            );
-      final analyticsStorageNotices = analyticsStorage.notices;
-      final analyticsIncidentInventory = analyticsStorage.inventory;
-      final analyticsStorageIncidents = [
-        for (final incident in analyticsIncidentInventory.incidents)
-          if (!incident.exactAccountInSnapshot) incident,
-      ];
-      final burnStats = widget._hostIntegration
-          ? recentBurnStatsByQuota(active, nowSec)
-          : <String, BurnStat>{};
-      // Track systemic failure...
       final anyLive = hasSuccessfulRefreshEvidence(active, nowSec);
-      // Back off only for genuine read failures. A fresh install where
-      // nothing is connected yet has no live evidence either, and treating
-      // that as a failure pushed the poll interval straight to hours, so a
-      // provider connected outside the app stayed invisible until a manual
-      // refresh. Nothing configured is a setup state, not a failure.
+      // Nothing configured is a setup state, not a read failure. Keep polling
+      // so a provider connected outside the app becomes visible automatically.
       final anyConfigured = active.any(
         (quota) => quota.windows.isNotEmpty || quota.stale || quota.isLocal,
       );
       _failStreak = anyLive || !anyConfigured ? 0 : _failStreak + 1;
-      // Track throttling separately from a full failure: a provider can push
-      // back (a timeout or a 429) while others read fine, so the refresh cadence
-      // can escalate its back-off from that provider without waiting for the
-      // whole fleet to go dark.
+      // One throttled provider can request back-off while the rest read fine.
       final anyThrottled = active.any(
         (q) =>
             q.pipeHealth == providerPipeHealthThrottled ||
@@ -1536,92 +1547,14 @@ class _DashboardState extends State<Dashboard>
       );
       _throttleStreak = anyThrottled ? _throttleStreak + 1 : 0;
 
-      // Load per-provider history and analytics BEFORE touching state. This is
-      // real file I/O, and doing it inside a setState callback means a throw
-      // mutates the fields already assigned above it and then never schedules a
-      // rebuild, because setState only marks the element dirty after its
-      // callback returns. One provider's unreadable analytics must also not
-      // discard a whole successful fleet read, so each is guarded on its own and
-      // simply contributes no history.
-      final tz = DateTime.now().timeZoneOffset;
-      final loadedHistory = <String, List<ProviderQuota>>{};
-      final loadedBuckets = <String, List<HeadroomBucket>>{};
-      final loadedHeatmaps = <String, List<List<double?>>>{};
-      final rawInsights = <String, Insights>{};
-      if (widget._hostIntegration) {
-        final accountCounts = distinctProviderAccountCounts(active);
-        for (final q in active) {
-          final key = quotaDisplayKey(q);
-          try {
-            loadedHistory[key] = loadHistory(q.provider, account: q.account);
-            if (!q.isLocal) {
-              final providerBuckets = loadBuckets(
-                q.provider,
-                account: q.account,
-                fallbackToProvider: accountCounts[q.provider] == 1,
-              );
-              loadedBuckets[key] = providerBuckets;
-              rawInsights[key] = Insights.from(
-                providerBuckets,
-                nowSec,
-                tzOffset: tz,
-              );
-              loadedHeatmaps[key] = smoothedWeekHourHeatmap(
-                providerBuckets,
-                tzOffset: tz,
-              );
-            }
-          } catch (_) {
-            // Advisory analytics only; quota for this provider still renders.
-          }
-        }
-      }
-      final loadedInsights = shrinkInsightsReliability(rawInsights);
-      // Settings remain interactive during the analytics await. Load profiles
-      // and keep the latest selection now so refresh cannot undo a profile
-      // switch or replace an edited profile with its earlier definition.
+      // Read the current profile after collection, with no intervening await.
+      // Analytics completion never restores a captured profile selection.
       final profiles = _loadProfiles();
       final selectedProfile = _activeProfile.name;
-      // Apply a completed refresh with setState whenever this widget is alive.
-      // Gating the rebuild on tracked window visibility instead is unsafe: if
-      // that flag ever desyncs from the real window - a minimize event that
-      // arrives without its matching restore, or a window shown by the platform
-      // rather than through _showWindow - then every refresh assigns new data
-      // without ever rebuilding, so the dashboard stays frozen on its first
-      // frame (an empty loading state on a cold start) and cannot recover,
-      // because each later refresh takes the same branch. Rebuilding while
-      // hidden costs one frame; not rebuilding while visible costs the product.
-      // The periodic clock tick is still skipped while hidden, which is where
-      // the churn actually came from.
-      if (mounted) {
-        setState(() {
-          _profiles = profiles;
-          _activeProfile = _profileByName(selectedProfile);
-          _applyProfileUiState(_activeProfile);
-          _data = active;
-          _setupData = setupRows;
-          _loading = false;
-          _updated = DateTime.now();
-          _history = loadedHistory;
-          _heatmaps = loadedHeatmaps;
-          _buckets = loadedBuckets;
-          _burnStats = burnStats;
-          _analyticsStorageNotices = analyticsStorageNotices;
-          _analyticsStorageIncidents = analyticsStorageIncidents;
-          _analyticsIncidentInventoryPartial =
-              analyticsIncidentInventory.state == 'partial';
-          _analyticsIncidentUncertainProviders =
-              analyticsIncidentInventory.uncertainProviders;
-          _analyticsIncidentGlobalUncertainty =
-              analyticsIncidentInventory.globalUncertainty;
-          _routeSummary = routeSummary;
-          _lastRefreshError = anyLive
-              ? null
-              : refreshNoCurrentDataMessage(hasRows: active.isNotEmpty);
-          _insights = loadedInsights;
-        });
-        _maybeStartFirstRun();
-      } else {
+      _quotaRevision++;
+      // Rebuild whenever mounted, even while hidden: native visibility events
+      // can be missed, and that must never strand the dashboard on an old frame.
+      setState(() {
         _profiles = profiles;
         _activeProfile = _profileByName(selectedProfile);
         _applyProfileUiState(_activeProfile);
@@ -1629,46 +1562,32 @@ class _DashboardState extends State<Dashboard>
         _setupData = setupRows;
         _loading = false;
         _updated = DateTime.now();
-        _history = loadedHistory;
-        _heatmaps = loadedHeatmaps;
-        _buckets = loadedBuckets;
-        _burnStats = burnStats;
-        _analyticsStorageNotices = analyticsStorageNotices;
-        _analyticsStorageIncidents = analyticsStorageIncidents;
-        _analyticsIncidentInventoryPartial =
-            analyticsIncidentInventory.state == 'partial';
-        _analyticsIncidentUncertainProviders =
-            analyticsIncidentInventory.uncertainProviders;
-        _analyticsIncidentGlobalUncertainty =
-            analyticsIncidentInventory.globalUncertainty;
-        _routeSummary = routeSummary;
         _lastRefreshError = anyLive
             ? null
             : refreshNoCurrentDataMessage(hasRows: active.isNotEmpty);
-        _insights = loadedInsights;
-      }
+        // Old burn/connection adjustments and charts belong to their earlier
+        // snapshot. Keep the new quota visible while matching checks run.
+        _clearAnalytics(
+          _analyticsScheduler == null
+              ? DesktopAnalyticsState.ready
+              : DesktopAnalyticsState.pending,
+        );
+      });
+      _queueAnalytics(active, nowSec);
+      _maybeStartFirstRun();
       if (_notificationClient != null || widget.alertPoster != null) {
-        // Fire-and-forget: notification and webhook posting must not delay the
-        // refresh completing or the post-frame resize; _checkAndNotify swallows
-        // its own errors, so an unawaited failure cannot escape.
         unawaited(_checkAndNotify());
       }
       _applySize();
     } catch (error) {
-      // Catch Error as well as Exception: a latent adapter fault (a bad cast,
-      // .first on empty) surfaces as an Error, and the isolate-failure fallback
-      // rethrows it on the main isolate. Catching only Exception let it escape
-      // as an unhandled async error every poll while the UI showed no failure.
-      // A failed or timed-out refresh keeps the last data on screen as
-      // explicitly stale evidence; the next poll (scheduled in finally)
-      // retries. This prevents a previously live account-wide value from
-      // remaining routable after the collector can no longer confirm it.
       _failStreak += 1;
       if (mounted) {
         final message = refreshFailureMessage(
           error,
           hasPreviousData: _data.isNotEmpty,
         );
+        _quotaRevision++;
+        _analyticsScheduler?.invalidate();
         setState(() {
           _data = retainSnapshotAfterRefreshFailure(_data, note: message);
           _setupData = retainSnapshotAfterRefreshFailure(
@@ -1678,10 +1597,10 @@ class _DashboardState extends State<Dashboard>
           _loading = false;
           _updated = DateTime.now();
           _lastRefreshError = message;
+          _clearAnalytics(DesktopAnalyticsState.unavailable);
         });
       }
     } finally {
-      // Always reschedule, so one thrown refresh can never stop auto-polling.
       if (mounted) {
         _scheduleNext();
         setState(() => _isRefreshing = false);
@@ -2137,19 +2056,33 @@ class _DashboardState extends State<Dashboard>
               _header(),
               const SizedBox(height: 2),
               Expanded(
-                child: FleetScreen(
-                  key: ValueKey(_analyticsRange),
-                  data: _visible,
-                  buckets: _buckets,
-                  dark: Theme.of(context).brightness == Brightness.dark,
-                  showAccounts: _showAccounts,
-                  routedRequests: _routeSummary,
-                  analyticsNotices: _analyticsStorageNotices,
-                  analyticsIncidents: _visibleAnalyticsStorageIncidents,
-                  analyticsIncidentInventoryPartial:
-                      _analyticsIncidentPartialVisible,
-                  initialRange: _analyticsRange,
-                ),
+                child: _analyticsStatusLine != null
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Semantics(
+                            liveRegion: true,
+                            child: Text(
+                              '${_analyticsState == DesktopAnalyticsState.pending ? 'Loading history and recent usage.' : 'History and recent usage are unavailable.'}'
+                              '\nQuota evidence remains visible in the quota view.',
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                      )
+                    : FleetScreen(
+                        key: ValueKey(_analyticsRange),
+                        data: _visible,
+                        buckets: _buckets,
+                        dark: Theme.of(context).brightness == Brightness.dark,
+                        showAccounts: _showAccounts,
+                        routedRequests: _routeSummary,
+                        analyticsNotices: _analyticsStorageNotices,
+                        analyticsIncidents: _visibleAnalyticsStorageIncidents,
+                        analyticsIncidentInventoryPartial:
+                            _analyticsIncidentPartialVisible,
+                        initialRange: _analyticsRange,
+                      ),
               ),
             ],
           ),
@@ -2419,11 +2352,13 @@ class _DashboardState extends State<Dashboard>
       now,
       showAccounts: _showAccounts,
     );
-    final routeDetail = desktopRouteDetailLine(
-      suggestion,
-      _visible,
-      now,
-      showAccounts: _showAccounts,
+    final routeDetail = _qualifiedRouteDetail(
+      desktopRouteDetailLine(
+        suggestion,
+        _visible,
+        now,
+        showAccounts: _showAccounts,
+      ),
     );
     final compactWidth = MediaQuery.sizeOf(context).width;
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
@@ -2435,6 +2370,7 @@ class _DashboardState extends State<Dashboard>
     if (_preferenceStorageWarning != null) warningCount++;
     if (_trayUnavailable) warningCount++;
     if (_lastRefreshError != null) warningCount++;
+    if (_analyticsStatusLine != null) warningCount++;
     final trailingChrome = 28.0 * 2 + 24.0 * warningCount;
     final naturalRouteMax = routeIconOnly
         ? iconOnlyWidth
@@ -2530,6 +2466,8 @@ class _DashboardState extends State<Dashboard>
               if (_trayUnavailable) _compactStatusIcon(trayUnavailableMessage),
               if (_lastRefreshError != null)
                 _compactStatusIcon(_lastRefreshError!),
+              if (_analyticsStatusLine != null)
+                _compactStatusIcon(_analyticsAdviceNote!),
               _iconButton(
                 Icons.open_in_full_rounded,
                 muted,
@@ -2735,11 +2673,13 @@ class _DashboardState extends State<Dashboard>
       now,
       showAccounts: _showAccounts,
     );
-    final routeDetail = desktopRouteDetailLine(
-      suggestion,
-      _visible,
-      now,
-      showAccounts: _showAccounts,
+    final routeDetail = _qualifiedRouteDetail(
+      desktopRouteDetailLine(
+        suggestion,
+        _visible,
+        now,
+        showAccounts: _showAccounts,
+      ),
     );
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
     final stackHeaderActions =
@@ -2897,6 +2837,8 @@ class _DashboardState extends State<Dashboard>
             if (_trayUnavailable) _warningLine(trayUnavailableMessage, warning),
             if (_lastRefreshError != null)
               _warningLine(_lastRefreshError!, warning),
+            if (_analyticsStatusLine != null)
+              _warningLine(_analyticsStatusLine!, muted),
           ],
         ),
       ),
@@ -2933,6 +2875,7 @@ class _DashboardState extends State<Dashboard>
 
   void _showRouteExplanation(RouteSuggestion suggestion, String routeLine) {
     final noRoute = suggestion.recommended == null;
+    final advisoryNote = _analyticsAdviceNote;
     unawaited(
       showDialog<void>(
         context: context,
@@ -2951,6 +2894,10 @@ class _DashboardState extends State<Dashboard>
                     routeLine,
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
+                  if (advisoryNote != null) ...[
+                    const SizedBox(height: 12),
+                    Text(advisoryNote),
+                  ],
                   const SizedBox(height: 12),
                   Text(suggestion.explanation),
                   const SizedBox(height: 12),
@@ -3985,6 +3932,8 @@ class _DashboardState extends State<Dashboard>
         suggestion: suggestion,
         now: nowSec,
         armed: _armed,
+        // Alerts remain timely, but cannot carry the UI's advisory caveat.
+        includeRoute: _analyticsState == DesktopAnalyticsState.ready,
       );
       _armed = alerts.armed;
       for (final a in alerts.fired) {
@@ -4757,10 +4706,11 @@ class _DashboardState extends State<Dashboard>
       if (!isLocalRuntimeReachableAt(q, now) || q.error != null) {
         return ('unavailable', grey);
       }
-      if (q.active) return ('loaded', green);
-      return q.models.any((model) => !model.cloudOffloaded)
-          ? ('ready', blue)
-          : ('reachable', blue);
+      final ready = isLocalRuntimeAvailableAt(q, now);
+      if (ready && q.localGenerationReadiness == 'loaded') {
+        return ('loaded', green);
+      }
+      return ready ? ('ready', blue) : ('reachable', blue);
     }
     if (q.driftReason != null) return ('provider drift', errorColor);
     if (!q.ok) {
@@ -5126,6 +5076,9 @@ class ProviderTile extends StatelessWidget {
     final trustedEvidence = isTrustedQuotaEvidenceAt(quota, now);
     final localReachable =
         isLocalRuntimeReachableAt(quota, now) && quota.error == null;
+    final localReady = isLocalRuntimeAvailableAt(quota, now);
+    final localLoaded =
+        localReady && quota.localGenerationReadiness == 'loaded';
     final blocked = binding != null && binding.exhausted;
     // When a spent short window blocks the card, a longer window that still has
     // room is the constraint the user faces after the short one resets - show it
@@ -5135,7 +5088,7 @@ class ProviderTile extends StatelessWidget {
     final statusColor = quota.isLocal
         ? !localReachable
               ? muted
-              : quota.active
+              : localLoaded
               ? const Color(0xFF3FB950)
               : const Color(0xFF58A6FF)
         : quota.driftReason != null
@@ -5408,7 +5361,13 @@ class ProviderTile extends StatelessWidget {
               const SizedBox(height: 10),
               if (quota.isLocal)
                 (localReachable
-                    ? _localRow(quota, muted, fg)
+                    ? _localRow(
+                        quota,
+                        muted,
+                        fg,
+                        ready: localReady,
+                        loaded: localLoaded,
+                      )
                     : _noData(quota.error ?? 'unreachable', muted))
               else if (quota.windows.isEmpty)
                 ((quota.status ?? '').isNotEmpty
@@ -6020,8 +5979,13 @@ class ProviderTile extends StatelessWidget {
   /// Status block for a local runtime: what is loaded or ready, plus running
   /// context, GPU residency, and inventory detail.
   /// Local runtimes have no quota to show.
-  Widget _localRow(ProviderQuota quota, Color muted, Color fg) {
-    final loaded = quota.active;
+  Widget _localRow(
+    ProviderQuota quota,
+    Color muted,
+    Color fg, {
+    required bool ready,
+    required bool loaded,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -6035,8 +5999,10 @@ class ProviderTile extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                quota.status ?? 'running',
-                maxLines: 1,
+                ready
+                    ? quota.status ?? 'running'
+                    : 'No eligible generation model',
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: AppType.caption,
@@ -6047,7 +6013,11 @@ class ProviderTile extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             Text(
-              loaded ? 'loaded' : 'ready',
+              loaded
+                  ? 'loaded'
+                  : ready
+                  ? 'ready'
+                  : 'reachable',
               style: TextStyle(fontSize: AppType.small, color: muted),
             ),
           ],

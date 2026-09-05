@@ -194,6 +194,7 @@ class LmStudioAdapter {
             max: 100000000,
           ),
       cloud: false,
+      upstreamRouting: UpstreamRouting.notReported,
       tools: _flag(declared?['trained_for_tool_use']),
       vision: _flag(declared?['vision']),
       // LM Link can serve localhost requests on another device. The current
@@ -257,6 +258,7 @@ class LmStudioAdapter {
             max: 100000000,
           ),
       cloud: false,
+      upstreamRouting: UpstreamRouting.notReported,
       tools: declared?.contains('tool_use'),
       vision: switch (type) {
         'vlm' => true,
@@ -293,6 +295,7 @@ List<LocalModel>? lmStudioCompatFromJson(dynamic data) {
           expiresAt: null,
           context: null,
           cloud: false,
+          upstreamRouting: UpstreamRouting.notReported,
           tools: null,
           vision: null,
           reasoning: null,

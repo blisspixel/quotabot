@@ -27,6 +27,7 @@ LocalModel _m(
       expiresAt: expiresAt,
       context: context,
       cloud: cloud,
+      upstreamRouting: UpstreamRouting.notReported,
       tools: tools,
       vision: vision,
       reasoning: null,
@@ -194,7 +195,7 @@ void main() {
         id: 'ollama',
         name: 'Ollama',
         asOf: 0,
-        installed: [_m('a', bytes: 300 * 1024 * 1024)],
+        installed: [_m('a', bytes: 300 * 1024 * 1024), _m('b')],
         loaded: [
           _m('a', vramBytes: 300 * 1024 * 1024),
           _m('b'),

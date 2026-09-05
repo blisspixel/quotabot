@@ -34,7 +34,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.11.0';
+const _version = '0.11.1';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -472,7 +472,7 @@ Future<void> _runMain(List<String> rawArgs) async {
         );
         wantsJson
             ? print(_jsonPretty(s.toJson(now)))
-            : _printSuggestModel(s, now);
+            : printModelSuggestion(s, now);
       } else {
         if (providerRoute && flags.contains('--use-expiring-quota')) {
           stderr.writeln(
@@ -586,7 +586,7 @@ Future<void> _runMain(List<String> rawArgs) async {
         print(_jsonPretty(modelRegistryJson(results, now,
             catalog: kModelCatalog, requirements: reqs.requirements)));
       } else {
-        _printModels(
+        printModelRegistry(
           buildModelRegistry(results, now,
               catalog: kModelCatalog, requirements: reqs.requirements),
           now,
@@ -1498,7 +1498,7 @@ List<TierPlanOption>? _parseTierPlans(String raw) {
 }
 
 /// Prints a concrete-model recommendation for a task profile.
-void _printSuggestModel(ModelSuggestion s, int now) {
+void printModelSuggestion(ModelSuggestion s, int now) {
   print('quotabot suggest  (best model for your task, 0 usage tokens)\n');
   final r = s.recommended;
   if (r == null) {
@@ -1516,7 +1516,7 @@ void _printSuggestModel(ModelSuggestion s, int now) {
   for (final e in s.ranked) {
     final m = e.model;
     final budget = e.local
-        ? style.cyan('local'.padRight(9))
+        ? style.cyan(_localModelBudgetLabel(e.model).padRight(9))
         : (e.headroomPercent == null
             ? style.dim('?'.padRight(9))
             : e.stale
@@ -2783,7 +2783,7 @@ void _printModelsHelp() {
     '  quota admits measured included quota and local-runtime entries.',
   );
   stdout.writeln(
-    '  local excludes cloud-offloaded models exposed by a local daemon.',
+    '  local excludes cloud-offloaded models and reported upstream routing.',
   );
   stdout.writeln('');
   stdout.writeln(head('READ BOUNDARY'));
@@ -3541,10 +3541,7 @@ String _providerAlertState(ProviderQuota q, int now) {
     if (!isLocalRuntimeReachableAt(q, now) || q.error != null) {
       return 'unavailable';
     }
-    if (q.active) return 'loaded';
-    return q.models.any((model) => !model.cloudOffloaded)
-        ? 'ready'
-        : 'reachable';
+    return _localProviderReadState(q);
   }
   if (q.driftReason != null) return 'provider drift';
   if (q.stale) return 'cached';
@@ -3617,10 +3614,7 @@ String _doctorState(ProviderQuota q, int now) {
       return 'UNVERIFIED';
     }
     if (!isLocalRuntimeReachableAt(q, now)) return 'unavailable';
-    if (q.active) return 'loaded';
-    return q.models.any((model) => !model.cloudOffloaded)
-        ? 'ready'
-        : 'reachable';
+    return _localProviderReadState(q);
   }
   if (q.driftReason != null) return 'PROVIDER DRIFT';
   if (!q.ok || q.sourceClassViolation != null) return 'ERROR';
@@ -4442,7 +4436,7 @@ String _verificationProvenanceState(ProviderQuota q, String state) =>
             'out_of_quota' => 'OUT OF QUOTA',
             'error' => 'ERROR',
             'no_data' => 'metadata',
-            'local' => q.active ? 'loaded' : 'ready',
+            'local' => _localProviderReadState(q),
             _ => state,
           };
 
@@ -4571,7 +4565,7 @@ String _ctxLabel(int tokens) => tokens >= 1000000
 
 /// Prints the represented model registry with each known budget gate and its
 /// capability hints.
-void _printModels(
+void printModelRegistry(
   List<ModelEntry> reg,
   int now, {
   bool filtersActive = false,
@@ -4589,7 +4583,7 @@ void _printModels(
   for (final e in reg) {
     final m = e.model;
     final budget = e.local
-        ? style.cyan('local'.padRight(9))
+        ? style.cyan(_localModelBudgetLabel(e.model).padRight(9))
         : (e.headroomPercent == null
             ? style.dim('?'.padRight(9))
             : e.stale
@@ -4635,7 +4629,10 @@ String _modelEntryProvenance(ModelEntry e, int decisionAsOf) {
   final spendClass = _modelSpendClass(e);
   if (spendClass != null) parts.add(spendClass);
   final fit = e.hardwareFit?.status;
-  if (e.local && fit != null && fit != LocalHardwareFitStatus.loaded) {
+  if (e.local &&
+      !e.model.hasLocalExecutionVeto &&
+      fit != null &&
+      fit != LocalHardwareFitStatus.loaded) {
     parts.add('${fit.wireName} fit');
   }
   if (_modelHasAccountIdentity(e)) {
@@ -4649,7 +4646,13 @@ String _modelEntryProvenance(ModelEntry e, int decisionAsOf) {
 String _modelEntryReadState(ModelEntry entry) {
   if (entry.driftReason != null) return 'provider drift';
   if (entry.stale) return 'cached';
-  if (entry.available) return entry.local ? entry.localReadiness! : 'live';
+  if (entry.local &&
+      entry.model.upstreamRouting == UpstreamRouting.unresolved) {
+    return 'unverified';
+  }
+  if (entry.available) {
+    return entry.local ? entry.localReadiness ?? 'reachable' : 'live';
+  }
   final headroom = entry.headroomPercent;
   if (!entry.local && headroom != null && headroom <= kSpentHeadroomFloor) {
     return 'spent';
@@ -4672,12 +4675,27 @@ String _modelAvailabilitySuffix(ModelEntry entry) {
 
 String? _modelSpendClass(ModelEntry e) {
   if (e.local) {
-    final readiness = e.localReadiness;
-    return readiness;
+    return e.model.hasLocalExecutionVeto
+        ? 'location/cost unverified'
+        : e.localReadiness;
   }
   if (e.sourceClass == ProviderSourceClass.manual) return null;
   return e.quotaBacked ? 'quota plan' : 'not included quota';
 }
+
+String _localModelBudgetLabel(ModelInfo model) =>
+    switch (model.upstreamRouting) {
+      UpstreamRouting.declared => 'upstream',
+      UpstreamRouting.unresolved => 'unverified',
+      UpstreamRouting.notReported => model.cloudOffloaded ? 'cloud' : 'local',
+    };
+
+String _localProviderReadState(ProviderQuota quota) =>
+    switch (quota.localGenerationReadiness) {
+      'loaded' => 'loaded',
+      'cold' => 'ready',
+      _ => 'reachable',
+    };
 
 bool _modelHasAccountIdentity(ModelEntry e) =>
     !e.local &&

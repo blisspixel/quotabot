@@ -256,10 +256,11 @@ String _desktopProviderReadState(ProviderQuota quota, int now) {
     if (!isLocalRuntimeReachableAt(quota, now) || quota.error != null) {
       return 'unavailable';
     }
-    if (quota.active) return 'loaded';
-    return quota.models.any((model) => !model.cloudOffloaded)
-        ? 'ready'
-        : 'reachable';
+    return switch (quota.localGenerationReadiness) {
+      'loaded' => 'loaded',
+      'cold' => 'ready',
+      _ => 'reachable',
+    };
   }
   if (quota.driftReason != null) return 'provider drift';
   if (!quota.ok) return 'error';

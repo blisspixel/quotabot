@@ -1168,6 +1168,42 @@ void main() {
       expect(line, 'error | local runtime | captured just now');
     });
 
+    for (final model in const [
+      ModelInfo(
+        id: 'private-upstream',
+        local: true,
+        loaded: true,
+        upstreamRouting: UpstreamRouting.declared,
+      ),
+      ModelInfo(
+        id: 'unresolved-upstream',
+        local: true,
+        loaded: true,
+        upstreamRouting: UpstreamRouting.unresolved,
+      ),
+      ModelInfo(id: 'cloud', local: true, loaded: true, cloudOffloaded: true),
+      ModelInfo(id: 'embedding', local: true, loaded: true, embedding: true),
+    ]) {
+      test('${model.id} trust ignores legacy provider activity', () {
+        const now = 1782046566;
+        final line = desktopProviderTrustLine(
+          ProviderQuota(
+            provider: 'ollama',
+            displayName: 'Ollama',
+            account: 'synthetic',
+            kind: ProviderQuotaKind.local,
+            active: true,
+            perMachine: true,
+            asOf: now,
+            models: [model],
+          ),
+          now,
+        );
+
+        expect(line, 'reachable | local runtime | captured just now');
+      });
+    }
+
     test('labels status-only metadata without claiming live quota', () {
       const now = 1782046566;
       final line = desktopProviderTrustLine(
