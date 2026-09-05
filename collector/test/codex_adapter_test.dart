@@ -73,7 +73,8 @@ void main() {
     test('collection and current identity select CODEX_HOME over legacy home',
         () async {
       final old = writeHostAt(
-        File('${environment['USERPROFILE']}/.codex/auth.json'),
+        File('${environment[Platform.isWindows ? 'USERPROFILE' : 'HOME']}'
+            '/.codex/auth.json'),
         'old-account',
       );
       final current = writeHostAt(
@@ -103,7 +104,8 @@ void main() {
     test('missing configured file never revives another home account',
         () async {
       writeHostAt(
-        File('${environment['USERPROFILE']}/.codex/auth.json'),
+        File('${environment[Platform.isWindows ? 'USERPROFILE' : 'HOME']}'
+            '/.codex/auth.json'),
         'old-account',
       );
       var requests = 0;
@@ -127,10 +129,18 @@ void main() {
         final env = Map<String, String>.from(environment)..remove('CODEX_HOME');
         if (value != null) env['CODEX_HOME'] = value;
         expect(codexHostAuthFile(environment: env).path,
-            '${environment['USERPROFILE']}/.codex/auth.json');
-        env.remove('USERPROFILE');
-        expect(codexHostAuthFile(environment: env).path,
-            '${environment['HOME']}/.codex/auth.json');
+            '${env[Platform.isWindows ? 'USERPROFILE' : 'HOME']}/.codex/auth.json');
+        for (final os in ['windows', 'macos', 'linux']) {
+          final preferred = os == 'windows' ? 'USERPROFILE' : 'HOME';
+          final fallback = os == 'windows' ? 'HOME' : 'USERPROFILE';
+          expect(codexHostAuthFile(environment: env, operatingSystem: os).path,
+              '${env[preferred]}/.codex/auth.json');
+          final onlyFallback = Map<String, String>.from(env)..remove(preferred);
+          expect(
+              codexHostAuthFile(environment: onlyFallback, operatingSystem: os)
+                  .path,
+              '${env[fallback]}/.codex/auth.json');
+        }
       }
     });
   });
