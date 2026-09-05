@@ -9,6 +9,8 @@ const maxMcpHttpBearerTokenCharacters = 4096;
 
 const mcpServerUsage = '''
 Usage:
+  quotabot mcp
+  quotabot mcp --http [--host 127.0.0.1] [--port 8722] [--path /mcp] [--token-file PATH]
   dart run bin/mcp_server.dart
   dart run bin/mcp_server.dart --http [--host 127.0.0.1] [--port 8722] [--path /mcp] [--token-file PATH]
 
@@ -21,6 +23,11 @@ Options:
   --token-env NAME    Read the bounded HTTP bearer from an environment variable.
   --token-file PATH   Read at most 4 KiB from an owner-only regular file.
   --help              Show this usage.
+
+Startup does not collect quota. Clients request metadata through MCP tools.
+Quota and routing reads make no model calls and cost no usage tokens.
+CLI profile, simulation, and output options are not accepted by this server;
+use each MCP tool's profile and account arguments to scope its request.
 ''';
 
 class McpServerCliOptions {
@@ -100,9 +107,9 @@ class McpServerCliOptions {
     }
 
     if (!http &&
-        (host != defaultMcpHttpHost ||
-            port != defaultMcpHttpPort ||
-            path != defaultMcpHttpPath ||
+        (hostCount > 0 ||
+            portCount > 0 ||
+            pathCount > 0 ||
             token != null ||
             tokenEnv != null ||
             tokenFile != null)) {

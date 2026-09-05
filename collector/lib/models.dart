@@ -282,9 +282,10 @@ enum ProviderPlanEvidenceSource {
 ///
 /// These values come from operating-system memory metadata and, when present,
 /// the local NVIDIA driver utility. They are not a benchmark, allocation, model
-/// load, or inference request. GPU values describe the largest single observed
-/// GPU so fit estimates never assume that memory from separate devices can be
-/// combined.
+/// load, or inference request. Numeric GPU memory and activity describe the
+/// largest single device with supported driver evidence, so fit estimates never
+/// combine separate devices. Name-only fallback evidence does not identify the
+/// largest GPU or establish its capacity or utilization.
 class LocalHardwareInfo {
   /// Unix epoch seconds when the capacity metadata was captured.
   final int asOf;

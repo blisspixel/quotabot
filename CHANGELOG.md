@@ -4,6 +4,57 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.0 - 2026-09-05
+
+### Added
+
+- A local-model detail view opens from each runtime's desktop card using the
+  displayed snapshot. It shows every model's readiness, reported capabilities,
+  context, quantization, memory evidence, advisory fit, and routing exclusions.
+  The view supports keyboard navigation and large text without refreshing a
+  runtime or loading a model.
+- Versioned advisory configuration for OpenClaw, Hermes, and OpenCode 1, plus
+  CLI recipes for pi and NemoClaw. The renderer never changes host configuration
+  or reads credentials. Native CI checks the existing metadata-only MCP
+  initialization and tool-list exchange; installed-harness loading remains
+  explicitly unverified.
+- `quotabot mcp` exposes the existing stdio or authenticated loopback MCP server
+  from the ordinary release CLI. Source entrypoints remain supported. A portable
+  Agent Plugins 1.0.0 package supplies quota advice, canonical MCP configuration,
+  and explicit profile-path preparation without loading a model or changing
+  host configuration.
+
+### Fixed
+
+- A desktop refresh preserves a profile selected while advisory analytics are
+  loading, so completion cannot restore the previous account filter.
+- The optional TypeScript MCP client lock updates fast-uri to 3.1.7 and qs to
+  6.16.0, resolving six dependency advisories without changing the direct SDK.
+- Screenshot and desktop readiness automation skip platform notification
+  registration, delivery, scheduling, and cancellation. Isolated checks no
+  longer register the production Windows notification identity or change its
+  pending reminders; normal desktop notifications remain enabled by preference.
+- Ollama's explicit `thinking` capability now reaches reasoning model filters.
+  Missing or malformed declarations remain unknown, and existing context,
+  spend, embedding, and execution-location gates still apply.
+- Windows fallback GPU discovery reports names and counts without treating
+  the 32-bit `AdapterRAM` field or aggregate GPU Engine counters as trustworthy
+  per-device memory and activity. Supported NVIDIA driver evidence remains
+  available.
+- MCP disconnect cleanup now disposes subscribed polling timers, releases HTTP
+  session slots after authenticated termination, and closes multiple sessions
+  without mutating an active iteration. HTTP shutdown cancels its signal
+  subscription and stops the server once. Explicit HTTP-only bind options are
+  rejected in stdio mode, including when they equal the default values.
+
+### Validation
+
+- Dashboard regressions cover a successful manual refresh from 95 percent to
+  70 percent remaining on the same account and window, capture-age updates,
+  coalesced repeated clicks, and a spent weekly cap overriding a healthy short
+  window. These synthetic checks do not establish the cause of any particular
+  user-reported stale display.
+
 ### Changed
 
 - The September product plan prioritizes inspectable local-model choices,

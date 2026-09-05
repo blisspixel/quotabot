@@ -22,16 +22,16 @@ typedef LocalModel = ({
   int? vramBytes,
   int? expiresAt,
   int? context,
-  // True when the runtime executes this model in its cloud, not on-device. Only
-  // Ollama exposes such models today (a `-cloud` name suffix); other runtimes
-  // are always on-device and leave this false.
+  // True when the runtime explicitly identifies cloud execution. This is
+  // separate from the loopback origin of the runtime's metadata endpoint.
   bool cloud,
   // Capabilities the runtime itself declares for this model. Null means the
   // runtime said nothing, which fails a capability requirement rather than
   // assuming the model has the capability. A runtime that lists only model
-  // names (any OpenAI-compatible endpoint) leaves all three null.
+  // names (any OpenAI-compatible endpoint) leaves these undeclared.
   bool? tools,
   bool? vision,
+  bool? reasoning,
   // True when the runtime declares this an embedding model rather than a text
   // generator. Null stays routable: only a stated non-generative kind removes a
   // model from routing, never the absence of a statement.
@@ -45,6 +45,7 @@ typedef LocalModel = ({
 typedef DeclaredModelCapabilities = ({
   bool tools,
   bool vision,
+  bool? reasoning,
   bool? embedding,
   int? context,
 });
@@ -326,9 +327,15 @@ DeclaredModelCapabilities? ollamaShowFromJson(dynamic data) {
     for (final c in capabilities)
       if (c is String) c.trim().toLowerCase(),
   };
+  // Ollama declares its thinking capability in the same metadata array:
+  // https://github.com/ollama/ollama/blob/main/types/model/capability.go
+  // An empty or malformed list cannot newly qualify a reasoning route.
+  final validReasoningDeclaration = capabilities.isNotEmpty &&
+      capabilities.every((c) => c is String && c.trim().isNotEmpty);
   return (
     tools: declared.contains('tools'),
     vision: declared.contains('vision'),
+    reasoning: validReasoningDeclaration ? declared.contains('thinking') : null,
     embedding: declared.isEmpty ? null : !declared.contains('completion'),
     context: _ollamaMaxContext(data['model_info']),
   );
@@ -368,6 +375,7 @@ LocalModel _declaring(
     cloud: model.cloud,
     tools: capabilities.tools,
     vision: capabilities.vision,
+    reasoning: capabilities.reasoning,
     embedding: capabilities.embedding,
     digest: model.digest,
   );
@@ -412,6 +420,7 @@ List<LocalModel> ollamaModelsFromJson(dynamic data) {
       // and the adapter folds that in afterwards.
       tools: null,
       vision: null,
+      reasoning: null,
       embedding: null,
       digest: _digest(m['digest']),
     ));
@@ -523,6 +532,7 @@ ProviderQuota localRuntimeQuota({
         // keep failing a requirement for it.
         tools: m.tools,
         vision: m.vision,
+        reasoning: m.reasoning == true ? 'reasoning' : null,
         embedding: m.embedding,
       ),
   ];

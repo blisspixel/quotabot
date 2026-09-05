@@ -82,6 +82,7 @@ List<ProviderQuota> demoProviders(int now) {
         cloud: false,
         tools: tools,
         vision: vision,
+        reasoning: null,
         embedding: embedding,
         digest: null,
       );
