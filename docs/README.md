@@ -4,9 +4,11 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.10.3. The next work makes local-model
-choices inspectable, improves everyday Windows, macOS, and Linux behavior, and
-adds versioned advisory setup for agent harnesses. The bounded
+The current verified stable release is 0.11.0. It adds inspectable local-model
+details, Ollama reasoning evidence, conservative Windows GPU discovery, and
+versioned harness and Agent Plugins setup through `quotabot mcp`. Further work
+improves everyday Windows, macOS, and Linux behavior and verifies each named
+harness on its installed version. The bounded
 provider-ID cache coordinator passed ordinary hosted CI plus the complete
 release, install, update, and source-setup lifecycle on Windows, macOS, and
 Linux; the shipped alias map remains empty. The current line includes bounded
@@ -68,6 +70,11 @@ belongs in [CHANGELOG.md](../CHANGELOG.md).
   and research directions.
 
 ## Build and extend
+
+- [Agent harness setup](../integrations/harnesses/README.md) prints reviewed
+  OpenClaw, Hermes, and OpenCode 1 configuration without opening a host config
+  or reading a credential. It includes pi and NemoClaw CLI recipes and explicit
+  version and transport limits.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): code boundaries and data flow.
 - [PRODUCT-STRATEGY.md](PRODUCT-STRATEGY.md): product choices and current

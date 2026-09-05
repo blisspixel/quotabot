@@ -181,6 +181,7 @@ List<LocalModel>? lemonadeModelsFromJson(dynamic data) {
       cloud: cloud,
       tools: labels?.contains('tool-calling'),
       vision: labels?.contains('vision'),
+      reasoning: null,
       embedding: labels?.contains('embeddings') == true ? true : null,
       digest: null,
     ));
@@ -238,6 +239,7 @@ LocalModel _localModel({required String name, int? context}) => (
       cloud: false,
       tools: null,
       vision: null,
+      reasoning: null,
       embedding: null,
       digest: null,
     );

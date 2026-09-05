@@ -74,6 +74,17 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   window when a provider is visibly burning ("about an hour of usage left", or
   "likely to run out before it resets" once that risk is material), the same
   forecast `quotabot top` shows. It appears only with a real burn signal.
+- **Local models:** the **Models** control on an Ollama, LM Studio, or Lemonade
+  card opens every model in that card's displayed snapshot. It shows loaded or
+  cold state, the reported context, quantization, capabilities, model size,
+  GPU residency, and advisory memory fit when the evidence supports them.
+  Unknown values remain unknown. Stale, unavailable, embedding, and explicitly
+  cloud-offloaded entries explain their routing exclusions. The computer's
+  memory and GPU activity appear once, without attributing shared load to a
+  model. Opening this view does not refresh the runtime or load a model.
+  Inventory alone cannot certify on-device execution, and reported context can
+  mean a configured limit or a model maximum. Keyboard activation and Close
+  return focus to the Models control.
 - **Tight by default, tap to expand:** each card defaults to its window bars and
   reset countdowns. Tapping a card expands it to reveal the provenance line, the
   model-specific rows, the recent "usually ~X% free" line, and the insights panel
@@ -87,6 +98,12 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
 The header shows a radial "pool gauge" next to the "Quota" wordmark: it fills to
 the average remaining headroom across visible providers and uses the same smooth
 headroom palette as the terminal truecolor view.
+
+<p align="center">
+  <a href="screenshot-local-models.png"><img src="screenshot-local-models.png" alt="Local-model detail dialog showing loaded and cold models, reported capabilities, and advisory memory fit with synthetic data" width="340"></a>
+</p>
+
+<p align="center"><sub>The real desktop detail renderer using synthetic inventory and hardware data.</sub></p>
 
 ## Quota Analytics
 
@@ -724,7 +741,13 @@ explicit flags: `--min-context=200k`, `--require-tools`, `--require-vision`,
 never sees the task; you supply the requirements, and it returns the models that
 meet them with budget. Local models are filtered on the capabilities their own
 runtime declares, so `--require-tools --budget=local` returns the on-device
-models the runtime says can call tools. A capability the runtime never declared
+models the runtime says can call tools. Ollama models with an explicit
+`thinking` declaration can satisfy `--require-reasoning --budget=local` or
+`--task=reasoning --budget=local`. This is declared capability, not a model
+quality score; it cannot override context, embedding, freshness, or spend gates.
+LM Studio reasoning is not yet admitted because LM Link execution location
+cannot be established from its current model-list metadata.
+A capability the runtime never declared
 is never assumed, so a runtime that publishes only model names has nothing a
 capability filter can admit. A tier floor still excludes local models, whose
 tier is unknown, so `--task=hard` continues to prefer a cloud model. A model the

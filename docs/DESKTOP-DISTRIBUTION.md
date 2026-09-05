@@ -33,7 +33,7 @@ at publication. Immutability applies prospectively to releases published after
 it was enabled on July 18, 2026. v0.9.4 and later releases are locked under that
 policy; v0.9.2 and earlier releases were not changed retroactively.
 
-The verified
+The preceding verified
 [v0.10.3 stable release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.3)
 contains all three desktop bundles and sidecars inside the exact 14-asset set.
 The release workflow builds, attests, freshly downloads, and verifies those
@@ -130,7 +130,7 @@ Expand-Archive -LiteralPath $asset -DestinationPath $destination
 Start-Process (Join-Path $destination 'quotabot.exe')
 ```
 
-The published v0.10.3 Windows packages are not Authenticode-signed. Each newer
+The v0.11.0 Windows packages use unsigned transition mode. Each
 release begins with a mandatory native signing status in its GitHub release
 notes. `Windows: unsigned transition artifact` means SmartScreen publisher
 identity is not established. Checksums and GitHub provenance do not establish

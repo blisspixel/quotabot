@@ -19,6 +19,8 @@ import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/http_client.dart';
 import 'package:quotabot_collector/identifiers.dart';
 import 'package:quotabot_collector/labels.dart';
+import 'package:quotabot_collector/mcp_server_entrypoint.dart';
+import 'package:quotabot_collector/mcp_server_options.dart';
 import 'package:quotabot_collector/provenance.dart';
 import 'package:quotabot_collector/provider_id_migration.dart';
 import 'package:quotabot_collector/route_render.dart';
@@ -32,7 +34,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.10.3';
+const _version = '0.11.0';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -243,6 +245,16 @@ void _printSimulationNoticeIfNeeded() {
 }
 
 Future<void> main(List<String> rawArgs) async {
+  // MCP owns its arguments and stdout. Delegate before CLI profile, simulation,
+  // presentation, or collection setup can alter the server's behavior.
+  if (rawArgs.isNotEmpty && rawArgs.first == 'mcp') {
+    await runQuotabotMcpServer(rawArgs.sublist(1));
+    return;
+  }
+  if (rawArgs.length >= 2 && rawArgs.first == 'help' && rawArgs[1] == 'mcp') {
+    await runQuotabotMcpServer(['--help', ...rawArgs.skip(2)]);
+    return;
+  }
   try {
     await _runMain(rawArgs);
   } finally {
@@ -269,6 +281,13 @@ Future<void> _runMain(List<String> rawArgs) async {
     }
   }
   final cmd = pos.isEmpty ? '' : pos.first;
+  if (cmd == 'mcp') {
+    stderr.writeln(
+      'quotabot: mcp must be the first argument; use "quotabot mcp --help"',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
   final wantsJson = flags.contains('--json');
   style = AnsiStyle(_useColor(flags));
 
@@ -846,6 +865,7 @@ const _knownCommands = {
   'login',
   'logout',
   'manual',
+  'mcp',
   'models',
   'report',
   'stats',
@@ -2343,6 +2363,9 @@ Future<void> _runTop(
 
 void _printHelp([String? command]) {
   switch (command) {
+    case 'mcp':
+      stdout.write(mcpServerUsage);
+      return;
     case 'suggest':
       _printSuggestHelp();
       return;
@@ -2424,6 +2447,9 @@ void _printHelp([String? command]) {
   );
   stdout.writeln('');
   stdout.writeln(head('OTHER'));
+  stdout.writeln(
+    '  mcp                 MCP server over stdio; --http enables authenticated loopback HTTP',
+  );
   stdout.writeln('  json                full snapshot as quotabot.v1 JSON');
   stdout.writeln(
     '  update              install the newest checksum-verified release',
@@ -2550,8 +2576,7 @@ void _printHelp([String? command]) {
         '  running; LM Studio needs its local server started (lms server start).'),
   );
   stdout.writeln(
-    style.dim(
-        '  Agents: see AGENTS.md. MCP server: dart run bin/mcp_server.dart.'),
+    style.dim('  Agents: see AGENTS.md. MCP server: quotabot mcp.'),
   );
 }
 

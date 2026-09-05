@@ -1,4 +1,6 @@
 import 'package:quotabot_collector/local_hardware.dart';
+import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/registry.dart';
 import 'package:test/test.dart';
 
 const _gib = 1024 * 1024 * 1024;
@@ -140,26 +142,170 @@ Pages speculative:                        50000.
       );
     });
 
-    test('parses Windows Win32_VideoController name and AdapterRAM', () {
+    test('preserves the selected NVIDIA GPU memory and activity together', () {
+      final sample = parseNvidiaSmiMemory(
+        'NVIDIA GeForce RTX 4070, 12288, 11000, 98\n'
+        'NVIDIA GeForce RTX 4090, 24576, 18000, 12\n',
+      );
+
+      expect(sample?.name, 'NVIDIA GeForce RTX 4090');
+      expect(sample?.totalBytes, 24 * _gib);
+      expect(sample?.availableBytes, 18000 * 1024 * 1024);
+      expect(sample?.utilizationPercent, 12);
+      expect(sample?.count, 2);
+    });
+
+    test('unknown NVIDIA activity preserves direct memory evidence', () {
+      final sample = parseNvidiaSmiMemory(
+        'NVIDIA GeForce RTX 4090, 24576, 18000, [N/A]\n',
+      );
+
+      expect(sample?.totalBytes, 24 * _gib);
+      expect(sample?.availableBytes, 18000 * 1024 * 1024);
+      expect(sample?.utilizationPercent, isNull);
+    });
+
+    test('Windows GPU metadata reads identity without ambiguous metrics',
+        () async {
+      var commandCount = 0;
+      final sample = await readWindowsGpuMetadata('powershell.exe', (
+        executable,
+        arguments,
+      ) async {
+        commandCount++;
+        expect(executable, 'powershell.exe');
+        expect(arguments.take(4), [
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+        ]);
+        expect(arguments.last, contains('-Property Name -ErrorAction Stop'));
+        expect(arguments.last, isNot(contains('AdapterRAM')));
+        expect(arguments.last, isNot(contains('Get-Counter')));
+        return 'AMD Radeon(TM) 780M\t\r\n';
+      });
+
+      expect(commandCount, 1);
+      expect(sample?.name, 'AMD Radeon 780M');
+      expect(sample?.count, 1);
+      expect(sample?.totalBytes, isNull);
+      expect(sample?.availableBytes, isNull);
+      expect(sample?.utilizationPercent, isNull);
+    });
+
+    test('Windows GPU metadata unavailable or malformed output fails soft',
+        () async {
+      for (final output in <String?>[
+        null,
+        '',
+        'invalid',
+        '__utilization__\t42'
+      ]) {
+        expect(
+          await readWindowsGpuMetadata(
+            'powershell.exe',
+            (_, __) async => output,
+          ),
+          isNull,
+        );
+      }
+      expect(
+        await readWindowsGpuMetadata('powershell.exe', (_, __) async {
+          throw StateError('CIM unavailable');
+        }),
+        isNull,
+      );
+    });
+
+    test('Windows fallback preserves GPU identity and no numeric evidence', () {
       final sample = parseWindowsGpuInfo(
         'Microsoft Basic Display Adapter\t4294967295\n'
-        'AMD Radeon(TM) 780M\t2147483648\n'
+        'AMD Radeon(TM) 780M\t\n'
         '__utilization__\t6\n',
       );
       expect(sample?.name, 'AMD Radeon 780M');
-      expect(sample?.totalBytes, 2147483648);
+      expect(sample?.totalBytes, isNull);
       expect(sample?.availableBytes, isNull);
-      expect(sample?.utilizationPercent, 6);
+      expect(sample?.utilizationPercent, isNull);
       expect(sample?.count, 1);
       expect(parseWindowsGpuInfo('Basic Display Adapter\t0'), isNull);
-      expect(
-        parseWindowsGpuInfo('AMD Radeon\t1024\n__utilization__\t101'),
-        isNotNull,
+    });
+
+    test('Windows CIM capacities never become authoritative GPU bytes', () {
+      for (final reportedBytes in [
+        '',
+        '0',
+        '2147483648',
+        '4294967295',
+        '4294967296',
+        '${24 * _gib}',
+        '-1',
+        '18446744073709551615',
+        'unknown',
+      ]) {
+        final sample = parseWindowsGpuInfo('AMD Radeon\t$reportedBytes\n');
+
+        expect(sample?.name, 'AMD Radeon', reason: reportedBytes);
+        expect(sample?.count, 1, reason: reportedBytes);
+        expect(sample?.totalBytes, isNull, reason: reportedBytes);
+        expect(sample?.availableBytes, isNull, reason: reportedBytes);
+        expect(sample?.utilizationPercent, isNull, reason: reportedBytes);
+      }
+    });
+
+    test('Windows aggregate counters never describe a selected GPU', () {
+      const rows = [
+        'Intel(R) Arc(TM) Graphics\t4294967295',
+        'AMD Radeon\t2147483648',
+      ];
+      for (final orderedRows in [rows, rows.reversed]) {
+        for (final counter in [
+          '0',
+          '6',
+          '100',
+          '101',
+          '-1',
+          'NaN',
+          'unknown'
+        ]) {
+          final sample = parseWindowsGpuInfo(
+            '${orderedRows.join('\n')}\n__utilization__\t$counter\n',
+          );
+
+          expect(sample?.name, 'AMD Radeon');
+          expect(sample?.count, 2);
+          expect(sample?.totalBytes, isNull);
+          expect(sample?.availableBytes, isNull);
+          expect(sample?.utilizationPercent, isNull, reason: counter);
+        }
+      }
+    });
+
+    test('name-only Windows evidence stays unknown for model fit and JSON', () {
+      final sample = parseWindowsGpuInfo('AMD Radeon\t4294967295\n')!;
+      final hardware = LocalHardwareInfo(
+        asOf: 123,
+        gpuName: sample.name,
+        gpuCount: sample.count,
+        gpuMemoryTotalBytes: sample.totalBytes,
+        gpuMemoryAvailableBytes: sample.availableBytes,
+        gpuUtilizationPercent: sample.utilizationPercent,
       );
+      final fit = localModelHardwareFit(
+        const ModelInfo(
+          id: 'local-model',
+          displayName: 'Local model',
+          sizeBytes: 8 * _gib,
+        ),
+        hardware,
+      );
+
+      expect(fit.status, LocalHardwareFitStatus.unknown);
+      expect(fit.basis, 'insufficient_evidence');
       expect(
-        parseWindowsGpuInfo('AMD Radeon\t1024\n__utilization__\t101')
-            ?.utilizationPercent,
-        isNull,
+        LocalHardwareInfo.fromJson(hardware.toJson()).toJson(),
+        {'as_of': 123, 'gpu_name': 'AMD Radeon', 'gpu_count': 1},
       );
     });
 
@@ -180,7 +326,7 @@ Pages speculative:                        50000.
     if (hardware == null) return;
     final evidence = hardware;
 
-    expect(evidence.hasMemoryEvidence, isTrue);
+    expect(evidence.hasMemoryEvidence || evidence.gpuName != null, isTrue);
     expect(evidence.asOf, greaterThan(0));
     final systemTotal = evidence.systemMemoryTotalBytes;
     final systemAvailable = evidence.systemMemoryAvailableBytes;

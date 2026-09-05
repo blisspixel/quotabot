@@ -616,7 +616,7 @@ check remain separate release-candidate requirements.
 
 ### Baseline release evidence
 
-The current corrected rehearsal baseline is the exact runtime promoted by the
+The preceding completed rehearsal baseline is the exact runtime promoted by the
 [v0.10.3 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.3).
 Its release workflow builds, checksums, shape-checks, attests, freshly downloads,
 and reverifies the immutable 14-asset set before publication. The separate

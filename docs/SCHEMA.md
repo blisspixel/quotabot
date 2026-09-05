@@ -374,9 +374,10 @@ availability gate or performance claim. A local provider snapshot can carry the
 underlying `local_hardware` object with `as_of`, system-memory total/available
 bytes, largest-single-GPU total/available bytes, optional host-scoped
 `gpu_utilization_percent`, `gpu_count`, and optional `gpu_name`. Separate GPU
-pools and GPU engine counters are not summed. On Windows, an AMD or Intel GPU is
-named from `Win32_VideoController` when `nvidia-smi` is not installed, and a
-supported GPU Engine counter can provide the optional utilization value.
+pools are not summed. Without usable `nvidia-smi` evidence, Windows can retain
+GPU names and count from `Win32_VideoController`, but it omits memory and
+utilization fields. A 32-bit compatibility value or an aggregate GPU Engine
+counter cannot substantiate the selected device's numeric evidence.
 Capacity evidence is absent on subscription providers.
 `budget_policy` is `any`, `quota`, or `local`. A local-runtime model that the
 runtime executes in a cloud rather than on-device carries

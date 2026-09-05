@@ -314,6 +314,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Agent harness configuration and MCP entrypoint tests
+        env:
+          QUOTABOT_HARNESS_SMOKE: '1'
+        run: python -m unittest discover -s integrations/harnesses -p 'test_*.py'
+
       - name: MCP client snippet tests
         working-directory: integrations/mcp_clients
         run: |
@@ -328,3 +333,10 @@ jobs:
         run: |
           python -m pip install --require-hashes -r requirements.txt
           python -m unittest test_quotabot_router.py test_quotabot_proxy_integration.py
+
+      - name: Agent Plugins package and native MCP launch tests
+        run: |
+          executable="$GITHUB_WORKSPACE/collector/build/quotabot_cli_release/bundle/bin/quotabot"
+          if [ "$RUNNER_OS" = Windows ]; then executable="${executable}.exe"; fi
+          QUOTABOT_PLUGIN_TEST_EXECUTABLE="$executable" python -m unittest discover \
+            -s integrations/agent_plugin -p 'test_*.py'

@@ -10,21 +10,16 @@ and recommends where to send the next request. It also shows supported local
 models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
-> **Current stable:** 0.10.3. quotabot remains under active 0.x development.
+> **Current stable:** 0.11.0. quotabot remains under active 0.x development.
 > **Next:** make local-model choices easier to inspect, improve everyday native
 > behavior on Windows, macOS, and Linux, and add tested advisory setup for named
 > agent harnesses. Product development continues while release signing is
 > provisioned. See [roadmap Next](ROADMAP.md#next) and the
 > [documentation index](docs/README.md).
 
-Releases state Windows and macOS signing mode at the top of the
-GitHub release notes. The source workflow now has fail-closed signing paths for
-both platforms, snapshots that policy once per run, and binds final signed-asset
-digests to native fresh-download verification. Existing published artifacts are
-immutable and remain unsigned. No future signed artifact can publish until owner
-provisioning, both protected native rehearsals, explicit mode activation, and
-the signed lifecycle gates succeed. Provisioning and activation live in
-[docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md).
+Release notes state each artifact's Windows and macOS signing status. Current
+artifacts are unsigned; [signing readiness](docs/RELEASE-SIGNING.md) proceeds
+alongside product development.
 
 quotabot is a local advisor, not a proxy. Quota and routing reads make no model
 calls, spend no usage tokens, and never read prompts or source code. The CLI
@@ -69,17 +64,10 @@ quotabot suggest
 
 `doctor` explains stale or unavailable evidence and gives a repair command.
 `suggest` ranks usable subscriptions and supplies a local fallback when one is
-available. The `quotabot update` command begins with release candidate 16; an
-older install can bootstrap it by running the one-line installer with the exact
-stable `v0.10.0` tag. Windows rc.16 users should use that same exact stable
-bootstrap once because the immutable rc.16 Windows bundle has a PowerShell
-self-update compatibility defect. Updater-capable releases through 0.10.1 can
-also report that GitHub release discovery exceeded its response bound as the
-public asset inventory grows. Stable 0.10.2 fixes discovery through GitHub's
-dedicated Latest endpoint; an affected older install can bootstrap it with the
-one-line installer or one exact `--target` update. For inspect-before-run
-installation, login, updates, rollback, and uninstall, use the [setup
-guide](docs/SETUP.md).
+available. Run `quotabot update` to keep the CLI current. If an older install
+does not support that command or cannot discover the latest release, run the
+installer once more. For inspect-before-run installation, login, updates,
+rollback, and uninstall, use the [setup guide](docs/SETUP.md).
 
 ## Core commands
 
@@ -87,7 +75,7 @@ guide](docs/SETUP.md).
 |---|---|
 | Show the full quota snapshot | `quotabot` or `quotabot --json` |
 | Check one provider | `quotabot check claude` |
-| Pick the next provider | `quotabot suggest` |
+| Recommend an account with usable quota | `quotabot suggest` |
 | Prefer a local runtime | `quotabot suggest --local-first` |
 | Preserve an included-quota reserve | `quotabot suggest --quota-stretch` |
 | Pick a model for a task | `quotabot suggest --task=hard` |
@@ -95,6 +83,7 @@ guide](docs/SETUP.md).
 | Watch quota and routing changes | `quotabot top` or `quotabot watch` |
 | Require selected reads to be live | `quotabot verify --require-live` |
 | Install the latest release for this channel | `quotabot update` |
+| Connect an agent to quota advice | `quotabot mcp` |
 
 Provider routing is balanced by default. `--local-first` prefers reachable
 on-device capacity immediately. `--quota-stretch` keeps fresh measured included
@@ -123,14 +112,11 @@ provider-owned cross-checks are in [Provider CLIs](docs/PROVIDER_CLIS.md).
 ## Desktop app
 
 Portable desktop bundles are published for Windows, macOS, and Linux alongside
-the CLI. The app is optional. Windows signing and macOS Developer ID signing,
-notarization, and stapling remain required native trust gates before 1.0.
-The release workflow now supports Azure Artifact Signing and macOS Developer ID
-modes for both the CLI and desktop assets. Those modes fail closed when required
-identity, credential, signature, notarization, staple, or verification evidence
-is missing. They remain inactive until owner provisioning and successful
-protected Windows and macOS rehearsals; each release's notes state the mode used
-by its artifacts.
+the CLI. The app is optional. Each local runtime's **Models** control opens its
+inventory with loaded state, reported capabilities, context, and advisory
+memory fit. See the [local-model view](docs/USAGE.md#the-desktop-widget).
+Windows signing and macOS signing, notarization, and stapling remain pre-1.0
+trust gates; each release states its artifacts' signing status.
 The grouped Settings dialog includes the installed build and an explicit
 **Check for updates** action. It contacts GitHub only after that action, shows
 the latest candidate and latest stable release separately, and opens the chosen
@@ -144,14 +130,26 @@ in [Building from source](docs/BUILDING.md).
 
 ## Agents and integrations
 
-The MCP server supports stdio and authenticated loopback HTTP. Its complete
+Run `quotabot mcp` with a release CLI from 0.11.0 onward. The MCP server supports
+stdio and authenticated loopback HTTP. Its complete
 tool and schema contract is in [AGENTS.md](AGENTS.md). See the
 [LiteLLM integration](integrations/litellm/) and
 [minimal MCP clients](integrations/mcp_clients/) for working examples. The
+[harness setup pack](integrations/harnesses/) prints versioned advisory
+configuration for OpenClaw, Hermes, and OpenCode 1, with CLI recipes for pi and
+NemoClaw. It checks configuration and the quotabot entrypoint; installed-harness
+loading remains a separate compatibility check. The
 [September harness review](docs/research/2026-09-harnesses.md) records the
 versioned OpenClaw, NemoClaw, pi, Hermes, and OpenCode integration plan and its
 current limits. Exposing MCP advice does not automatically switch a harness's
 model or grant API access through a coding subscription.
+
+For clients that support [Agent Plugins](https://agent-plugins.org/), the
+[portable package](integrations/agent_plugin/) supplies the same quota advice
+and MCP connection. quotabot reports which configured accounts have usable
+included quota; a harness chooses through its supported access under provider
+terms. Local-model suggestions are optional, and no integration overrides a
+provider limit or silently enables paid fallback.
 
 ## Privacy and trust boundary
 
@@ -176,23 +174,24 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Stable 0.10.3 is the current verified release. It refreshes provider and model
-semantics as of 2026-09-02 and makes local-runtime readiness substantially more
-useful without changing routing safety. The preceding audited 0.10.2
+Stable 0.11.0 adds an inspectable local-model view, truthful Windows GPU fallback
+evidence, Ollama reasoning metadata, and packaged quota advice for agent
+harnesses and Agent Plugins. The release CLI now starts the MCP server directly
+with `quotabot mcp`. The preceding audited 0.10.2
 [release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
 published an immutable 14-asset set, and its unpinned GitHub Latest
 [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
 passed clean install, prior-stable upgrade, source setup, stable-channel
 resolution, and desktop-run checks on Windows, macOS, and Ubuntu. A live Windows
 installation also updated from 0.10.2-rc.1 to 0.10.2 and then reported no newer
-stable release. The 0.10.3 release repeats the same three-platform quality,
+stable release. Every release repeats the same three-platform quality,
 packaging, provenance, and install gates.
 The release uses GitHub's dedicated Latest endpoint for stable discovery and
 keeps preview discovery within smaller bounded pages. Every release
 repeats native build, archive, checksum, provenance,
 fresh-download, install, upgrade, source-setup, and desktop-run checks. Current
 Windows and macOS artifacts remain unsigned transition artifacts, so the
-focused 0.10.x line must repeat that evidence with platform-signed artifacts
+0.x line must repeat that evidence with platform-signed artifacts
 before 1.0. See the [release
 evidence](docs/BUILDING.md#baseline-release-evidence),
 [roadmap](ROADMAP.md), [documentation index](docs/README.md),

@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-09-04. This file is the forward plan. It records brief shipped
+Updated 2026-09-05. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -133,11 +133,15 @@ evidence; this section owns the execution order.
    boundary, model identifier mapping, spend class, and failure behavior. Pin
    the shipped `2025-11-25` protocol and verify legacy compatibility for each
    harness while preparing the published `2026-07-28` revision through a
-   separate dual-version test matrix. MCP access provides advice; it does not
-   prove automatic model switching. After
-   advisory setup works, add an explicit local-only model-selection command
-   through a documented harness API, beginning with the smallest verified
-   extension surface. Never inspect a task or silently rewrite harness state.
+   separate dual-version test matrix. Package the same advice in the portable
+   [Agent Plugins format](integrations/agent_plugin/) where a client supports
+   it, with a shipped `quotabot mcp` entrypoint and explicit credential and
+   environment prerequisites. The primary integration job is account and plan
+   availability advice through supported access under provider terms. MCP
+   access does not establish automatic dispatch or permission to bypass a
+   limit. Any future explicit model-selection command is secondary and must
+   use a documented harness API without inspecting a task or silently rewriting
+   host state.
 5. **Broaden insights from demonstrated decisions.** Add shared local model
    comparisons, supported hardware evidence, and a bounded llama.cpp metadata
    adapter when the first four steps show a real need. Passive availability and
@@ -279,7 +283,7 @@ macOS has exact CLI and desktop Mach-O inventories, inside-out signing plans,
   assets, the macOS CLI passes `codesign --verify --strict` and `spctl --assess`;
   the app passes `codesign --verify --deep --strict`, `spctl --assess`, and
   stapler validation.
-- A signed 0.10.x rehearsal passes clean install, launch, tray, update, rollback,
+- A signed 0.x rehearsal passes clean install, launch, tray, update, rollback,
   data-preserving uninstall, checksum, provenance, and immutable publication on
   native Windows and macOS runners.
 - The setup and distribution docs describe the signed state without asking users
@@ -404,7 +408,7 @@ plan semantics remain uneven.
 
 ## Current state
 
-The current line, **0.10.3**, is the stable release version and carries
+The current line, **0.11.0**, is the stable release version and carries
 the latest hardening inventory described in [Next](#next). The stable line
 contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
@@ -417,25 +421,30 @@ verification commands, release automation, and cross-platform CI. Local-model
 insights, native quality, and named harness support now advance through the
 bounded product increments in [Next](#next). Field validation, accessibility,
 signing, and exact native release evidence remain 1.0 gates.
+The 0.11.0 increment adds per-model desktop inspection, explicit Ollama
+reasoning capabilities, conservative Windows GPU fallback evidence, and
+versioned quota-advice setup through `quotabot mcp` and Agent Plugins. The
+completed release-lifecycle records below remain dated evidence; each new tag
+must repeat the native build and installation gates.
 The table is a status index; detailed scope and acceptance criteria live in the
 milestone sections below.
 
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
-| Core contracts and automated quality | Stable 0.10.3 | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the stable immutable release, unpinned three-OS Latest smoke, and live RC-to-stable update passed | Keep every 0.10.x patch green and resolve any new reproducible defect before signing activation |
+| Core contracts and automated quality | Stable 0.10.3 | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the stable immutable release, unpinned three-OS Latest smoke, and live RC-to-stable update passed | Keep the current stable line green and resolve any new reproducible defect before signing activation |
 | Integration trust boundary | Stable 0.10.3 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
 | Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
 | Provider-ID cache continuity | Stable 0.10.1 | The bounded coordinator, exact role validation, mixed-version locks, durable prepared receipts, crash recovery, branch-conflict quarantine, and empty shipped alias map passed [ordinary hosted CI](https://github.com/blisspixel/quotabot/actions/runs/33542805801), the immutable [candidate release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1-rc.1), and the complete [three-OS lifecycle](https://github.com/blisspixel/quotabot/actions/runs/33562140830) | Add an alias only for a real provider rename and retain the same fail-closed migration evidence when one exists |
 | Installation and update | Stable 0.10.3 | The immutable stable release, unpinned GitHub Latest smoke, three-OS stable-channel, clean install, prior-stable upgrade, persistence, source-setup, and desktop-run matrix passed; the preceding release also has a live RC-to-stable update record | Repeat the complete path on the signed rehearsal and frozen 1.0 candidate |
-| Native signing | Repository-ready; inactive | Exact Windows PE and macOS Mach-O inventories and deltas, isolated signer jobs, protected nonpublishing rehearsal workflows, reviewed `main` and `v*` environment policies, deterministic policy and failure tests, credential-free packaging, bounded receipts, and exact draft-asset re-verification are implemented for CLI and desktop; current published artifacts remain unsigned | Provision both owner identities and the exact protected-environment values and secrets, pass native protected rehearsals, activate both modes, and retain one signed 0.10.x lifecycle record |
+| Native signing | Repository-ready; inactive | Exact Windows PE and macOS Mach-O inventories and deltas, isolated signer jobs, protected nonpublishing rehearsal workflows, reviewed `main` and `v*` environment policies, deterministic policy and failure tests, credential-free packaging, bounded receipts, and exact draft-asset re-verification are implemented for CLI and desktop; current published artifacts remain unsigned | Provision both owner identities and the exact protected-environment values and secrets, pass native protected rehearsals, activate both modes, and retain one signed 0.x lifecycle record |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Stable 0.10.3 baseline complete | The stable release completed the tag, exact 14-asset set, checksum, provenance, fresh download, install, upgrade, state, exact self-update, source setup, immutable publication, unpinned Latest acquisition, and installed stable-channel assertion | Run a signed 0.10.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Stable 0.10.3 baseline complete | The stable release completed the tag, exact 14-asset set, checksum, provenance, fresh download, install, upgrade, state, exact self-update, source setup, immutable publication, unpinned Latest acquisition, and installed stable-channel assertion | Run a signed 0.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
-shipped together in 0.8.0, and 0.9.0 followed. Use 0.10.x patches for corrective
-work and subsequent 0.x minor releases for coherent new product capabilities.
+shipped together in 0.8.0, and 0.9.0 followed. Use patches on the current stable
+line for corrective work and 0.x minor releases for coherent new capabilities.
 Cut 1.0 when its evidence gates pass.
 
 ## Version plan
@@ -464,9 +473,12 @@ which is why calibration lands before 1.0 rather than after it.
   desktop robustness, and documentation. Activate the implemented signing paths
   only after owner provisioning and successful protected rehearsals. Corrective
   patches continue while the next additive product milestone is built.
-- **Next 0.x minor - local models and agent workflows.** Deliver the local-model
-  detail, capability truth, native quality, and versioned harness-advice work in
-  [Next](#next), with one shared evidence core and no automatic paid routing.
+- **0.11 - local-model inspection and packaged quota advice.** The first
+  increment adds desktop model details, explicit Ollama reasoning evidence,
+  conservative Windows GPU fallback data, and versioned harness and Agent
+  Plugins setup through `quotabot mcp`. Continue with the remaining native
+  recovery, terminal model detail, execution-scope, and installed-harness
+  evidence in [Next](#next).
 - **0.6 - Truthful substrate, core shipped.** Every advertised route means
   exactly what it says on every admitted provider. The remaining field evidence
   and migration hardening listed below are 1.0 acceptance work, not a second
@@ -858,7 +870,7 @@ an actionable recovery path instead of a plausible-looking partial success.
   implemented for the CLI and desktop paths. Deterministic coverage is green;
   owner provisioning and successful protected rehearsals remain external gates.
 - Activate and rehearse the implemented signing paths, then use one signed
-  0.10.x candidate for the native install, update, rollback, provider, and
+  0.x candidate for the native install, update, rollback, provider, and
   accessibility evidence pass.
 
 Acceptance: every applicable increment criterion in [Next](#next) passes. There is no
@@ -910,7 +922,7 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   cannot carry a stapled ticket, so its gate is bound accepted notarization plus
   native signature, entitlement, and Gatekeeper verification. Packaging and
   exact draft-asset verification run without Apple credentials.
-  The explicit unsigned transition mode keeps corrective 0.10.x candidates moving
+  The explicit unsigned transition mode keeps 0.x product increments moving
   while disclosing that platform identity is absent. Owner eligibility, Azure
   resource and identity provisioning, the exact subscriber EKU, Apple Developer
   Program membership, Developer ID and notary credentials, protected rehearsals,
@@ -933,7 +945,7 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   from stable v0.10.1, exact-tag self-update, persistent state, source setup,
   canonical Latest acquisition, and desktop-run checks. A live Windows path also
   updated from 0.10.2-rc.1 to stable. Repeat the full lifecycle on the signed
-  0.10.x rehearsal and exact 1.0 candidate.
+  0.x rehearsal and exact 1.0 candidate.
 - Rehearse and cut: freeze the exact candidate from a clean main worktree; run all
   local and hosted gates; build the tag artifacts and verify checksums and
   attestations; install and smoke on clean native Windows, macOS, and Linux; repeat

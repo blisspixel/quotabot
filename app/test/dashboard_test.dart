@@ -2161,25 +2161,22 @@ void main() {
     await _useDesktopSurface(tester);
     var checks = 0;
     final opened = <String>[];
-    const latest = QuotabotRelease(
-      tag: 'v0.10.4',
-      version: '0.10.4',
-      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.4',
+    final nextMajor = int.parse(quotabotAppVersion.split('.').first) + 1;
+    final newerVersion = '$nextMajor.0.0';
+    final latest = QuotabotRelease(
+      tag: 'v$newerVersion',
+      version: newerVersion,
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v$newerVersion',
       prerelease: false,
     );
-    const stable = QuotabotRelease(
-      tag: 'v0.10.4',
-      version: '0.10.4',
-      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.4',
-      prerelease: false,
-    );
+    final stable = latest;
     await tester.pumpWidget(
       _wrap(
         Dashboard.test(
           prefs: const Prefs(),
           updateChecker: () async {
             checks++;
-            return const QuotabotUpdateStatus(
+            return QuotabotUpdateStatus(
               currentVersion: quotabotAppVersion,
               currentBuild: quotabotAppBuild,
               stable: stable,
@@ -2209,7 +2206,7 @@ void main() {
     await tester.pump();
     expect(checks, 1);
     expect(find.text('Update available'), findsOneWidget);
-    expect(find.text('Latest release: 0.10.4'), findsOneWidget);
+    expect(find.text('Latest release: $newerVersion'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byType(AlertDialog).last,

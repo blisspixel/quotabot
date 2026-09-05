@@ -119,6 +119,23 @@ try {
     Pop-Location
   }
 
+  Write-Gate 'Agent harness configuration and MCP entrypoint'
+  Push-Location $root
+  $originalHarnessDart = $env:QUOTABOT_HARNESS_TEST_DART
+  try {
+    $env:QUOTABOT_HARNESS_TEST_DART = $toolchain.DartExecutable
+    Invoke-CheckedCommand -Command 'python' -Arguments @(
+      '-m', 'unittest', 'discover', '-s', 'integrations/harnesses', '-p', 'test_*.py'
+    )
+  } finally {
+    if ($null -eq $originalHarnessDart) {
+      Remove-Item Env:QUOTABOT_HARNESS_TEST_DART -ErrorAction SilentlyContinue
+    } else {
+      $env:QUOTABOT_HARNESS_TEST_DART = $originalHarnessDart
+    }
+    Pop-Location
+  }
+
   Write-Gate 'MCP client snippets'
   Push-Location (Join-Path $root 'integrations\mcp_clients')
   try {
@@ -151,6 +168,16 @@ try {
     } else {
       $env:QUOTABOT_RUN_LITELLM_PROXY_TEST = $originalProxyTest
     }
+    Pop-Location
+  }
+
+  Write-Gate 'Agent Plugins package'
+  Push-Location $root
+  try {
+    Invoke-CheckedCommand -Command 'python' -Arguments @(
+      '-m', 'unittest', 'discover', '-s', 'integrations/agent_plugin', '-p', 'test_*.py'
+    )
+  } finally {
     Pop-Location
   }
 

@@ -166,31 +166,27 @@ Future<GpuMemorySample?> _readWindowsGpu() async {
   if (root == null || root.isEmpty) return null;
   final executable = '$root\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
   if (!File(executable).existsSync()) return null;
+  return readWindowsGpuMetadata(executable, _runBounded);
+}
+
+/// Reads Windows GPU names without treating limited CIM or aggregate engine
+/// counters as per-device capacity or activity. AdapterRAM is a uint32 byte
+/// value, and GPU Engine counters do not identify the selected adapter here.
+Future<GpuMemorySample?> readWindowsGpuMetadata(
+  String executable,
+  HardwareMetadataCommand run,
+) async {
   const command = r'$ErrorActionPreference="Stop"; '
       r'$rows=Get-CimInstance -ClassName Win32_VideoController '
-      r'-Property Name,AdapterRAM -ErrorAction Stop; '
-      r'$culture=[Globalization.CultureInfo]::InvariantCulture; '
+      r'-Property Name -ErrorAction Stop; '
       r'foreach ($g in @($rows)) { '
       r'$n=[string]$g.Name; '
       r'if ([string]::IsNullOrWhiteSpace($n)) { continue } '
       r'if ($n -match "(?i)basic display|microsoft basic") { continue } '
-      r'$ram=0; if ($null -ne $g.AdapterRAM) { $ram=[uint64]$g.AdapterRAM } '
-      r'[Console]::Out.WriteLine($n + "`t" + $ram.ToString($culture)) '
-      r'}; '
-      r'try { '
-      r'$samples=(Get-Counter "\GPU Engine(*)\Utilization Percentage" '
-      r'-ErrorAction Stop).CounterSamples; '
-      r'$values=@($samples | ForEach-Object { [double]$_.CookedValue } | '
-      r'Where-Object { -not [double]::IsNaN($_) -and '
-      r'-not [double]::IsInfinity($_) -and $_ -ge 0 -and $_ -le 100 }); '
-      r'if ($values.Count -gt 0) { '
-      r'$max=[Math]::Round(($values | Measure-Object -Maximum).Maximum); '
-      r'[Console]::Out.WriteLine("__utilization__`t" + '
-      r'([int]$max).ToString($culture)) '
-      r'} '
-      r'} catch {}';
+      r'[Console]::Out.WriteLine($n + "`t") '
+      r'}';
   try {
-    final output = await _runBounded(executable, const [
+    final output = await run(executable, const [
       '-NoLogo',
       '-NoProfile',
       '-NonInteractive',
@@ -340,40 +336,29 @@ GpuMemorySample? parseNvidiaSmiMemory(String input) {
   );
 }
 
-/// Parses Windows `Win32_VideoController` rows as `Name<TAB>AdapterRAM` plus an
-/// optional `__utilization__<TAB>percent` row from the busiest GPU engine.
-/// AdapterRAM is dedicated bytes when the driver reports it; 0 still keeps
-/// the GPU name so an iGPU without a useful carve-out is visible.
+/// Parses Windows `Win32_VideoController` identity rows as `Name<TAB>`.
+/// Legacy AdapterRAM fields and aggregate utilization rows are discarded:
+/// neither establishes trustworthy capacity or activity for a selected GPU.
+/// Names are ordered deterministically without inferring which GPU is largest.
 GpuMemorySample? parseWindowsGpuInfo(String input) {
-  final pools = <({int total, String name})>[];
-  int? utilization;
+  final names = <String>[];
   for (final line in input.split(RegExp(r'[\r\n]+'))) {
-    final trimmed = line.trim();
-    if (trimmed.isEmpty) continue;
-    final tab = trimmed.indexOf('\t');
+    final tab = line.indexOf('\t');
     if (tab <= 0) continue;
-    if (trimmed.substring(0, tab) == '__utilization__') {
-      final parsed = int.tryParse(trimmed.substring(tab + 1).trim());
-      if (parsed != null && parsed >= 0 && parsed <= 100) {
-        utilization = parsed;
-      }
-      continue;
-    }
-    final name = _gpuDisplayName(trimmed.substring(0, tab));
+    final rawName = line.substring(0, tab).trim();
+    if (rawName == '__utilization__') continue;
+    final name = _gpuDisplayName(rawName);
     if (name == null) continue;
-    final ram = int.tryParse(trimmed.substring(tab + 1).trim());
-    if (ram == null || ram < 0 || ram > _maxMemoryBytes) continue;
-    pools.add((total: ram, name: name));
+    names.add(name);
   }
-  if (pools.isEmpty) return null;
-  pools.sort((a, b) => b.total.compareTo(a.total));
-  final largest = pools.first;
+  if (names.isEmpty) return null;
+  names.sort();
   return (
-    totalBytes: largest.total > 0 ? largest.total : null,
+    totalBytes: null,
     availableBytes: null,
-    utilizationPercent: utilization,
-    count: pools.length,
-    name: largest.name,
+    utilizationPercent: null,
+    count: names.length,
+    name: names.first,
   );
 }
 

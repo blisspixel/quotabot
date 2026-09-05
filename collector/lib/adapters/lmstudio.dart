@@ -196,6 +196,10 @@ class LmStudioAdapter {
       cloud: false,
       tools: _flag(declared?['trained_for_tool_use']),
       vision: _flag(declared?['vision']),
+      // LM Link can serve localhost requests on another device. The current
+      // model-list contract has no execution-location evidence, so do not
+      // broaden local reasoning routing from its reasoning configuration yet.
+      reasoning: null,
       embedding: _declaredEmbedding(type),
       digest: null,
     );
@@ -259,6 +263,7 @@ class LmStudioAdapter {
         'llm' || 'embedding' || 'embeddings' => false,
         _ => null,
       },
+      reasoning: null,
       embedding: _declaredEmbedding(type),
       digest: null,
     );
@@ -290,6 +295,7 @@ List<LocalModel>? lmStudioCompatFromJson(dynamic data) {
           cloud: false,
           tools: null,
           vision: null,
+          reasoning: null,
           embedding: null,
           digest: null,
         ),

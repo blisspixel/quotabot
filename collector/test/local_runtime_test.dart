@@ -29,6 +29,7 @@ LocalModel _m(
       cloud: cloud,
       tools: tools,
       vision: vision,
+      reasoning: null,
       embedding: embedding,
       digest: digest,
     );

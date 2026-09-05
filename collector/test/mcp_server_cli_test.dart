@@ -7,8 +7,31 @@ const _token = '0123456789abcdef0123456789abcdef';
 
 void main() {
   test('usage documents stdio and Streamable HTTP modes', () {
+    expect(mcpServerUsage, contains('quotabot mcp --http'));
     expect(mcpServerUsage, contains('bin/mcp_server.dart --http'));
     expect(mcpServerUsage, contains('--token-file PATH'));
+    expect(mcpServerUsage, contains('Startup does not collect quota'));
+  });
+
+  test('explicit default HTTP bind options still require HTTP mode', () {
+    for (final option in [
+      ['--host', '127.0.0.1'],
+      ['--host=127.0.0.1'],
+      ['--port', '8722'],
+      ['--port=8722'],
+      ['--path', '/mcp'],
+      ['--path=/mcp'],
+    ]) {
+      expect(
+        () => McpServerCliOptions.parse(option),
+        throwsA(isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          'HTTP options require --http',
+        )),
+        reason: option.join(' '),
+      );
+    }
   });
 
   test('parses Streamable HTTP flags in separated and equals forms', () {
