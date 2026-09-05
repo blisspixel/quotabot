@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-09-04. This file is the forward plan. It records brief shipped
+Updated 2026-09-05. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind

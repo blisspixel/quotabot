@@ -211,3 +211,59 @@ before entering a release. Capture
 metadata-only fixtures and dated native evidence separately. No paid service,
 model download, benchmark, store enrollment, or identity purchase is needed
 for this plan.
+
+## 2026-09-05 follow-up: execution-location evidence
+
+This follow-up narrows slice 3 into the next proposed correctness increment.
+The execution-location schema and routing changes below are future work, not
+features implemented in 0.11.0. The historical 0.10.3 baseline above remains
+unchanged.
+
+[LM Link](https://lmstudio.ai/docs/developer/core/lmlink) permits localhost
+requests to execute on a preferred remote device. The reviewed
+[native REST model list](https://lmstudio.ai/docs/developer/rest/list) exposes
+loaded instances but no documented execution-device discriminator. A model's
+local copy, loaded flag, or loopback endpoint cannot establish where its routing
+identifier will execute.
+
+There is a concrete future source: the SDK's
+[ModelInfoBase at fe095ac4](https://github.com/lmstudio-ai/lmstudio-js/blob/fe095ac4e8960e846950ea44707617f1b6ad4c23/packages/lms-shared-types/src/ModelInfoBase.ts)
+defines `deviceIdentifier` as explicit null for a model local to that server,
+or a string for a remote LM Link device. Missing is not null. This is not a
+documented REST field. Using it requires binding the configured endpoint and
+exact dispatch identifier; a runtime host behind WSL, a container, or a tunnel
+is not automatically the collector's execution environment.
+
+Do not automatically add `lms link status --json` to passive collection. Its
+[status implementation](https://github.com/lmstudio-ai/lms/blob/ff5080941a878f9283dee990e8252e4461d3d361/src/subcommands/link/status.ts)
+uses a [client creation path](https://github.com/lmstudio-ai/lms/blob/ff5080941a878f9283dee990e8252e4461d3d361/src/createClient.ts)
+that can start llmster and read or refetch CLI credentials. The underlying
+[LM Link status types](https://github.com/lmstudio-ai/lmstudio-js/blob/fe095ac4e8960e846950ea44707617f1b6ad4c23/packages/lms-shared-types/src/repository/LMLink.ts)
+are also marked unstable and discouraged for public adoption. A separately
+admitted source must be bounded, metadata-only, authenticated safely, and unable
+to wake or modify the runtime.
+
+**Proposed contract:** add `execution_location: on_device | remote | unknown`
+and `execution_location_basis` (`runtime_metadata`, `cloud_route`, `not_reported`,
+`conflicting_evidence`, or `legacy_snapshot`) to `ModelInfo`. Reuse the enclosing
+observation time. Preserve `local` as integration identity and `cloud_offloaded` as an
+independent exclusion. Known cloud routes become remote; private remote devices
+are not automatically paid or free. Missing, malformed, conflicting, and legacy
+local-only evidence stays unknown. Return no device identifiers or names.
+
+One shared positive-evidence predicate should govern model budgets, provider
+availability, local-first and quota-stretch fallback, readiness ranking, cached
+decisions, and host hardware fit. Remote and unknown models remain inspectable
+under `budget: any`; they cannot satisfy local/free capacity promises. Desktop
+and terminal views should explain the exclusion while preserving runtime loaded
+state separately. Regression fixtures must cover all LM Studio REST shapes,
+explicit SDK null versus missing, mixed devices and inventories, stale/cache
+round trips, cloud conflicts, and existing embedding/manual/paid exclusions.
+Spy clients must prove no new probes or runtime commands occur.
+
+The schema is additive, but eligibility intentionally tightens. When this
+correction ships, on-device LM Studio models may lose automatic
+local/quota fallback until a supported positive source is admitted. Keep the
+caller's original choice when no safe route exists. Audit positive Ollama and
+Lemonade producers before claiming their fallback is preserved; an absent cloud
+flag must not silently turn unknown into on-device evidence.

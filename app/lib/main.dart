@@ -587,6 +587,15 @@ typedef ProfileSaver = void Function(QuotaProfile profile);
 
 typedef TrayInitializer = Future<void> Function();
 
+typedef AnalyticsStorageCollector =
+    Future<
+      ({
+        List<AnalyticsStorageNotice> notices,
+        AnalyticsIncidentInventory inventory,
+      })
+    >
+    Function(List<ProviderQuota> active);
+
 typedef UpdateChecker = Future<QuotabotUpdateStatus> Function();
 
 typedef ReleaseOpener = Future<void> Function(String url);
@@ -619,6 +628,8 @@ class Dashboard extends StatefulWidget {
   @visibleForTesting
   final Future<List<ProviderQuota>> Function()? collector;
   @visibleForTesting
+  final AnalyticsStorageCollector? analyticsStorageCollector;
+  @visibleForTesting
   final List<QuotaProfile>? testProfiles;
   @visibleForTesting
   final AlertPoster? alertPoster;
@@ -649,6 +660,7 @@ class Dashboard extends StatefulWidget {
       _demoModeOverride = null,
       initialAnalytics = false,
       collector = null,
+      analyticsStorageCollector = null,
       testProfiles = null,
       alertPoster = null,
       prefsSaver = null,
@@ -673,6 +685,7 @@ class Dashboard extends StatefulWidget {
     bool demoMode = true,
     this.initialAnalytics = false,
     this.collector,
+    this.analyticsStorageCollector,
     this.testProfiles,
     this.alertPoster,
     this.prefsSaver,
@@ -1401,6 +1414,8 @@ class _DashboardState extends State<Dashboard>
     })
   >
   _collectAnalyticsStorage(List<ProviderQuota> active) async {
+    final injectedCollector = widget.analyticsStorageCollector;
+    if (injectedCollector != null) return injectedCollector(active);
     Future<
       ({
         List<AnalyticsStorageNotice> notices,
@@ -1475,8 +1490,6 @@ class _DashboardState extends State<Dashboard>
           ? visibleProviderRows(results, detectInstalledAgenticTools())
           : results;
       final setupRows = providerSetupRows(results);
-      final profiles = _loadProfiles();
-      final selectedProfile = _activeProfile.name;
       final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       // Analytics notices are advisory: they annotate quota that has already
       // been collected successfully. So this must never be able to fail the
@@ -1485,7 +1498,8 @@ class _DashboardState extends State<Dashboard>
       // escape here would discard a good fleet read, retain nothing on a cold
       // start, and leave the dashboard permanently empty while reporting a
       // failed refresh. Fall back to the main isolate, then to no notices.
-      final analyticsStorage = widget._hostIntegration
+      final analyticsStorage =
+          widget._hostIntegration || widget.analyticsStorageCollector != null
           ? await _collectAnalyticsStorage(active)
           : (
               notices: const <AnalyticsStorageNotice>[],
@@ -1563,6 +1577,11 @@ class _DashboardState extends State<Dashboard>
         }
       }
       final loadedInsights = shrinkInsightsReliability(rawInsights);
+      // Settings remain interactive during the analytics await. Load profiles
+      // and keep the latest selection now so refresh cannot undo a profile
+      // switch or replace an edited profile with its earlier definition.
+      final profiles = _loadProfiles();
+      final selectedProfile = _activeProfile.name;
       // Apply a completed refresh with setState whenever this widget is alive.
       // Gating the rebuild on tracked window visibility instead is unsafe: if
       // that flag ever desyncs from the real window - a minimize event that

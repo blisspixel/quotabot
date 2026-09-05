@@ -5,7 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot/theme_spec.dart';
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/profiles.dart';
 
 const _account = 'codex-refresh-fixture';
 
@@ -13,11 +15,12 @@ ProviderQuota _codex({
   required int asOf,
   required int weeklyReset,
   required double weeklyUsed,
+  String account = _account,
   QuotaWindow? shorterWindow,
 }) => ProviderQuota(
   provider: 'codex',
   displayName: 'Codex',
-  account: _account,
+  account: account,
   plan: 'pro',
   asOf: asOf,
   sourceClass: ProviderSourceClass.authoritativeLive,
@@ -196,4 +199,129 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets('refresh preserves the profile selected while analytics waits', (
+    tester,
+  ) async {
+    _desktopSurface(tester);
+    const personalAccount =
+        'credential:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const workAccount =
+        'credential:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const personal = QuotaProfile(
+      name: 'personal',
+      accounts: {
+        'codex': {personalAccount},
+      },
+    );
+    const work = QuotaProfile(
+      name: 'work',
+      accounts: {
+        'codex': {workAccount},
+      },
+    );
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final initial = [
+      _codex(
+        asOf: now - 300,
+        weeklyReset: now + 86400,
+        weeklyUsed: 5,
+        account: personalAccount,
+      ),
+      _codex(
+        asOf: now - 300,
+        weeklyReset: now + 86400,
+        weeklyUsed: 25,
+        account: workAccount,
+      ),
+    ];
+    final refreshed = [
+      _codex(
+        asOf: now - 60,
+        weeklyReset: now + 86400,
+        weeklyUsed: 10,
+        account: personalAccount,
+      ),
+      _codex(
+        asOf: now - 60,
+        weeklyReset: now + 86400,
+        weeklyUsed: 30,
+        account: workAccount,
+      ),
+    ];
+    final analyticsPending = Completer<void>();
+    var collections = 0;
+    var analyticsReads = 0;
+    Prefs? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark().copyWith(
+          extensions: [AppChromeTheme.forSpec(Brightness.dark, appThemeDark)],
+        ),
+        home: Dashboard.test(
+          prefs: const Prefs(
+            setupDone: true,
+            enableNotifications: false,
+            cadence: Cadence.h1,
+            activeProfile: 'personal',
+          ),
+          demoMode: false,
+          testProfiles: [QuotaProfile.defaultProfile(), personal, work],
+          prefsSaver: (prefs) async => saved = prefs,
+          collector: () async => ++collections == 1 ? initial : refreshed,
+          analyticsStorageCollector: (active) async {
+            analyticsReads++;
+            if (analyticsReads == 2) {
+              expect(active, refreshed);
+              await analyticsPending.future;
+            }
+            return (
+              notices: const <AnalyticsStorageNotice>[],
+              inventory: const AnalyticsIncidentInventory.suppressed(),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(_cardText('95% free'), findsOneWidget);
+    expect(find.text('Personal'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Refresh now'));
+    await tester.pumpAndSettle();
+    expect(collections, 2);
+    expect(analyticsReads, 2);
+    expect(find.byTooltip('Refreshing quotas'), findsOneWidget);
+    expect(_cardText('95% free'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-profile')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Work').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-close')));
+    await tester.pumpAndSettle();
+    expect(saved?.activeProfile, 'work');
+    expect(find.text('Work'), findsOneWidget);
+    expect(_cardText('75% free'), findsOneWidget);
+
+    analyticsPending.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Work'), findsOneWidget);
+    expect(find.text('Personal'), findsNothing);
+    expect(find.byType(ProviderTile), findsOneWidget);
+    final card = tester.widget<ProviderTile>(find.byType(ProviderTile));
+    expect(card.quota.account, workAccount);
+    expect(card.quota.asOf, refreshed.last.asOf);
+    expect(_cardText('70% free'), findsOneWidget);
+    expect(_cardText('75% free'), findsNothing);
+    expect(_cardText('90% free'), findsNothing);
+    expect(saved?.activeProfile, 'work');
+    expect(find.byTooltip('Refresh now'), findsOneWidget);
+    expect(collections, 2);
+    expect(analyticsReads, 2);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }

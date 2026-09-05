@@ -26,6 +26,8 @@ Notable changes to quotabot. Newest first.
 
 ### Fixed
 
+- A desktop refresh preserves a profile selected while advisory analytics are
+  loading, so completion cannot restore the previous account filter.
 - The optional TypeScript MCP client lock updates fast-uri to 3.1.7 and qs to
   6.16.0, resolving six dependency advisories without changing the direct SDK.
 - Screenshot and desktop readiness automation skip platform notification
