@@ -27,9 +27,10 @@ Provider snapshots keep these stable fields:
 - `provider`, `display_name`, `account`, `kind`, `ok`, `as_of`, `stale`, and
   `windows`.
 - `account` is the exact local evidence identity. It is normally a provider
-  account label. Claude and Codex use `credential:` plus a full irreversible
+  account label. Claude, Codex and Grok use `credential:` plus a full irreversible
   SHA-256 fingerprint. Codex hashes its stable ChatGPT account id when known;
-  Claude hashes the current profile account and organization ids when available.
+  Claude hashes the current profile account and organization ids when available;
+  Grok hashes its typed first-party personal or team principal.
   A credential-generation fingerprint is the fail-closed fallback. Consumers
   must treat the value as an opaque exact-match key, not as a user-facing name
   or a token. Raw credentials and provider account ids are never serialized in
@@ -38,7 +39,7 @@ Provider snapshots keep these stable fields:
   `source_class`, `supplemental_manual_quota`, `status`, `active`, `details`,
   `error`, `models`, `local_hardware`, `model_quotas`, `suspect`, `drift_reason`,
   `drift_observed_at`, `per_machine`, `pipe_health`, `http_status`,
-  `retry_after_seconds`, and `reset_credits_available`.
+  `retry_after_seconds`, `request_admission`, and `reset_credits_available`.
 - `kind` is `subscription` or `local`.
 - `as_of` is the evidence capture time. Structurally the frozen schema retains
   its non-negative integer type, but live quota is trusted for routing only when
@@ -104,8 +105,17 @@ Provider snapshots keep these stable fields:
   throttling or provider-side degradation from generic no-data.
 - `http_status` is an optional sanitized metadata-endpoint status code
   (`100..599`). `retry_after_seconds` is an optional non-negative delay parsed
-  from `Retry-After`. These are metadata only and must not include response
+  from `Retry-After` or the remaining bounded transport cooldown. It is an
+  earliest-next-read constraint, not a promise about a UI's timer. These fields
+  are metadata only and must not include response
   bodies, prompts, generated text, source code, or secrets.
+- Optional `request_admission` is `allowed`, `denied`, `unresolved`, or
+  `not_reported`. Writers omit `not_reported`; it and absence both mean the
+  provider did not report an admission flag. A valid negative
+  Codex flag preserves measured quota but makes the provider unavailable;
+  positive admission never overrides a spent, stale, expired or drifted window.
+  Unknown or malformed serialized admission values decode as `unresolved` and
+  cannot reopen access. Metadata-read failures are separate from this state.
 - `reset_credits_available` is an optional non-negative count of redeemable
   off-cycle resets the provider reports as available now (Codex's rate-limit
   reset credits today), omitted when zero. It is a fresh-read signal: it is not
@@ -155,6 +165,8 @@ GPT-5.3-Codex-Spark entry follows the same fail-closed rule. Each entry keeps:
   from time remaining. When present it is trimmed, control-free, non-empty, and
   at most 96 characters.
 - Optional `category` (a provider speed label) and `note` (a provider badge).
+- Optional `request_admission` uses the same values and veto, scoped to the
+  matching model. A scoped denial cannot block unrelated models.
 
 The contract is additive. Unknown fields are allowed at the root, provider,
 window, and model levels. Existing field meanings and types must not change
@@ -195,7 +207,9 @@ emit `quotabot.suggest.v1` with:
   `quota_stretch` when the caller requested fresh measured included quota down
   to the stretch threshold before local capacity.
 - `decision_code`: the low-cardinality policy outcome, such as `best_runway`,
-  `preferred_provider`, `quota_stretch`, `local_fallback`, or `spent_wait`.
+  `preferred_provider`, `quota_stretch`, `local_fallback`, `request_blocked`, or
+  `spent_wait`. Admission rejections use receipt verdicts `request_denied` or
+  `request_admission_unresolved`.
 - `recommended`: the picked provider candidate, or an explicit `null` when
   nothing is usable.
 - `reason`, the complete plain-language `explanation`,
@@ -223,7 +237,7 @@ emit `quotabot.suggest.v1` with:
   optional `cost_penalty`, optional `cost_discount`,
   optional `local_readiness` (`loaded` or `cold`) for local-runtime candidates,
   optional `capability_limited`, optional `capability_budget_limited`,
-  optional `binding_pool`,
+  optional `binding_pool`, optional `request_admission`,
   optional `drift_reason`, optional `drift_observed_at`, `routing_score`,
   `resets_at`, `stale`, and `available`. Drift candidates are unavailable;
   `headroom_percent` is last-trusted when present and null for a legacy
@@ -293,8 +307,9 @@ code, responses, credentials, or exception messages.
 provider/account), or `account`, `source_class`, `available`,
 `headroom_percent`, `resets_at`, and `stale`, with an optional plain `error` when
 a failed live read is showing last-known evidence, plus optional `drift_reason`
-and `drift_observed_at`. CLI `check` accepts a shipped adapter id or display
-name and then matches rows by provider id. A custom provider matches by its id
+and `drift_observed_at`, and optional `request_admission`. CLI `check` accepts a
+shipped adapter id or display name and then matches rows by provider id. A
+custom provider matches by its id
 or display name and cannot satisfy a shipped adapter name. MCP and loopback
 HTTP `/providers/` keep the exact provider selector.
 
@@ -328,8 +343,9 @@ problems.
 `quotabot models --json` and MCP `list_models` emit `quotabot.models.v1` with
 `schema`, `generated_at`, `catalog_updated`, `budget_policy`, and `models`.
 Each model entry includes provider/account, `source_class`, `local`,
-`available`, `stale`, `quota_backed`, capability hints where known, and the
-gating quota budget when the model is remote: `headroom_percent`, `resets_at`,
+`available`, `stale`, `quota_backed`, optional `request_admission`, capability
+hints where known, and the gating quota budget when the model is remote:
+`headroom_percent`, `resets_at`,
 and the `gating_window` label. Capability hints such as `tools`, `vision`, and
 `context_tokens` are present only where the source declared them: a committed
 catalog entry for a cloud model, and the runtime's own metadata for a local one.

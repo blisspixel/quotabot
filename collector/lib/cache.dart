@@ -999,6 +999,7 @@ ProviderQuota _lockUnavailableAdmissionResult(
     planEvidenceAsOf: fresh.planEvidenceAsOf,
     source: fresh.source,
     sourceClass: fresh.sourceClass,
+    requestAdmission: fresh.requestAdmission,
     ok: false,
     error: 'quota evidence admission unavailable; no trusted snapshot is '
         'available',

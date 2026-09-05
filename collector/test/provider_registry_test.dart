@@ -7,6 +7,21 @@ import 'package:test/test.dart';
 
 void main() {
   group('provider adapter registry', () {
+    test('usage cooldown coverage is an explicit collector capability', () {
+      expect(providersWithMetadataUsageCooldowns(),
+          {claudeProviderId, codexProviderId, grokProviderId});
+      final custom = ProviderAdapterRegistration(
+        id: codexProviderId,
+        displayName: codexProviderName,
+        adapterClass: ProviderAdapterClass.subscription,
+        sourceClasses: kAuthoritativeLiveSourceClasses,
+        collect: () async => [],
+        fixtureKind: ProviderFixtureKind.codexUsage,
+        fixtureFile: 'codex_usage.json',
+      );
+      expect(providersWithMetadataUsageCooldowns(registry: [custom]), isEmpty);
+    });
+
     test('covers every built-in adapter exactly once', () {
       final ids = kProviderAdapterRegistry.map((entry) => entry.id).toList();
       expect(ids.toSet(), hasLength(ids.length));

@@ -3,6 +3,7 @@ library;
 
 import 'dart:async';
 
+import 'model_quota_matching.dart';
 import 'provider_source.dart';
 
 export 'credential_identity.dart';
@@ -20,6 +21,54 @@ const int kDefaultExpiringQuotaMaxHours = 24;
 /// Keeping a 1.5 percent buffer avoids routing to a sliver that still renders as
 /// "1% free" after whole-percent display rounding and may already be rejected.
 const double kSpentHeadroomFloor = 1.5;
+
+/// Provider-declared request admission, separate from measured quota usage.
+/// Positive or absent evidence never overrides other availability constraints.
+enum RequestAdmission {
+  notReported('not_reported'),
+  allowed('allowed'),
+  denied('denied'),
+  unresolved('unresolved');
+
+  const RequestAdmission(this.wireName);
+
+  final String wireName;
+
+  bool get blocksRequests =>
+      this == RequestAdmission.denied || this == RequestAdmission.unresolved;
+
+  static const wireValues = ['not_reported', 'allowed', 'denied', 'unresolved'];
+
+  /// Unknown persisted declarations remain a veto rather than becoming absence.
+  static RequestAdmission fromWire(Object? value) => switch (value) {
+        'not_reported' => RequestAdmission.notReported,
+        'allowed' => RequestAdmission.allowed,
+        'denied' => RequestAdmission.denied,
+        'unresolved' => RequestAdmission.unresolved,
+        _ => RequestAdmission.unresolved,
+      };
+
+  /// Combines constraints without letting a healthier sibling erase a veto.
+  RequestAdmission combine(RequestAdmission other) {
+    if (this == RequestAdmission.denied || other == RequestAdmission.denied) {
+      return RequestAdmission.denied;
+    }
+    if (this == RequestAdmission.unresolved ||
+        other == RequestAdmission.unresolved) {
+      return RequestAdmission.unresolved;
+    }
+    if (this == RequestAdmission.notReported ||
+        other == RequestAdmission.notReported) {
+      return RequestAdmission.notReported;
+    }
+    return RequestAdmission.allowed;
+  }
+}
+
+RequestAdmission _requestAdmissionFromJson(Map<String, dynamic> json) =>
+    json.containsKey('request_admission')
+        ? RequestAdmission.fromWire(json['request_admission'])
+        : RequestAdmission.notReported;
 
 /// A finite double from a JSON-decoded number, or null. `jsonEncode` throws on
 /// NaN and infinities, and the routing and analytics math assume finite input,
@@ -130,6 +179,9 @@ class ModelQuota {
   /// Short provider badge, e.g. "Limited time". Null when not exposed.
   final String? note;
 
+  /// Admission of this named pool only, not the provider's unrelated models.
+  final RequestAdmission requestAdmission;
+
   const ModelQuota({
     required this.model,
     this.usedPercent,
@@ -137,6 +189,7 @@ class ModelQuota {
     this.windowLabel,
     this.category,
     this.note,
+    this.requestAdmission = RequestAdmission.notReported,
   });
 
   /// Remaining headroom percent (100 - used), 0..100. Null when unknown.
@@ -161,6 +214,8 @@ class ModelQuota {
         if (windowLabel != null) 'window_label': windowLabel,
         if (category != null) 'category': category,
         if (note != null) 'note': note,
+        if (requestAdmission != RequestAdmission.notReported)
+          'request_admission': requestAdmission.wireName,
       };
 
   factory ModelQuota.fromJson(Map<String, dynamic> j) => ModelQuota(
@@ -172,6 +227,7 @@ class ModelQuota {
         windowLabel: j['window_label'] as String?,
         category: j['category'] as String?,
         note: j['note'] as String?,
+        requestAdmission: _requestAdmissionFromJson(j),
       );
 }
 
@@ -575,6 +631,10 @@ class ProviderQuota {
   /// it is deliberately not asserted from stale, drifted, or degraded snapshots.
   final int resetCreditsAvailable;
 
+  /// Admission for shared provider requests. A veto preserves measured windows
+  /// and their trust while independently making this account unavailable.
+  final RequestAdmission requestAdmission;
+
   ProviderQuota({
     required this.provider,
     required this.displayName,
@@ -603,6 +663,7 @@ class ProviderQuota {
     this.httpStatus,
     this.retryAfterSeconds,
     this.resetCreditsAvailable = 0,
+    this.requestAdmission = RequestAdmission.notReported,
     ProviderSourceClass? sourceClass,
     this.supplementalManualQuota,
   }) : sourceClass = sourceClass ??
@@ -622,10 +683,31 @@ class ProviderQuota {
   /// Provider-wide activity cannot substitute for an eligible represented model.
   String? get localGenerationReadiness {
     if (!isLocal) return null;
-    final eligible = models.where((model) => !model.hasLocalGenerationVeto);
+    final eligible = models.where((model) =>
+        !model.hasLocalGenerationVeto &&
+        !requestAdmissionForModel(model).blocksRequests);
     if (eligible.isEmpty) return null;
     return eligible.any((model) => model.loaded) ? 'loaded' : 'cold';
   }
+
+  /// Shared matching keeps local availability and model-budget routing on the
+  /// same named constraints, including equally specific reported variants.
+  List<ModelQuota> matchingModelQuotas(ModelInfo model) =>
+      bestModelQuotaMatches(
+        modelQuotas,
+        provider: provider,
+        modelId: model.id,
+        displayName: model.displayName,
+        modelLabel: (quota) => quota.model,
+      );
+
+  /// Negative shared or model-scoped admission vetoes this model only. Positive
+  /// and missing declarations cannot override other eligibility constraints.
+  RequestAdmission requestAdmissionForModel(ModelInfo model) =>
+      matchingModelQuotas(model).fold(
+        requestAdmission,
+        (admission, quota) => admission.combine(quota.requestAdmission),
+      );
 
   /// True when this is a self-reported manual quota entry, not measured data.
   bool get isManual => source == providerQuotaManualSource;
@@ -731,6 +813,8 @@ class ProviderQuota {
         'source_class': sourceClass.wireName,
         if (supplementalManualQuota != null)
           'supplemental_manual_quota': supplementalManualQuota!.toJson(),
+        if (requestAdmission != RequestAdmission.notReported)
+          'request_admission': requestAdmission.wireName,
         'kind': kind.wireName,
         if (status != null) 'status': status,
         if (active) 'active': active,
@@ -766,6 +850,7 @@ class ProviderQuota {
             : boundedIntFromWire(j['plan_evidence_as_of'], min: 1),
         source: j['source'] as String?,
         sourceClass: _providerSourceClassFromJson(j),
+        requestAdmission: _requestAdmissionFromJson(j),
         supplementalManualQuota: j['supplemental_manual_quota'] is Map
             ? SupplementalManualQuota.fromJson(
                 (j['supplemental_manual_quota'] as Map).cast<String, dynamic>(),
@@ -842,6 +927,7 @@ class ProviderQuota {
         // failed or windowless fresh read must never graft untrusted pools onto
         // otherwise trusted cached windows.
         modelQuotas: modelQuotas,
+        requestAdmission: requestAdmission,
         // The concern belongs to these cached windows, so it rides along when
         // they are served stale, regardless of fresh metadata.
         suspect: suspect,
@@ -877,6 +963,7 @@ class ProviderQuota {
         models: models,
         localHardware: localHardware,
         modelQuotas: modelQuotas,
+        requestAdmission: requestAdmission,
         suspect: reason,
         driftReason: driftReason,
         driftObservedAt: driftObservedAt,
@@ -912,6 +999,7 @@ class ProviderQuota {
         models: models,
         localHardware: localHardware,
         modelQuotas: modelQuotas,
+        requestAdmission: requestAdmission,
         driftReason: reason,
         driftObservedAt: observedAt,
         perMachine: perMachine,
@@ -951,6 +1039,7 @@ class ProviderQuota {
         ok: false,
         error: 'provider drift detected; legacy quota evidence is quarantined '
             'because no trusted snapshot is available',
+        requestAdmission: requestAdmission,
         stale: true,
         kind: kind,
         status: metadataFrom?.status ?? status,
@@ -991,6 +1080,7 @@ class ProviderQuota {
         models: models,
         localHardware: hardware,
         modelQuotas: modelQuotas,
+        requestAdmission: requestAdmission,
         suspect: suspect,
         driftReason: driftReason,
         driftObservedAt: driftObservedAt,
@@ -1031,6 +1121,7 @@ class ProviderQuota {
         models: models,
         localHardware: localHardware,
         modelQuotas: modelQuotas,
+        requestAdmission: requestAdmission,
         suspect: suspect,
         driftReason: driftReason,
         driftObservedAt: driftObservedAt,
@@ -1114,6 +1205,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
     planEvidenceAsOf: q.planEvidenceAsOf,
     source: q.source == null ? null : t(q.source!),
     sourceClass: q.sourceClass,
+    requestAdmission: q.requestAdmission,
     supplementalManualQuota: q.supplementalManualQuota == null
         ? null
         : SupplementalManualQuota(
@@ -1200,6 +1292,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
           windowLabel: m.windowLabel == null ? null : t(m.windowLabel!),
           category: m.category == null ? null : t(m.category!),
           note: m.note == null ? null : t(m.note!),
+          requestAdmission: m.requestAdmission,
         ),
     ],
     suspect: q.suspect == null ? null : t(q.suspect!),

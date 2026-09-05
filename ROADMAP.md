@@ -94,26 +94,32 @@ same evidence in the app and their agent harnesses.** Useful product work
 continues while publisher identities are unavailable. Signing remains a native
 distribution gate before 1.0; store admission is not a product-development gate.
 
-The 0.11.0 release adds inspectable desktop model detail, declared Ollama reasoning
-capabilities, honest Windows GPU evidence, and tested advisory harness and
-Agent Plugins setup. Further work improves native recovery and execution evidence
-before expanding local-only promises.
+The 0.11.2 release adds reset confirmation, provider-scoped metadata retry
+coordination, explicit admission evidence and current Grok billing support.
+The previous increments provide inspectable desktop models, conservative
+hardware evidence, and tested advisory harness and Agent Plugins setup. Further
+work closes the independent credential and shutdown lifecycle gaps and improves
+native use before expanding local-only promises.
 The September research records the current code baseline, primary sources,
 uncertainties, and concrete tests for [local models](docs/research/2026-09-local-models.md),
-[native platforms](docs/research/2026-09-platform-quality.md), and
+[native platforms](docs/research/2026-09-platform-quality.md),
+[provider reliability](docs/research/2026-09-provider-reliability.md), and
 [agent harnesses](docs/research/2026-09-harnesses.md). Those reports are dated
 evidence; this section owns the execution order.
 
 **Build in this order**
 
-1. **Close the reported freshness and provider-failure gaps.** Exercise renewal
-   across a binding reset, including a provider that briefly returns its old
-   pool after the boundary. Add bounded confirmation and coalesced return/pause
-   recovery without inventing renewed quota. Preserve provider Retry-After across
-   every cadence and metadata transport; verify credential, account and pool
-   identity before fallback. Recheck supported Codex, Claude and Grok status
-   interfaces against current primary sources. A real throttle, authentication
-   failure and failed metadata read need distinct, accurate recovery messages.
+1. **Finish credential and shutdown recovery.** Reset confirmation, coalesced
+   return/pause recovery, usage-read ownership, admission and accurate recovery
+   labels are implemented. Next, retain Claude/Codex credential-transaction
+   ownership through original OAuth request settlement while keeping callers'
+   publication deadlines bounded and preserving safe late token rotation.
+   Track nested grant resolution before a worker closes. Separately, stop new
+   MCP snapshot admissions and bound shutdown without allowing a late pending
+   snapshot to restart a closed HTTP client. Preserve existing host-account
+   independence and repeat synthetic late-success, failure, replacement and
+   restart cases. Real idle-machine and original display-disagreement evidence
+   remain distinct from these reproducible regressions.
 2. **Establish execution scope before expanding local-only advice.** The
    explicit upstream veto, declared reasoning support, and conservative Windows
    GPU correction are in place. Next, require a bounded positive producer and
@@ -436,7 +442,7 @@ plan semantics remain uneven.
 
 ## Current state
 
-The current line, **0.11.1**, is the stable release version and carries
+The current line, **0.11.2**, is the stable release version and carries
 the latest hardening inventory described in [Next](#next). The stable line
 contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
@@ -457,8 +463,13 @@ and unpinned three-platform
 [install and upgrade smoke](https://github.com/blisspixel/quotabot/actions/runs/33959135481)
 passed, with the matching CLI and desktop installed and verified on Windows.
 The 0.11.1 increment separates refresh from advisory work and closes explicit
-upstream and embedding-only admission gaps. Each new tag must repeat the
-native build and installation gates.
+upstream and embedding-only admission gaps. Its native
+[release](https://github.com/blisspixel/quotabot/actions/runs/33977671639) and
+[install lifecycle](https://github.com/blisspixel/quotabot/actions/runs/33980712404)
+passed, with matching CLI and desktop payloads installed and verified on Windows.
+The 0.11.2 increment adds bounded reset recovery, provider-specific usage
+coordination, explicit request admission, and modern Grok billing. Each new tag
+must repeat the native build and installation gates.
 The table is a status index; detailed scope and acceptance criteria live in the
 milestone sections below.
 

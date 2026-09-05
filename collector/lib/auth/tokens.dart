@@ -260,6 +260,7 @@ class TokenStore {
     String provider,
     Future<T> Function(TokenRecord? current) run, {
     String? account,
+    Duration acquisitionTimeout = defaultFileGuardAcquisitionTimeout,
   }) async {
     final accountName = _normalizeAccount(account);
     final f = _file(provider, account: accountName);
@@ -268,6 +269,7 @@ class TokenStore {
     final guard = await acquireInterprocessFileGuard(
       lockFile,
       hardenClaim: _hardenTokenFile,
+      acquisitionTimeout: acquisitionTimeout,
     );
     try {
       final current = _readRecord(

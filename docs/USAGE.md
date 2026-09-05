@@ -516,12 +516,14 @@ quotabot top --truecolor    # force 24-bit gradient meters
 quotabot top --sort=headroom  # order providers by a routing metric
 ```
 
-By default the collection cadence adapts to the same logic the desktop app uses:
-it polls fast (down to 30s) when a reset is imminent, or when a window is near its
-cap and that window's own reset is near enough to be worth watching, and relaxes
-to hours when the fleet is healthy or a provider is spent with a far-off reset, so
-it is responsive when it matters without hammering provider APIs. The footer
-shows when the data was last collected. `--interval` pins a fixed rate.
+By default, current live quota is checked within five minutes, including plans
+with only a weekly window. An imminent reset gets a shorter check, followed by a
+bounded confirmation period if the provider still reports the old window.
+quotabot never assumes a refill from the clock alone. Provider cooldowns remain
+in force: covered Claude, Codex and Grok usage reads defer independently, while
+other throttled transports retain a fleet-wide backoff. Passive-only or failed
+fleets can use longer intervals. The footer shows the capture time.
+`--interval` pins a fixed rate but does not bypass a covered usage cooldown.
 
 Press `q` (or Ctrl-C) to quit, `r` to refresh immediately, and `s` to cycle the
 ordering: `default` (collection order), `headroom` (most free first), `burn`

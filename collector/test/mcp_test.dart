@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:mcp_dart/mcp_dart.dart';
 import 'package:quotabot_collector/identifiers.dart';
@@ -8,6 +9,7 @@ import 'package:quotabot_collector/mcp.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/profiles.dart';
 import 'package:quotabot_collector/schema_contracts.dart';
+import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
 const _now = 1782000000;
@@ -643,6 +645,142 @@ void main() {
       await client.close();
       await server.close();
     });
+
+    void isolateAdmissionMetadata() {
+      final directory = Directory.systemTemp.createTempSync('mcp_admission_');
+      setQuotabotDirOverrideForTesting(directory);
+      addTearDown(() {
+        setQuotabotDirOverrideForTesting(null);
+        directory.deleteSync(recursive: true);
+      });
+    }
+
+    test('request admission survives real MCP schemas and rejects route advice',
+        () async {
+      isolateAdmissionMetadata();
+      await connect([
+        ProviderQuota(
+          provider: 'codex',
+          displayName: 'Codex',
+          account: 'a',
+          asOf: _now,
+          requestAdmission: RequestAdmission.denied,
+          windows: [
+            QuotaWindow(label: 'weekly', usedPercent: 50, resetsAt: _now + 3600)
+          ],
+        ),
+      ]);
+      final quotas =
+          await client.callTool(const CallToolRequest(name: 'list_quotas'));
+      expect(quotas.isError, isFalse);
+      final provider =
+          (quotas.structuredContent!['providers'] as List).single as Map;
+      expect(provider['request_admission'], 'denied');
+      expect((provider['windows'] as List).single['used_percent'], 50);
+      final availability = await client.callTool(const CallToolRequest(
+          name: 'check_provider_availability',
+          arguments: {'provider': 'codex'}));
+      expect(availability.isError, isFalse);
+      expect(availability.structuredContent!['request_admission'], 'denied');
+      expect(availability.structuredContent!['available'], isFalse);
+      expect(availability.structuredContent!['headroom_percent'], 50);
+      final headroom = await client
+          .callTool(const CallToolRequest(name: 'provider_with_most_headroom'));
+      expect(headroom.isError, isFalse);
+      expect(headroom.structuredContent!['provider'], isNull);
+      final models = await client.callTool(const CallToolRequest(
+          name: 'list_models', arguments: {'budget': 'any'}));
+      expect(models.isError, isFalse);
+      final model = (models.structuredContent!['models'] as List).single as Map;
+      expect(model['request_admission'], 'denied');
+      expect(model['available'], isFalse);
+      expect(model['headroom_percent'], 50);
+      final suggested =
+          await client.callTool(const CallToolRequest(name: 'suggest_model'));
+      expect(suggested.isError, isFalse);
+      expect(suggested.structuredContent!['recommended'], isNull);
+      expect(suggested.structuredContent!['reason'],
+          contains('request admission'));
+      final route = await client
+          .callTool(const CallToolRequest(name: 'suggest_provider'));
+      expect(route.isError, isFalse);
+      expect(route.structuredContent!['recommended'], isNull);
+      expect(route.structuredContent!['decision_code'], 'request_blocked');
+      final rejected =
+          ((route.structuredContent!['receipt'] as Map)['alternatives'] as List)
+              .single as Map;
+      expect(rejected['request_admission'], 'denied');
+      expect(rejected['verdict'], 'request_denied');
+    });
+
+    for (final explicit in [false, true]) {
+      for (final scope in [
+        'shared denied',
+        'shared unresolved',
+        'model denied'
+      ]) {
+        test(
+            'request admission $scope blocks ${explicit ? "explicit" : "auto"} lease creation and reuse',
+            () async {
+          isolateAdmissionMetadata();
+          var admission = RequestAdmission.allowed;
+          final store =
+              InMemoryRouteLeaseStore(idFactory: () => 'admission-lease');
+          ProviderQuota snapshot() => ProviderQuota(
+                provider: 'codex',
+                displayName: 'Codex',
+                account: 'a',
+                asOf: _now,
+                requestAdmission: scope == 'model denied'
+                    ? RequestAdmission.allowed
+                    : admission,
+                windows: [
+                  QuotaWindow(
+                      label: 'weekly', usedPercent: 50, resetsAt: _now + 3600)
+                ],
+                modelQuotas: scope == 'model denied'
+                    ? [
+                        ModelQuota(
+                          model: 'codex-test',
+                          usedPercent: 10,
+                          resetsAt: _now + 3600,
+                          requestAdmission: admission,
+                        )
+                      ]
+                    : const [],
+              );
+          await connect([],
+              snapshotProvider: () async => [snapshot()], leaseStore: store);
+          final arguments = <String, dynamic>{
+            if (explicit) 'provider': 'codex',
+            'idempotency_key': 'admission-retry',
+          };
+          final first = await client.callTool(
+              CallToolRequest(name: 'reserve_provider', arguments: arguments));
+          expect(first.isError, isFalse);
+          expect(first.structuredContent!['reserved'], isTrue);
+          admission = scope == 'shared unresolved'
+              ? RequestAdmission.unresolved
+              : RequestAdmission.denied;
+          final retry = await client.callTool(
+              CallToolRequest(name: 'reserve_provider', arguments: arguments));
+          expect(retry.isError, isFalse);
+          expect(retry.structuredContent!['reserved'], isFalse);
+          expect(retry.structuredContent!['reused'], isFalse);
+          expect(retry.structuredContent!['lease'], isNull);
+          final fresh = await client
+              .callTool(CallToolRequest(name: 'reserve_provider', arguments: {
+            ...arguments,
+            'idempotency_key': 'new-admission-retry',
+          }));
+          expect(fresh.isError, isFalse);
+          expect(fresh.structuredContent!['reserved'], isFalse);
+          expect(store.active(_now), hasLength(1),
+              reason:
+                  'denial prevents reuse or a new lease; existing ledger remains intact');
+        });
+      }
+    }
 
     test('upstream model evidence survives real MCP output and budget gates',
         () async {

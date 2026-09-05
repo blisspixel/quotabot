@@ -128,7 +128,8 @@ PROV-DM conformance.
 - Source (authoritative, cross-device): `GET
   https://chatgpt.com/backend-api/wham/usage`, the same endpoint the CLI's own
   status view polls. Auth is tried in priority order: the OAuth access token
-  Codex stores in `~/.codex/auth.json`, then quotabot's own refreshable grant
+  Codex stores in `CODEX_HOME/auth.json` (default `~/.codex/auth.json`), then
+  quotabot's own refreshable grant
   from `quotabot login codex` when that token is expired (the idle-machine path).
   The `chatgpt-account-id` header is read from `auth.json` only with that host
   token. An independent grant may represent another account and never inherits
@@ -139,7 +140,9 @@ PROV-DM conformance.
   weekly pool in `primary_window` and explicitly set `secondary_window` to null.
   That null is an absent pool, not a malformed response. Admission flags
   (`allowed`, `limit_reached`) say whether ChatGPT will take a new request.
-  They are not a second encoding of `used_percent`. A Plus weekly window at
+  A valid negative becomes `request_admission: denied` and vetoes advice and
+  reservations while preserving the measured percent. They are not a second
+  encoding of `used_percent`. A Plus weekly window at
   100% used with `allowed: true` is a live spent observation. Internally
   contradictory flags (`allowed` equal to `limit_reached`) still reject the
   payload. `plan_type` is display
@@ -271,6 +274,12 @@ PROV-DM conformance.
   Profiles saved by an older version with a Claude plan such as `max` in the
   account filter remain fail-closed and are flagged for editing; quotabot never
   silently widens an exact account filter.
+- An owner-only local store retains at most 32 opaque credential-to-pool
+  associations. It can recover that exact credential's last-known cache after
+  a failed read in a new worker or process. It cannot prove a live account,
+  plan, entitlement, or balance. A successful usage read without a current
+  profile stays credential-keyed; it never duplicates its old pool as a second
+  available account. Older completions cannot overwrite newer associations.
 - The host token only refreshes while Claude Code runs on this machine, so on an
   idle machine it eventually expires. quotabot then refreshes its own grant if
   connected; if neither token works it reports the token as expired (pointing at
@@ -279,39 +288,42 @@ PROV-DM conformance.
 
 ## Grok (xAI)
 
-- Account: `~/.grok/auth.json` (email).
-- Auth: quotabot's own grant from `login grok` if present, otherwise the bearer
-  token (`key`) the CLI currently holds. See "Authentication" below.
-- Expired host logins are named, not guessed: the CLI records the token's
-  expiry (`expires_at`) next to the token, and xAI answers an expired bearer
-  with a permission denial (observed gRPC status 7) rather than an
-  unauthenticated status. When the token quotabot sent is already past that
-  recorded expiry and the read is denied, the account reports an expired login
-  with the repair steps (use Grok once, or `quotabot login grok`). A denial for
-  a token that should still be valid keeps its exact status, because a status
-  code alone does not prove an expired login.
-- Live usage: a gRPC-web POST to
-  `https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` with the
-  bearer token and an empty request frame. The protobuf response carries the
-  used percent of the shared paid-plan weekly pool plus the window start and
-  end timestamps; quotabot reads the percent and window end by their known
-  fields and parses them into a single weekly window. The usage page's Imagine,
-  Chat, and Build percentages are category breakdowns inside that shared pool,
-  not independent spendable buckets, and while the response matches the known
-  shape a breakdown is not mistaken for the total (if the shape ever drifts, a
-  schema-less scan is the best-effort fallback). Those percents are also
-  surfaced as display-only detail on expanded cards and `top` / `doctor`; they
-  never become extra windows. This is a billing metadata call, not a model
-  call, so it costs no tokens.
+- Host account: the exact first-party OIDC/external scope in
+  `~/.grok/auth.json`, issued by `https://auth.x.ai` for the supported public
+  Grok CLI client. Personal and team principals produce separate opaque pool
+  identities. Email is not a quota pool. API-key, customer-issuer, staging and
+  legacy WebLogin records do not select this transport; legacy users receive an
+  explicit re-login step.
+  Old email-based Grok profile filters remain exact and can require reselection;
+  they are never widened to a newly proved account.
+- A usable host read starts independently of optional quotabot grant resolution.
+  Owned grants are discoverable without a host auth file. Each must prove its
+  current principal with the same token through
+  `GET https://cli-chat-proxy.grok.com/v1/user?include=subscription` before
+  billing. A stored opaque association is for failed-read cache lookup only.
+  Multiple credentials join a pool only with matching current typed identity.
+  Only an explicit 401 permits an authorized same-pool credential fallback;
+  403, 429, and service errors retain their own recovery state.
+- Live usage: `GET
+  https://cli-chat-proxy.grok.com/v1/billing?format=credits` with bearer auth,
+  `X-XAI-Token-Auth: xai-grok-cli`, and the same principal's user id. Reads reject
+  redirects and cap response bodies before accumulation. The modern JSON
+  `config.creditUsagePercent` and typed `currentPeriod` yield the included
+  weekly or monthly window. Deprecated included `monthlyLimit`/`used` fields
+  are considered only when modern fields are absent. Present-invalid modern
+  evidence never falls back to a guessed balance. Prepaid, on-demand, product
+  breakdowns and history never increase remaining included quota.
+  This follows the [pinned first-party billing client](https://github.com/xai-org/grok-build/blob/72a61251fcffb464bcc687aeb5a998e5a98ec0c9/crates/codegen/xai-grok-shell/src/extensions/billing.rs).
+- A plan name requires provider metadata. Missing plan evidence remains unknown.
+  The old gRPC parser stays covered by historical fixtures, but runtime failures
+  do not fall back to that transport. There is no inference or usage-token cost.
 - Not monotonic: xAI can revise the pool percent downward mid-window without a
   reset (observed live: 100 to 73 under the same reset time, consistent with
   re-rated compute charges or a grown allowance). quotabot mirrors the number
   Grok's own usage page shows; burn analytics treat a decrease as recovery, so
   it cannot poison burn-rate or runway estimates.
-- Multi-account: every account object in `auth.json` is read. quotabot tries the
-  matching account-scoped grant before the provider-default grant (primary
-  account only) or that account's CLI token, and successful reads are cached per
-  account.
+- Billing and optional user discovery have separate persistent cooldown scopes.
+  A quota-endpoint throttle is not evidence that included quota is spent.
 
 ## Antigravity (Google)
 
@@ -429,11 +441,10 @@ Antigravity can run two ways:
   Google's userinfo endpoint after OAuth exchange. Rotated refresh tokens are
   persisted on every refresh.
 
-Connected grants do not replace provider account discovery. Grok still
-discovers accounts from its local auth file, and Antigravity discovers accounts
-from local IDE/profile state. Run the provider on this machine first and retain
-that local identity state; a quotabot grant is selected only after a matching
-account has been discovered.
+Grok can discover stamped quotabot grants independently, then verifies their
+principal through provider metadata. Antigravity discovers accounts through its
+supported IDE, CLI/keyring and grant paths. A grant's saved account label never
+proves that it may reuse another credential's quota pool.
 
 `quotabot logout` is a provider-wide local disconnect, not a host-app logout. It
 removes quotabot-owned grants and records an owner-only marker that makes all

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/registry.dart';
 import 'package:quotabot_collector/util.dart';
@@ -140,6 +142,13 @@ class _LocalModelDetailsDialogState extends State<LocalModelDetailsDialog> {
                         : _ModelDetail(
                             entry: _entries[index - 1],
                             chrome: chrome,
+                            inventoryCurrent:
+                                isLocalRuntimeReachableAt(
+                                  widget.quota,
+                                  widget.now,
+                                ) &&
+                                widget.quota.error == null &&
+                                widget.quota.driftReason == null,
                           ),
                   ),
                 ),
@@ -238,13 +247,20 @@ class _LocalModelDetailsDialogState extends State<LocalModelDetailsDialog> {
 class _ModelDetail extends StatelessWidget {
   final ModelEntry entry;
   final AppChromeTheme chrome;
+  final bool inventoryCurrent;
 
-  const _ModelDetail({required this.entry, required this.chrome});
+  const _ModelDetail({
+    required this.entry,
+    required this.chrome,
+    required this.inventoryCurrent,
+  });
 
   @override
   Widget build(BuildContext context) {
     final model = entry.model;
-    final lastObserved = entry.stale || !entry.available;
+    // Request admission and generation eligibility do not age an otherwise
+    // current metadata observation or prove that its runtime is unreachable.
+    final lastObserved = !inventoryCurrent;
     final upstream = model.upstreamRouting;
     final residency = upstream != UpstreamRouting.notReported
         ? model.loaded
@@ -254,6 +270,7 @@ class _ModelDetail extends StatelessWidget {
         ? 'Loaded'
         : 'Cold';
     final exclusions = <String>[
+      ?requestAdmissionDetail(entry.requestAdmission),
       if (model.cloudOffloaded)
         'Cloud-offloaded. Excluded from local and quota budgets.',
       if (upstream == UpstreamRouting.declared && !model.cloudOffloaded)
@@ -267,7 +284,7 @@ class _ModelDetail extends StatelessWidget {
         'Stale inventory. Excluded from routing.'
       else if (entry.driftReason != null)
         'Untrusted inventory. Excluded from routing.'
-      else if (!entry.available && upstream != UpstreamRouting.unresolved)
+      else if (!inventoryCurrent)
         'Runtime unavailable. Excluded from routing.',
     ];
     final contextLabel = model.contextTokens == null
@@ -320,7 +337,7 @@ class _ModelDetail extends StatelessWidget {
               'Reported GPU memory: ${formatCompactBytes(model.vramBytes!)}',
             ),
           const SizedBox(height: 6),
-          _line(_fitLabel(entry)),
+          _line(_fitLabel(entry, lastObserved: lastObserved)),
           for (final exclusion in exclusions) ...[
             const SizedBox(height: 4),
             _line(exclusion, emphasized: true),
@@ -353,7 +370,7 @@ String _reasoningLabel(String? value) {
   return label.toLowerCase() == 'reasoning' ? 'supported' : label;
 }
 
-String _fitLabel(ModelEntry entry) {
+String _fitLabel(ModelEntry entry, {required bool lastObserved}) {
   if (entry.model.cloudOffloaded) {
     return 'Advisory host fit: not applicable to cloud execution.';
   }
@@ -361,9 +378,7 @@ String _fitLabel(ModelEntry entry) {
     return 'Advisory host fit: unavailable for upstream configuration.';
   }
   final fit = entry.hardwareFit;
-  final prefix = entry.stale || !entry.available
-      ? 'Last observed advisory fit'
-      : 'Advisory fit';
+  final prefix = lastObserved ? 'Last observed advisory fit' : 'Advisory fit';
   if (fit == null || fit.status == LocalHardwareFitStatus.unknown) {
     return '$prefix: unknown. Model size or host memory evidence is incomplete.';
   }

@@ -78,7 +78,7 @@ void main() {
         providerFailureSummary(
           failure(pipeHealth: providerPipeHealthThrottled),
         ),
-        'provider slow - retrying',
+        'quota check delayed',
       );
       expect(
         providerFailureSummary(
@@ -88,7 +88,7 @@ void main() {
             retryAfterSeconds: 120,
           ),
         ),
-        'rate limited - retrying in 2m',
+        'quota check rate limited',
       );
       expect(
         providerFailureSummary(
@@ -99,7 +99,7 @@ void main() {
           ),
           showingLastKnown: true,
         ),
-        'provider error - retrying in 45s, showing last known',
+        'quota service error, showing last known',
       );
     });
 
@@ -151,7 +151,7 @@ void main() {
             httpStatus: 200,
           ),
         ),
-        'rate limited - retrying',
+        'quota check rate limited',
       );
     });
 

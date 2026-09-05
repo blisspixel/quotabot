@@ -1316,7 +1316,7 @@ void main() {
       );
       final detail = desktopProviderTrustDetail(degraded, now);
 
-      expect(detail, contains('provider error - retrying in 45s'));
+      expect(detail, contains('quota service error'));
       expect(detail, isNot(contains('throttled')));
     });
 

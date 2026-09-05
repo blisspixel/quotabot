@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,10 +7,12 @@ import 'package:http/http.dart' as http;
 import '../auth/anthropic_auth.dart';
 import '../auth/provider_disconnect.dart';
 import '../auth/tokens.dart';
+import '../credential_pool_store.dart';
 import '../http_client.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
+import '../provider_read_gate.dart';
 import '../util.dart';
 
 /// Fetches a fresh access token from quotabot's own Claude grant, or null when
@@ -53,14 +56,14 @@ class ClaudeAdapter {
   static const _profileDeadline = Duration(seconds: 4);
   static const _maxProfileBodyBytes = 64 * 1024;
   static const _duplicateFallbackDeadline = Duration(seconds: 8);
-  static const _maxRememberedPoolIdentities = 32;
-  static final Map<String, String> _poolByCredential = {};
+  static final _poolStore = CredentialPoolStore(id);
 
   final http.Client? _http;
   final File? _credentialsFile;
   final ClaudeGrantCredential _grantCredential;
   final bool Function()? _disconnectReader;
   final Duration _grantResolutionDeadline;
+  final ProviderReadGate _readGate;
 
   ClaudeAdapter({
     http.Client? client,
@@ -68,6 +71,7 @@ class ClaudeAdapter {
     ClaudeGrantToken? grantToken,
     ClaudeGrantCredential? grantCredential,
     bool Function()? disconnectReader,
+    ProviderReadGate? readGate,
     Duration grantResolutionDeadline = const Duration(seconds: 8),
   })  : assert(
           grantToken == null || grantCredential == null,
@@ -77,6 +81,7 @@ class ClaudeAdapter {
         _http = client,
         _credentialsFile = credentialsFile,
         _disconnectReader = disconnectReader,
+        _readGate = readGate ?? ProviderReadGate(),
         _grantResolutionDeadline = grantResolutionDeadline,
         _grantCredential = grantCredential ??
             (grantToken != null
@@ -240,7 +245,7 @@ class ClaudeAdapter {
       final results = _safeAccountRows(outcomes, asOf);
       final indexedGrantAccount = indexedGrantIdentity == null
           ? null
-          : _accountForCredential(indexedGrantIdentity);
+          : _cachedAccountForCredential(indexedGrantIdentity);
       if (grantOutcomeFuture == null &&
           isOpaqueCredentialIdentity(indexedGrantIdentity) &&
           !results.any((quota) => quota.account == indexedGrantAccount) &&
@@ -360,23 +365,91 @@ class ClaudeAdapter {
     int asOf, {
     Duration timeout = const Duration(seconds: 10),
   }) async {
-    final knownAccount = _accountForCredential(credential.identity);
+    final knownAccount = _cachedAccountForCredential(credential.identity);
     // Profile metadata is a zero-cost provider read using the same credential.
     // Start it alongside usage so stable account-pool identity and current plan
     // proof add no serial network round trip. Await it on every path so a bad
     // usage body still keys last-known cache by the same pool as a live read.
     final profileFuture = _readProfile(credential, asOf);
 
+    return _readGate.run<_ReadOutcome>(
+      provider: id,
+      credentialIdentity: credential.identity,
+      purpose: ProviderReadPurpose.usage,
+      attempt: (operation) => _readUsage(
+        credential,
+        fallbackPlanEvidence,
+        asOf,
+        profileFuture,
+        operation,
+        timeout: timeout,
+      ),
+      classify: (outcome) {
+        if (outcome.quota != null || outcome.unauthorized) {
+          return const ProviderReadDisposition.completed();
+        }
+        final error = outcome.error!;
+        final status = error.httpStatus;
+        if (status != null) {
+          return ProviderReadDisposition.httpFailure(
+            status,
+            retryAfterSeconds: error.retryAfterSeconds,
+          );
+        }
+        return ProviderReadDisposition.failed(
+          error.pipeHealth == providerPipeHealthThrottled
+              ? ProviderReadFailure.timedOut
+              : ProviderReadFailure.unavailable,
+        );
+      },
+      deferred: (deferral) => _finishReadError(
+        profileFuture,
+        credential: credential,
+        knownAccount: knownAccount,
+        fallbackPlanEvidence: fallbackPlanEvidence,
+        asOf: asOf,
+        message: switch (deferral.reason) {
+          ProviderReadDeferralReason.cooldown => 'Claude usage read deferred',
+          ProviderReadDeferralReason.busy =>
+            'Claude usage read already in progress',
+          ProviderReadDeferralReason.storageUnavailable =>
+            'Claude usage read coordination unavailable',
+          ProviderReadDeferralReason.failed => 'unable to read Claude usage',
+        },
+        httpStatus: deferral.httpStatus,
+        retryAfterSeconds: deferral.retryAfterSeconds,
+        pipeHealth: switch (deferral.failure) {
+          ProviderReadFailure.rateLimited ||
+          ProviderReadFailure.timedOut =>
+            providerPipeHealthThrottled,
+          ProviderReadFailure.serviceUnavailable => providerPipeHealthDegraded,
+          _ => null,
+        },
+      ),
+    );
+  }
+
+  Future<_ReadOutcome> _readUsage(
+    ClaudeCredential credential,
+    _PlanEvidence? fallbackPlanEvidence,
+    int asOf,
+    Future<_ProfileEvidence?> profileFuture,
+    ProviderReadOperation operation, {
+    required Duration timeout,
+  }) async {
+    final knownAccount = _cachedAccountForCredential(credential.identity);
+
     Future<http.Response> getUsage() {
-      final get = _http?.get ?? sharedHttpClient.get;
-      return get(
+      return operation.get(
+        _http ?? sharedHttpClient,
         Uri.parse(_endpoint),
         headers: {
           'Authorization': 'Bearer ${credential.accessToken}',
           'anthropic-beta': 'oauth-2025-04-20',
           'anthropic-version': '2023-06-01',
         },
-      ).timeout(timeout);
+        timeout: timeout,
+      );
     }
 
     Future<_ReadOutcome> fail({
@@ -400,58 +473,56 @@ class ClaudeAdapter {
       );
     }
 
-    http.Response resp;
-    try {
-      resp = await getUsage();
-    } catch (e) {
-      final health = providerPipeHealthForReadError(e);
-      return fail(
-        message: health == providerPipeHealthThrottled
-            ? 'Claude usage read timed out'
-            : 'unable to read Claude usage',
-        pipeHealth: health,
-      );
-    }
-
-    if (resp.statusCode == 401) {
-      return fail(
-        message: 'token expired (re-run claude, or quotabot login claude)',
-        unauthorized: true,
-        httpStatus: resp.statusCode,
-      );
-    }
-    if (resp.statusCode != 200) {
-      final retryAfter =
-          retryAfterSeconds(resp.headers['retry-after'], now: asOf);
-      return fail(
-        message: 'HTTP ${resp.statusCode}',
-        pipeHealth: providerPipeHealthForHttpStatus(resp.statusCode),
-        httpStatus: resp.statusCode,
-        retryAfter: retryAfter,
-      );
-    }
-
-    var decoded = _decodeClaudeUsageMap(resp.body);
-    var usage =
-        decoded == null ? null : claudeLiveUsage(decoded, observedAt: asOf);
-    if (usage == null) {
+    Map<String, dynamic>? decoded;
+    ClaudeLiveUsage? usage;
+    // Only an unusable successful body earns one parse retry. Classify both
+    // attempts identically so the second response retains its auth, throttle,
+    // service or timeout evidence instead of becoming a parsing failure.
+    for (var attempt = 0; attempt < 2; attempt++) {
+      http.Response resp;
       try {
-        final retry = await getUsage();
-        if (retry.statusCode == 200) {
-          decoded = _decodeClaudeUsageMap(retry.body);
-          usage = decoded == null
-              ? null
-              : claudeLiveUsage(decoded, observedAt: asOf);
-        }
-      } catch (_) {}
+        resp = await getUsage();
+      } catch (e) {
+        final health = providerPipeHealthForReadError(e);
+        return fail(
+          message: health == providerPipeHealthThrottled
+              ? 'Claude usage read timed out'
+              : 'unable to read Claude usage',
+          pipeHealth: health,
+        );
+      }
+
+      if (resp.statusCode == 401) {
+        return fail(
+          message: 'token expired (re-run claude, or quotabot login claude)',
+          unauthorized: true,
+          httpStatus: resp.statusCode,
+        );
+      }
+      if (resp.statusCode != 200) {
+        final retryAfter =
+            retryAfterSeconds(resp.headers['retry-after'], now: asOf);
+        return fail(
+          message: 'HTTP ${resp.statusCode}',
+          pipeHealth: providerPipeHealthForHttpStatus(resp.statusCode),
+          httpStatus: resp.statusCode,
+          retryAfter: retryAfter,
+        );
+      }
+
+      decoded = _decodeClaudeUsageMap(resp.body);
+      usage =
+          decoded == null ? null : claudeLiveUsage(decoded, observedAt: asOf);
+      if (usage != null) break;
     }
     if (decoded == null || usage == null) {
       return fail(message: 'invalid Claude usage response');
     }
 
     final profile = await profileFuture;
-    final poolIdentity = profile?.poolIdentity ??
-        _poolIdentityForCredential(credential.identity);
+    // Only this read's profile proves a live pool. A stored association can
+    // recover stale cache after failure, never identify an unproved success.
+    final poolIdentity = profile?.poolIdentity;
     final account = poolIdentity ?? credential.identity;
     final planEvidence = decoded.containsKey('subscription_type')
         ? _providerPlanEvidence(decoded, asOf)
@@ -486,15 +557,15 @@ class ClaudeAdapter {
     int? retryAfterSeconds,
   }) async {
     final profile = await profileFuture;
-    final poolIdentity = profile?.poolIdentity ??
-        _poolIdentityForCredential(credential.identity);
+    final poolIdentity = profile?.poolIdentity;
+    final cachedPool = _poolStore.lookup(credential.identity)?.pool;
     final plan = profile?.planEvidence ?? fallbackPlanEvidence;
     final error = ProviderQuota.error(
       id,
       name,
       message,
       asOf,
-      account: poolIdentity ?? knownAccount,
+      account: poolIdentity ?? cachedPool ?? knownAccount,
       plan: plan?.plan,
       planEvidenceSource: plan?.source,
       planEvidenceAsOf: plan?.asOf,
@@ -511,33 +582,80 @@ class ClaudeAdapter {
     ClaudeCredential credential,
     int asOf,
   ) async {
-    try {
-      final get = _http?.get ?? sharedHttpClient.get;
-      final response = await get(
-        Uri.parse(_profileEndpoint),
-        headers: {
-          'Authorization': 'Bearer ${credential.accessToken}',
-          'Content-Type': 'application/json',
-          'anthropic-beta': 'oauth-2025-04-20',
-          'anthropic-version': '2023-06-01',
-        },
-      ).timeout(_profileDeadline);
-      if (response.statusCode != 200 ||
-          response.bodyBytes.length > _maxProfileBodyBytes) {
-        return null;
-      }
-      final decoded = jsonDecode(
-        utf8.decode(response.bodyBytes, allowMalformed: false),
+    final result = await _readGate.run<_ProfileReadOutcome>(
+      provider: id,
+      credentialIdentity: credential.identity,
+      purpose: ProviderReadPurpose.profile,
+      attempt: (operation) async {
+        final requestStartedAtMicros = DateTime.now().microsecondsSinceEpoch;
+        try {
+          final response = await operation.get(
+            _http ?? sharedHttpClient,
+            Uri.parse(_profileEndpoint),
+            headers: {
+              'Authorization': 'Bearer ${credential.accessToken}',
+              'Content-Type': 'application/json',
+              'anthropic-beta': 'oauth-2025-04-20',
+              'anthropic-version': '2023-06-01',
+            },
+            timeout: _profileDeadline,
+          );
+          if (response.statusCode != 200) {
+            return _ProfileReadOutcome(
+              null,
+              // A fresh access token for the same authorized credential can
+              // recover a 401. A 429 or 403 never earns that immediate retry.
+              response.statusCode == 401
+                  ? const ProviderReadDisposition.completed()
+                  : ProviderReadDisposition.httpFailure(
+                      response.statusCode,
+                      retryAfterSeconds: retryAfterSeconds(
+                        response.headers['retry-after'],
+                        now: asOf,
+                      ),
+                    ),
+            );
+          }
+          if (response.bodyBytes.length > _maxProfileBodyBytes) {
+            return const _ProfileReadOutcome.unavailable();
+          }
+          final decoded = jsonDecode(
+            utf8.decode(response.bodyBytes, allowMalformed: false),
+          );
+          if (decoded is! Map<String, dynamic>) {
+            return const _ProfileReadOutcome.unavailable();
+          }
+          final evidence = _profileEvidence(decoded, asOf);
+          return evidence == null
+              ? const _ProfileReadOutcome.unavailable()
+              : _ProfileReadOutcome(
+                  evidence,
+                  const ProviderReadDisposition.completed(),
+                  observedAtMicros: requestStartedAtMicros,
+                );
+        } catch (error) {
+          return _ProfileReadOutcome(
+            null,
+            ProviderReadDisposition.failed(
+              error is TimeoutException
+                  ? ProviderReadFailure.timedOut
+                  : ProviderReadFailure.unavailable,
+            ),
+          );
+        }
+      },
+      classify: (result) => result.disposition,
+      deferred: (_) => const _ProfileReadOutcome.unavailable(),
+    );
+    final evidence = result.evidence;
+    if (evidence != null) {
+      _poolStore.remember(
+        credential.identity,
+        evidence.poolIdentity,
+        observedAtMicros: result.observedAtMicros!,
       );
-      if (decoded is! Map<String, dynamic>) return null;
-      final evidence = _profileEvidence(decoded, asOf);
-      if (evidence != null) {
-        _rememberPoolIdentity(credential.identity, evidence.poolIdentity);
-      }
-      return evidence;
-    } catch (_) {
-      return null;
     }
+    return evidence;
   }
 
   /// Reads the host access token and its freshness from the Claude Code
@@ -556,50 +674,33 @@ class ClaudeAdapter {
   /// can detect duplicate live subscription pools.
   static Set<String> get currentAccounts => currentCredentialIdentities();
 
-  static Set<String> currentCredentialIdentities({File? credentialsFile}) {
+  static Set<String> currentCredentialIdentities({File? credentialsFile}) =>
+      currentCredentialGenerations(credentialsFile: credentialsFile)
+          .map(_cachedAccountForCredential)
+          .toSet();
+
+  /// Exact credential generations currently configured, without pool aliases.
+  /// Used only to prevent a fresh unproved read acquiring a duplicate stale row.
+  static Set<String> currentCredentialGenerations({File? credentialsFile}) {
     if (ProviderDisconnectStore.isDisconnected(id)) return const {};
     final found = <String>{};
     final host = _readHostCredentialFile(
       credentialsFile ?? File('${home()}/.claude/.credentials.json'),
     );
     if (host != null) {
-      found.add(_accountForCredential(host.identity));
+      found.add(host.identity);
     }
     final grant = AnthropicAuth.currentCredentialIdentity();
     if (isOpaqueCredentialIdentity(grant)) {
-      found.add(_accountForCredential(grant!));
+      found.add(grant!);
     }
     return found;
   }
 
-  /// Clears the in-memory credential-to-pool index between isolated tests.
-  /// Production code must never call this method.
-  static void resetPoolIdentityMemoryForTesting() {
-    var assertsEnabled = false;
-    assert(() {
-      assertsEnabled = true;
-      return true;
-    }());
-    if (!assertsEnabled) {
-      throw StateError('pool identity reset is testing-only');
-    }
-    _poolByCredential.clear();
-  }
-
-  static String? _poolIdentityForCredential(String identity) =>
-      _poolByCredential[identity];
-
-  static String _accountForCredential(String identity) =>
-      _poolIdentityForCredential(identity) ?? identity;
-
-  static void _rememberPoolIdentity(String credential, String pool) {
-    if (_poolByCredential[credential] == pool) return;
-    _poolByCredential.remove(credential);
-    while (_poolByCredential.length >= _maxRememberedPoolIdentities) {
-      _poolByCredential.remove(_poolByCredential.keys.first);
-    }
-    _poolByCredential[credential] = pool;
-  }
+  /// This label is for failed-read cache lookup and current-account discovery.
+  /// Successful reads require their own profile evidence to claim a pool.
+  static String _cachedAccountForCredential(String identity) =>
+      _poolStore.lookup(identity)?.pool ?? identity;
 
   static _HostCredential? _readHostCredentialFile(File credFile) {
     if (!credFile.existsSync()) return null;
@@ -785,6 +886,22 @@ String? _boundedPlanLabel(Object? value) {
     return null;
   }
   return plan;
+}
+
+class _ProfileReadOutcome {
+  final _ProfileEvidence? evidence;
+  final ProviderReadDisposition disposition;
+  final int? observedAtMicros;
+
+  const _ProfileReadOutcome(this.evidence, this.disposition,
+      {this.observedAtMicros});
+
+  const _ProfileReadOutcome.unavailable()
+      : evidence = null,
+        observedAtMicros = null,
+        disposition = const ProviderReadDisposition.failed(
+          ProviderReadFailure.unavailable,
+        );
 }
 
 class _ReadOutcome {

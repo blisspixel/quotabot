@@ -9,6 +9,7 @@ import 'package:quotabot_collector/auth/provider_disconnect.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/provider_adapters.dart';
+import 'package:quotabot_collector/provider_read_gate.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
@@ -16,11 +17,20 @@ void main() {
   const hostRefreshToken = 'host-refresh-token';
   late Directory temp;
   late File credentials;
+  late ProviderReadGate readGate;
+  late int gateNow;
 
   setUp(() {
-    ClaudeAdapter.resetPoolIdentityMemoryForTesting();
     temp = Directory.systemTemp.createTempSync('quotabot_claude_adapter_');
     setQuotabotDirOverrideForTesting(Directory('${temp.path}/quotabot'));
+    gateNow = nowEpoch();
+    readGate = ProviderReadGate(
+      directory: Directory('${temp.path}/read-gates'),
+      clock: () => gateNow,
+      jitter: (_) => 0,
+      hardenDirectory: (_) {},
+      hardenFile: (_) {},
+    );
     credentials = File('${temp.path}/credentials.json');
     credentials.writeAsStringSync(jsonEncode({
       'claudeAiOauth': {
@@ -53,6 +63,7 @@ void main() {
     var grantReads = 0;
     var networkReads = 0;
     final quotas = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       disconnectReader: () => true,
       grantToken: () async {
@@ -71,8 +82,160 @@ void main() {
     expect(networkReads, 0);
   });
 
+  test(
+      'profile cooldown preserves healthy usage without fresh profile evidence',
+      () async {
+    credentials.deleteSync();
+    var profiles = 0;
+    var usages = 0;
+    final identity =
+        opaqueCredentialIdentity('claude', 'profile-cooldown-grant');
+    final adapter = ClaudeAdapter(
+      readGate: readGate,
+      credentialsFile: credentials,
+      grantCredential: () async => ClaudeCredential(
+        accessToken: 'synthetic-access',
+        identity: identity,
+      ),
+      client: MockClient((request) async {
+        if (_isProfileRequest(request)) {
+          profiles++;
+          return profiles == 1
+              ? http.Response('{}', 429, headers: {'retry-after': '120'})
+              : http.Response(
+                  _profileBody(
+                    accountUuid: 'profile-recovered',
+                    hasMax: true,
+                  ),
+                  200);
+        }
+        usages++;
+        return http.Response(_usageBody(), 200);
+      }),
+    );
+    for (final elapsed in [0, 30, 89]) {
+      gateNow += elapsed;
+      final quota = await adapter.collect();
+      expect(quota.ok, isTrue);
+      expect(quota.account, identity);
+      expect(quota.plan, isNull);
+      expect(quota.planEvidenceSource, isNull);
+    }
+    expect(profiles, 1);
+    expect(usages, 3);
+    gateNow++;
+    final recovered = await adapter.collect();
+    expect(recovered.ok, isTrue);
+    expect(recovered.account, profileIdentity('profile-recovered'));
+    expect(recovered.plan, 'max');
+    expect(recovered.planEvidenceSource,
+        ProviderPlanEvidenceSource.providerMetadata);
+    expect(profiles, 2);
+    expect(usages, 4);
+  });
+
+  test('profile success cannot clear usage cooldown or enable token fallback',
+      () async {
+    var profiles = 0;
+    var usages = 0;
+    var grants = 0;
+    final adapter = ClaudeAdapter(
+      readGate: readGate,
+      credentialsFile: credentials,
+      grantToken: () async {
+        grants++;
+        return 'unused-grant';
+      },
+      client: MockClient((request) async {
+        if (_isProfileRequest(request)) {
+          profiles++;
+          return http.Response(_profileBody(accountUuid: 'cooldown-pool'), 200);
+        }
+        usages++;
+        return http.Response('synthetic-private-detail', 429,
+            headers: {'retry-after': '7200'});
+      }),
+    );
+    final first = await adapter.collect();
+    expect(first.httpStatus, 429);
+    gateNow += 60;
+    final deferred = await adapter.collect();
+    expect(deferred.ok, isFalse);
+    expect(deferred.windows, isEmpty);
+    expect(deferred.account, first.account);
+    expect(deferred.httpStatus, 429);
+    expect(deferred.retryAfterSeconds, 7140);
+    expect(deferred.pipeHealth, providerPipeHealthThrottled);
+    expect(jsonEncode(deferred.toJson()),
+        isNot(contains('synthetic-private-detail')));
+    expect(profiles, 2);
+    expect(usages, 1);
+    expect(grants, 0);
+  });
+
+  test('access-token rotation keeps the same credential usage deadline',
+      () async {
+    var usageReads = 0;
+    final client = MockClient((request) async {
+      if (_isProfileRequest(request)) {
+        return http.Response(_profileBody(accountUuid: 'rotating-pool'), 200);
+      }
+      usageReads++;
+      return http.Response('{}', 503, headers: {'retry-after': '300'});
+    });
+    final first = await ClaudeAdapter(
+      readGate: readGate,
+      credentialsFile: credentials,
+      client: client,
+    ).collect();
+    final saved = jsonDecode(credentials.readAsStringSync()) as Map;
+    (saved['claudeAiOauth'] as Map)['accessToken'] = 'rotated-access';
+    credentials.writeAsStringSync(jsonEncode(saved));
+    gateNow += 20;
+    final second = await ClaudeAdapter(
+      readGate: readGate,
+      credentialsFile: credentials,
+      client: client,
+    ).collect();
+    expect(first.httpStatus, 503);
+    expect(second.httpStatus, 503);
+    expect(second.retryAfterSeconds, 280);
+    expect(second.account, first.account);
+    expect(usageReads, 1);
+  });
+
+  test(
+      'default gate stores only scoped metadata under the isolated quotabot root',
+      () async {
+    var requests = 0;
+    final adapter = ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((_) async {
+        requests++;
+        return http.Response('{}', 503, headers: {'retry-after': '300'});
+      }),
+    );
+    expect((await adapter.collect()).httpStatus, 503);
+    expect((await adapter.collect()).httpStatus, 503);
+    expect(requests, 2);
+    final gateDirectory = quotabotDir('provider_read_gates');
+    final records = gateDirectory
+        .listSync()
+        .whereType<File>()
+        .where((file) => file.path.endsWith('.json'))
+        .toList();
+    expect(records, hasLength(2));
+    for (final file in records) {
+      final wire = file.readAsStringSync();
+      expect(wire, isNot(contains('claude-token')));
+      expect(wire, isNot(contains(hostRefreshToken)));
+      expect(wire, isNot(contains(hostIdentity())));
+    }
+  });
+
   test('preserves throttled metadata from the usage endpoint', () async {
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((request) async {
         expect(request.headers['Authorization'], 'Bearer claude-token');
@@ -98,6 +261,7 @@ void main() {
       'preserves degraded metadata without treating auth failures as pipe health',
       () async {
     final degraded = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((_) async => http.Response('{}', 529)),
     ).collect();
@@ -106,7 +270,10 @@ void main() {
     expect(degraded.pipeHealth, providerPipeHealthDegraded);
     expect(degraded.httpStatus, 529);
 
+    // A new read after the cooldown can expose an auth failure.
+    gateNow += 1200;
     final expired = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((_) async => http.Response('{}', 401)),
     ).collect();
@@ -138,6 +305,7 @@ void main() {
     writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
     var grantCalled = false;
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantToken: () async {
         grantCalled = true;
@@ -169,6 +337,7 @@ void main() {
     final attempted = <String>[];
     final quotas = await collectClaudeProviderAccounts(
       ClaudeAdapter(
+        readGate: readGate,
         credentialsFile: credentials,
         grantCredential: () async => ClaudeCredential(
           accessToken: 'grant-token',
@@ -206,6 +375,7 @@ void main() {
     writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
     var requests = 0;
     final quotas = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantCredential: () async => ClaudeCredential(
         accessToken: 'duplicate-grant-token',
@@ -233,6 +403,7 @@ void main() {
     writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
     final attempted = <String>[];
     final quotas = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantCredential: () async => ClaudeCredential(
         accessToken: 'duplicate-grant-token',
@@ -266,6 +437,7 @@ void main() {
     writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
     var requests = 0;
     final quotas = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantCredential: () async => ClaudeCredential(
         accessToken: 'duplicate-grant-token',
@@ -309,6 +481,7 @@ void main() {
     final pending = Completer<ClaudeCredential?>();
     final stopwatch = Stopwatch()..start();
     final quotas = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantCredential: () => pending.future,
       grantResolutionDeadline: const Duration(milliseconds: 20),
@@ -331,6 +504,7 @@ void main() {
     final grantIdentity =
         opaqueCredentialIdentity(ClaudeAdapter.id, 'healthy-grant');
     final quotas = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantCredential: () async => ClaudeCredential(
         accessToken: 'grant-token',
@@ -353,6 +527,7 @@ void main() {
     final grantIdentity =
         opaqueCredentialIdentity(ClaudeAdapter.id, 'healthy-grant');
     final quotas = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantCredential: () async => ClaudeCredential(
         accessToken: 'grant-token',
@@ -398,6 +573,7 @@ void main() {
     );
 
     final quotas = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantCredential: () async => null,
     ).collectAccounts();
@@ -410,6 +586,7 @@ void main() {
 
   test('maps the current limits payload to live quota windows', () async {
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((_) async => http.Response(_currentUsageBody(), 200)),
     ).collect();
@@ -431,6 +608,7 @@ void main() {
     final payload = (jsonDecode(_currentUsageBody()) as Map<String, dynamic>)
       ..['subscription_type'] = 'team_premium';
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((_) async => http.Response(jsonEncode(payload), 200)),
     ).collect();
@@ -447,6 +625,7 @@ void main() {
   test('current Claude profile proves a Max plan when usage omits it',
       () async {
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((request) async => http.Response(
             _isProfileRequest(request)
@@ -470,6 +649,7 @@ void main() {
 
   test('current Claude profile proves a Team Premium plan', () async {
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((request) async => http.Response(
             _isProfileRequest(request)
@@ -513,6 +693,7 @@ void main() {
   ]) {
     test('current Claude profile proves a ${scenario.name} plan', () async {
       final q = await ClaudeAdapter(
+        readGate: readGate,
         credentialsFile: credentials,
         client: MockClient((request) async => http.Response(
               _isProfileRequest(request)
@@ -543,6 +724,7 @@ void main() {
     final payload = (jsonDecode(_currentUsageBody()) as Map<String, dynamic>)
       ..['subscription_type'] = {'unexpected': 'max'};
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((request) async => http.Response(
             _isProfileRequest(request)
@@ -565,6 +747,7 @@ void main() {
   test('same provider account collapses distinct local credentials', () async {
     writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
     final quotas = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantCredential: () async => ClaudeCredential(
         accessToken: 'grant-token',
@@ -613,6 +796,7 @@ void main() {
           200,
         ));
     final first = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: client,
     ).collect();
@@ -623,6 +807,7 @@ void main() {
       refreshToken: 'host-refresh-b',
     );
     final second = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: client,
     ).collect();
@@ -638,6 +823,7 @@ void main() {
     final grantIdentity =
         opaqueCredentialIdentity(ClaudeAdapter.id, 'distinct-grant');
     final quotas = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantCredential: () async => ClaudeCredential(
         accessToken: 'grant-token',
@@ -669,6 +855,7 @@ void main() {
     final grantIdentity =
         opaqueCredentialIdentity(ClaudeAdapter.id, 'unidentified-grant');
     final quotas = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantCredential: () async => ClaudeCredential(
         accessToken: 'grant-token',
@@ -691,6 +878,7 @@ void main() {
     final grantIdentity =
         opaqueCredentialIdentity(ClaudeAdapter.id, 'failed-grant');
     final quotas = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantCredential: () async => ClaudeCredential(
         accessToken: 'grant-token',
@@ -713,6 +901,7 @@ void main() {
     const rawAccount = 'account-secret';
     const rawOrganization = 'organization-secret';
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((request) async => http.Response(
             _isProfileRequest(request)
@@ -742,6 +931,7 @@ void main() {
       (row) => row is Map && row['kind'] == 'weekly_all',
     );
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((_) async => http.Response(jsonEncode(body), 200)),
     ).collect();
@@ -764,6 +954,7 @@ void main() {
       },
     });
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((_) async => http.Response(jsonEncode(body), 200)),
     ).collect();
@@ -782,6 +973,7 @@ void main() {
         'resets_at': 'not-a-date',
       };
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((_) async => http.Response(jsonEncode(body), 200)),
     ).collect();
@@ -793,6 +985,7 @@ void main() {
 
   test('an unusable 200 usage body uses the profile pool identity', () async {
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((request) async => http.Response(
             _isProfileRequest(request)
@@ -810,6 +1003,7 @@ void main() {
   test('retries one unusable 200 usage body', () async {
     var usageCalls = 0;
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((request) async {
         if (_isProfileRequest(request)) {
@@ -832,6 +1026,193 @@ void main() {
     expect(q.account, profileIdentity('account-host'));
   });
 
+  for (final firstBodyUnusable in [false, true]) {
+    for (final status in [429, 403, 503]) {
+      test(
+          '${firstBodyUnusable ? 'second' : 'first'} usage HTTP $status '
+          'preserves diagnostics without retrying or using a duplicate grant',
+          () async {
+        writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+        final attempted = <String>[];
+        var profileCalls = 0;
+        final quotas = await collectClaudeProviderAccounts(
+          ClaudeAdapter(
+            readGate: readGate,
+            credentialsFile: credentials,
+            grantCredential: () async => ClaudeCredential(
+              accessToken: 'duplicate-grant-token',
+              identity: hostIdentity(),
+            ),
+            client: MockClient((request) async {
+              expect(request.headers['Authorization'], 'Bearer host-token');
+              if (_isProfileRequest(request)) {
+                profileCalls++;
+                return http.Response(
+                  _profileBody(accountUuid: 'account-shared', hasMax: true),
+                  200,
+                );
+              }
+              attempted.add(request.headers['Authorization']!);
+              if (firstBodyUnusable && attempted.length == 1) {
+                return http.Response('<html>temporary response</html>', 200);
+              }
+              return http.Response(
+                'untrusted response body',
+                status,
+                headers: {'retry-after': '120'},
+              );
+            }),
+          ),
+        );
+
+        final quota = quotas.single;
+        expect(attempted,
+            List.filled(firstBodyUnusable ? 2 : 1, 'Bearer host-token'));
+        expect(profileCalls, 1);
+        expect(quota.ok, isFalse);
+        expect(quota.hasWindows, isFalse);
+        expect(quota.error, 'HTTP $status');
+        expect(quota.httpStatus, status);
+        expect(quota.retryAfterSeconds, 120);
+        expect(
+            quota.pipeHealth,
+            switch (status) {
+              429 => providerPipeHealthThrottled,
+              503 => providerPipeHealthDegraded,
+              _ => null,
+            });
+        expect(quota.account, profileIdentity('account-shared'));
+        expect(quota.plan, 'max');
+        expect(jsonEncode(quota.toJson()),
+            isNot(contains('untrusted response body')));
+      });
+    }
+  }
+
+  test('second usage 401 allows the authorized duplicate credential fallback',
+      () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    final attempted = <String>[];
+    final quotas = await collectClaudeProviderAccounts(
+      ClaudeAdapter(
+        readGate: readGate,
+        credentialsFile: credentials,
+        grantCredential: () async => ClaudeCredential(
+          accessToken: 'duplicate-grant-token',
+          identity: hostIdentity(),
+        ),
+        client: MockClient((request) async {
+          if (_isProfileRequest(request)) {
+            return http.Response(
+              _profileBody(accountUuid: 'account-shared', hasMax: true),
+              200,
+            );
+          }
+          final authorization = request.headers['Authorization']!;
+          attempted.add(authorization);
+          if (authorization == 'Bearer duplicate-grant-token') {
+            return http.Response(_usageBody(), 200);
+          }
+          return http.Response('{}', attempted.length == 1 ? 200 : 401);
+        }),
+      ),
+    );
+
+    expect(attempted, [
+      'Bearer host-token',
+      'Bearer host-token',
+      'Bearer duplicate-grant-token',
+    ]);
+    expect(quotas.single.ok, isTrue);
+    expect(quotas.single.hasWindows, isTrue);
+    expect(quotas.single.account, profileIdentity('account-shared'));
+    expect(quotas.single.httpStatus, isNull);
+  });
+
+  test('second usage 401 remains an authentication error without a fallback',
+      () async {
+    var usageCalls = 0;
+    final quota = await ClaudeAdapter(
+      readGate: readGate,
+      credentialsFile: credentials,
+      grantToken: () async => null,
+      client: MockClient((request) async {
+        if (_isProfileRequest(request)) {
+          return http.Response(_profileBody(accountUuid: 'account-host'), 200);
+        }
+        usageCalls++;
+        return http.Response('{}', usageCalls == 1 ? 200 : 401);
+      }),
+    ).collect();
+
+    expect(usageCalls, 2);
+    expect(quota.ok, isFalse);
+    expect(quota.error, contains('token expired'));
+    expect(quota.httpStatus, 401);
+    expect(quota.pipeHealth, isNull);
+    expect(quota.account, profileIdentity('account-host'));
+  });
+
+  test('second usage timeout remains a slow read without credential fallback',
+      () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    var usageCalls = 0;
+    final quotas = await collectClaudeProviderAccounts(
+      ClaudeAdapter(
+        readGate: readGate,
+        credentialsFile: credentials,
+        grantCredential: () async => ClaudeCredential(
+          accessToken: 'duplicate-grant-token',
+          identity: hostIdentity(),
+        ),
+        client: MockClient((request) async {
+          expect(request.headers['Authorization'], 'Bearer host-token');
+          if (_isProfileRequest(request)) {
+            return http.Response(
+                _profileBody(accountUuid: 'account-shared'), 200);
+          }
+          usageCalls++;
+          if (usageCalls == 1) return http.Response('{}', 200);
+          throw TimeoutException('untrusted exception detail');
+        }),
+      ),
+    );
+
+    final quota = quotas.single;
+    expect(usageCalls, 2);
+    expect(quota.ok, isFalse);
+    expect(quota.error, 'Claude usage read timed out');
+    expect(quota.pipeHealth, providerPipeHealthThrottled);
+    expect(quota.httpStatus, isNull);
+    expect(quota.retryAfterSeconds, isNull);
+    expect(quota.account, profileIdentity('account-shared'));
+    expect(jsonEncode(quota.toJson()),
+        isNot(contains('untrusted exception detail')));
+  });
+
+  test('two unusable 200 usage bodies stop after one parse retry', () async {
+    var usageCalls = 0;
+    final quota = await ClaudeAdapter(
+      readGate: readGate,
+      credentialsFile: credentials,
+      grantToken: () async => null,
+      client: MockClient((request) async {
+        if (_isProfileRequest(request)) {
+          return http.Response(_profileBody(accountUuid: 'account-host'), 200);
+        }
+        usageCalls++;
+        return http.Response('{}', 200);
+      }),
+    ).collect();
+
+    expect(usageCalls, 2);
+    expect(quota.ok, isFalse);
+    expect(quota.error, 'invalid Claude usage response');
+    expect(quota.httpStatus, isNull);
+    expect(quota.pipeHealth, isNull);
+    expect(quota.retryAfterSeconds, isNull);
+  });
+
   test('host identity is opaque and stable across access-token rotation',
       () async {
     writeCreds(
@@ -840,6 +1221,7 @@ void main() {
     );
     final client = MockClient((_) async => http.Response(_usageBody(), 200));
     final first = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: client,
     ).collect();
@@ -849,6 +1231,7 @@ void main() {
       accessToken: 'host-access-b',
     );
     final second = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: client,
     ).collect();
@@ -867,6 +1250,7 @@ void main() {
       refreshToken: 'host-grant-a',
     );
     final first = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: client,
     ).collect();
@@ -876,6 +1260,7 @@ void main() {
       refreshToken: 'host-grant-b',
     );
     final second = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: client,
     ).collect();
@@ -891,6 +1276,7 @@ void main() {
     credentials.deleteSync();
     final client = MockClient((_) async => http.Response(_usageBody(), 200));
     Future<ProviderQuota> read(String token) => ClaudeAdapter(
+          readGate: readGate,
           credentialsFile: credentials,
           grantToken: () async => token,
           client: client,
@@ -917,6 +1303,7 @@ void main() {
 
   test('network failures retain the attempted credential identity', () async {
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       client: MockClient((_) async => throw StateError('offline')),
     ).collect();
@@ -930,6 +1317,7 @@ void main() {
       () async {
     writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantToken: () async => throw StateError('grant refresh unavailable'),
       client: MockClient((request) async {
@@ -947,6 +1335,7 @@ void main() {
       () async {
     credentials.writeAsStringSync('{not valid json');
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantToken: () async => 'grant-token',
       client: MockClient((request) async {
@@ -963,6 +1352,7 @@ void main() {
   test('falls through to the grant when the host token is expired', () async {
     writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantToken: () async => 'grant-token',
       client: MockClient((request) async {
@@ -982,6 +1372,7 @@ void main() {
     writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
     final tried = <String>[];
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantToken: () async => 'grant-token',
       client: MockClient((request) async {
@@ -1002,6 +1393,7 @@ void main() {
       () async {
     writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantToken: () async => throw StateError('grant store unavailable'),
       client: MockClient((request) async {
@@ -1019,6 +1411,7 @@ void main() {
     writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
     final tried = <String>[];
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantToken: () async => 'grant-token',
       client: MockClient((request) async {
@@ -1038,6 +1431,7 @@ void main() {
   test('independent grant never borrows failed host identity', () async {
     writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantToken: () async => 'other-account-grant',
       client: MockClient((request) async {
@@ -1064,6 +1458,7 @@ void main() {
   test('points at both recovery paths when expired with no grant', () async {
     writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantToken: () async => null,
       client: MockClient((_) async => http.Response('{}', 401)),
@@ -1078,6 +1473,7 @@ void main() {
       () async {
     writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
     final q = await ClaudeAdapter(
+      readGate: readGate,
       credentialsFile: credentials,
       grantToken: () async => null,
       client: MockClient((_) async => http.Response(

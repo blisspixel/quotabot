@@ -31,9 +31,11 @@ class _FakeTimer implements Timer {
 
 class _TimerHarness {
   final timers = <_FakeTimer>[];
+  final delays = <Duration>[];
 
   Timer create(Duration delay, void Function() callback) {
     final timer = _FakeTimer(callback);
+    delays.add(delay);
     timers.add(timer);
     return timer;
   }
@@ -42,6 +44,32 @@ class _TimerHarness {
 }
 
 void main() {
+  test('an extreme provider delay never dispatches at an internal timer chunk',
+      () async {
+    final timers = _TimerHarness();
+    var reads = 0;
+    final coordinator = TopRefreshCoordinator<int>(
+      collect: () async => ++reads,
+      apply: (_) {},
+      nextDelaySeconds: () => 0x7fffffffffffffff,
+      timerFactory: timers.create,
+    );
+    await coordinator.refreshNow();
+    expect(reads, 1);
+    expect(coordinator.hasScheduledRefresh, isTrue);
+    expect(timers.delays.single, const Duration(days: 1));
+    for (var day = 0; day < 3; day++) {
+      timers.active.single.fire();
+      await Future<void>.delayed(Duration.zero);
+      expect(reads, 1);
+      expect(coordinator.hasScheduledRefresh, isTrue);
+    }
+    expect(timers.delays.every((delay) => delay == const Duration(days: 1)),
+        isTrue);
+    coordinator.dispose();
+    expect(timers.active, isEmpty);
+  });
+
   test('repeated refresh requests coalesce into one queued follow-up',
       () async {
     final pending = <Completer<int>>[];

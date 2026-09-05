@@ -15,6 +15,7 @@ class QuotaHealthProviderLine {
   final ProviderSourceClass sourceClass;
   final String state;
   final bool ok;
+  final RequestAdmission requestAdmission;
   // The spend class for the trust tag ('quota plan', 'metered plan', 'loaded',
   // 'cold', or null), computed from the source quota via the shared
   // providerSpendClass so it cannot drift from `top` and the CLI.
@@ -50,6 +51,7 @@ class QuotaHealthProviderLine {
     required this.sourceClass,
     required this.state,
     required this.ok,
+    this.requestAdmission = RequestAdmission.notReported,
     required this.spendClass,
     required this.asOf,
     required this.stalenessSeconds,
@@ -85,6 +87,8 @@ class QuotaHealthProviderLine {
         'source_class': sourceClass.wireName,
         'state': state,
         'ok': ok,
+        if (requestAdmission != RequestAdmission.notReported)
+          'request_admission': requestAdmission.wireName,
         // Same spend class the markdown Trust column shows (quota plan,
         // metered plan, loaded, cold, manual). Omitted only when unknown.
         if (spendClass != null) 'spend_class': spendClass,
@@ -348,6 +352,7 @@ QuotaHealthProviderLine _providerLine(
     sourceClass: provider.sourceClass,
     state: state,
     ok: provider.ok,
+    requestAdmission: provider.requestAdmission,
     spendClass: providerSpendClass(provider),
     asOf: provider.asOf,
     stalenessSeconds: (now - provider.asOf).clamp(0, 1 << 31).toInt(),
@@ -411,6 +416,8 @@ String _state(ProviderQuota provider, double? headroom, int now) {
   // as drift.
   if (provider.driftReason != null) return 'provider drift';
   if (!provider.ok) return 'unavailable';
+  final admission = requestAdmissionLabel(provider.requestAdmission);
+  if (!provider.stale && admission != null) return admission;
   if (provider.isLocal) {
     if (provider.error != null || provider.sourceClassViolation != null) {
       return 'unavailable';
@@ -444,6 +451,8 @@ String _trustContext(QuotaHealthProviderLine provider, int generatedAt) {
 String _trustReadState(QuotaHealthProviderLine provider) {
   if (provider.state == 'provider drift') return 'provider drift';
   if (provider.state == 'unavailable') return 'error';
+  final admission = requestAdmissionLabel(provider.requestAdmission);
+  if (!provider.stale && admission != null) return admission;
   if (provider.kind.isLocal) {
     return switch (provider.state) {
       'local active' => 'loaded',

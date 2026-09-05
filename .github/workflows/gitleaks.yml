@@ -2,8 +2,9 @@ name: Secret scan
 
 # Server-side secret scan on every push and PR, complementing the local
 # gitleaks run in the dev loop, GitHub's native secret scanning, and CodeQL.
-# Reuses the repository .gitleaks.toml (which allowlists the two public,
-# non-confidential Google installed-app OAuth client secrets). gitleaks is
+# Reuses narrowly scoped repository exceptions for public installed-app OAuth
+# constants and an exact synthetic MCP token. Other values remain scanned.
+# gitleaks is
 # pinned by version and verified against its published checksum. Actions are
 # pinned to commit SHAs with versions in trailing comments. Dependabot reports
 # available updates; selected pins are recreated and tested on a first-party

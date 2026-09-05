@@ -656,6 +656,11 @@ Future<HttpServer> startLocalQuotabotServer({
     }
 
     final burnStats = recentBurnStatsByQuota(candidates, current);
+    final admissionGates = providerRouteCapabilityGates(
+      candidates,
+      current,
+      catalog: kModelCatalog,
+    ).requestAdmissionByQuotaKey;
     final pipePenalties = routeSummaryProvider().pipePenaltyByProvider(
       now: current,
     );
@@ -711,7 +716,10 @@ Future<HttpServer> startLocalQuotabotServer({
       reuseWhere: (lease) => candidates.any(
         (quota) =>
             normalizeLeaseProvider(quota.provider) == lease.provider &&
-            normalizeLeaseAccount(quota.account) == lease.account,
+            normalizeLeaseAccount(quota.account) == lease.account &&
+            !quota.requestAdmission.blocksRequests &&
+            !(admissionGates[quotaIdentityKeyFor(quota)]?.blocksRequests ??
+                false),
       ),
     );
 

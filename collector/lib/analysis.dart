@@ -142,8 +142,10 @@ ProviderQuota? providerWithMostHeadroom(List<ProviderQuota> quotas, int now) {
   ProviderQuota? best;
   double bestHeadroom = -1;
   for (final q in quotas) {
-    if (q.isLocal || !isTrustedQuotaEvidenceAt(q, now)) continue;
-    final h = providerHeadroom(q, now);
+    if (q.isLocal) continue;
+    final availability = providerAvailability(q, now);
+    if (!availability.available) continue;
+    final h = availability.headroom;
     if (h != null && h > kSpentHeadroomFloor && h > bestHeadroom) {
       bestHeadroom = h;
       best = q;
@@ -165,7 +167,9 @@ ProviderQuota? providerWithMostHeadroom(List<ProviderQuota> quotas, int now) {
   final h = providerHeadroom(q, now);
   if (h == null) return (available: false, headroom: null, resetsAt: null);
   return (
-    available: isTrustedQuotaEvidenceAt(q, now) && h > kSpentHeadroomFloor,
+    available: !q.requestAdmission.blocksRequests &&
+        isTrustedQuotaEvidenceAt(q, now) &&
+        h > kSpentHeadroomFloor,
     headroom: h,
     resetsAt: bindingWindow(q, now)?.resetsAt,
   );
@@ -236,6 +240,7 @@ bool isLocalRuntimeReachableAt(ProviderQuota quota, int now) =>
 /// declarations do not establish positive physical execution scope.
 bool isLocalRuntimeAvailableAt(ProviderQuota quota, int now) =>
     isLocalRuntimeReachableAt(quota, now) &&
+    !quota.requestAdmission.blocksRequests &&
     quota.error == null &&
     quota.localGenerationReadiness != null;
 
@@ -432,6 +437,9 @@ class RouteCandidate {
   /// not available.
   final bool available;
 
+  /// Shared or capability-scoped admission for the requested route.
+  final RequestAdmission requestAdmission;
+
   /// Local-runtime readiness used by quota-stretch routing. Null for cloud
   /// candidates, `loaded` when at least one on-device model is resident, and
   /// `cold` when the runtime can load an on-device model on demand.
@@ -451,6 +459,7 @@ class RouteCandidate {
     required this.resetsAt,
     required this.stale,
     required this.available,
+    this.requestAdmission = RequestAdmission.notReported,
     this.localReadiness,
     this.bindingPool,
     this.driftReason,
@@ -504,6 +513,8 @@ class RouteCandidate {
         if (driftReason != null) 'drift_reason': driftReason,
         if (driftObservedAt != null) 'drift_observed_at': driftObservedAt,
         'available': available,
+        if (requestAdmission != RequestAdmission.notReported)
+          'request_admission': requestAdmission.wireName,
         if (localReadiness != null) 'local_readiness': localReadiness,
       };
 
@@ -796,6 +807,7 @@ RouteDecisionReceipt _decisionReceiptFor(RouteSuggestion suggestion) {
           (suggestion.asOf - candidate.asOf).clamp(0, 1 << 31).toInt(),
       resetsAt: candidate.resetsAt,
       available: candidate.available,
+      requestAdmission: candidate.requestAdmission,
       stale: candidate.stale,
       confidence: candidate.confidence,
       confidenceReasons: confidenceReasons,
@@ -865,6 +877,12 @@ RouteCandidateVerdict _receiptVerdict(
     return RouteCandidateVerdict.providerDrift;
   }
   if (candidate.stale) return RouteCandidateVerdict.stale;
+  if (candidate.requestAdmission == RequestAdmission.denied) {
+    return RouteCandidateVerdict.requestDenied;
+  }
+  if (candidate.requestAdmission == RequestAdmission.unresolved) {
+    return RouteCandidateVerdict.requestAdmissionUnresolved;
+  }
   if (candidate.capabilityLimited) {
     return RouteCandidateVerdict.noCapableModel;
   }
@@ -926,6 +944,8 @@ RouteFallback _fallbackFor(
           !c.available &&
           !c.stale &&
           !c.capabilityLimited &&
+          (!c.requestAdmission.blocksRequests ||
+              (c.headroom ?? 0) <= kSpentHeadroomFloor) &&
           c.resetsAt != null)
       .toList()
     ..sort((a, b) => a.resetsAt!.compareTo(b.resetsAt!));
@@ -977,6 +997,11 @@ String _localFallbackSubscriptionNote(RouteCandidate? candidate) {
   if (candidate.stale) {
     return ' (best subscription ${candidate.provider} has cached last-known '
         'headroom ${headroom ?? 0}%)';
+  }
+  if (candidate.requestAdmission.blocksRequests) {
+    return ' (${candidate.provider} request admission is '
+        '${candidate.requestAdmission.wireName}; measured headroom '
+        '${headroom ?? 0}%)';
   }
   return ' (best subscription ${candidate.provider} only '
       '${headroom ?? 0}% free)';
@@ -1405,6 +1430,7 @@ RouteSuggestion suggestRoute(
   Set<String>? capabilityAvailableQuotaKeys,
   Map<String, int> capabilityBudgetResetByQuotaKey = const {},
   Map<String, double> capabilityHeadroomByQuotaKey = const {},
+  Map<String, RequestAdmission> capabilityRequestAdmissionByQuotaKey = const {},
   List<String> preferenceOrder = const [],
   String snapshotSource = 'live',
   int? snapshotAsOf,
@@ -1434,6 +1460,10 @@ RouteSuggestion suggestRoute(
     final binding = q.isLocal ? null : bindingWindow(q, now);
     final headroom = q.isLocal ? 100.0 : a.headroom;
     final quotaKey = quotaIdentityKeyFor(q);
+    final capabilityAdmission = capabilityRequestAdmissionByQuotaKey[quotaKey];
+    final admission = capabilityAdmission == null
+        ? q.requestAdmission
+        : q.requestAdmission.combine(capabilityAdmission);
     final cap = capabilityVerdict(
       q,
       quotaKey: quotaKey,
@@ -1453,6 +1483,7 @@ RouteSuggestion suggestRoute(
     final capabilityHeadroom = !q.isLocal &&
             !capabilityBlocked &&
             (capabilityAvailableQuotaKeys?.contains(quotaKey) ?? false) &&
+            !admission.blocksRequests &&
             isTrustedQuotaEvidenceAt(q, now) &&
             rawCapabilityHeadroom != null &&
             rawCapabilityHeadroom.isFinite &&
@@ -1577,7 +1608,8 @@ RouteSuggestion suggestRoute(
       driftObservedAt: q.driftObservedAt,
       available: q.isLocal
           ? isLocalRuntimeAvailableAt(q, now)
-          : routeAvailable && !capabilityBlocked,
+          : routeAvailable && !capabilityBlocked && !admission.blocksRequests,
+      requestAdmission: admission,
       localReadiness: q.localGenerationReadiness,
       leaseDiscount: leaseDiscount,
       pipeDiscount: pipeDiscount,
@@ -1809,6 +1841,22 @@ RouteSuggestion suggestRoute(
     );
   }
 
+  final admissionBlocked = routingSubs
+      .where((candidate) =>
+          !candidate.stale &&
+          candidate.driftReason == null &&
+          candidate.requestAdmission.blocksRequests &&
+          (candidate.headroom ?? 0) > kSpentHeadroomFloor)
+      .toList();
+  if (admissionBlocked.isNotEmpty) {
+    return result(
+      null,
+      'Measured quota remains visible, but request admission is denied or '
+      'unresolved for the remaining routes. Check the provider before retrying.',
+      decisionCode: RouteDecisionCode.requestBlocked,
+    );
+  }
+
   final capabilityBlocked = routingSubs
       .where((c) =>
           (c.capabilityLimited || c.capabilityBudgetLimited) &&
@@ -1934,48 +1982,95 @@ double? _projectedWastePercent(
   return waste;
 }
 
-/// The adaptive refresh delay in seconds for a snapshot: fast when a reset is
-/// imminent or a cap is nearly hit, relaxed when everything is healthy and resets
-/// are far off, and backing off after [failStreak] cycles that returned nothing
-/// live. Only trusted, automatically refreshable quota controls urgency: stale,
-/// integrity-rejected, local-runtime, and manual entries remain visible but do
-/// not force the whole fleet into a fast polling loop. Pure, so the desktop app
-/// and `quotabot top` poll on identical logic rather than two drifting copies.
-int nextRefreshSeconds(List<ProviderQuota> data, int now,
-    {int failStreak = 0, int throttleStreak = 0}) {
-  if (failStreak >= 2) return 6 * 3600;
-  if (failStreak >= 1) return 3600;
+/// Whether a failed metadata read needs a fleet-wide scheduling floor. The
+/// caller supplies audited registration capabilities, never snapshot claims.
+/// Covered transports enforce their own scope's deadline before outbound work.
+bool needsFleetReadBackoff(
+  ProviderQuota quota, {
+  Set<String> providersWithUsageCooldowns = const {},
+}) =>
+    !providersWithUsageCooldowns.contains(quota.provider) &&
+    (quota.pipeHealth == providerPipeHealthThrottled ||
+        quota.pipeHealth == providerPipeHealthDegraded ||
+        (quota.retryAfterSeconds ?? 0) > 0);
 
+/// The refresh delay shared by desktop, `top`, `watch`, and MCP subscriptions.
+/// Current live quota is rechecked within five minutes, including weekly-only
+/// plans whose balances can change after an off-cycle reset. A recently captured
+/// old window gets a bounded renewal check after its reset; its balance remains
+/// unavailable until a new observation proves the replacement window.
+/// [providersWithUsageCooldowns] comes from the actual adapter registrations.
+/// The default retains a fleet-wide floor for every provider, including custom
+/// collectors. A protected usage scope cannot slow a healthy sibling, but its
+/// own transport still enforces the provider's absolute retry deadline.
+/// A selected [fixedIntervalSeconds] replaces adaptive cadence, but never the
+/// explicit Retry-After floor of an uncovered transport.
+int nextRefreshSeconds(List<ProviderQuota> data, int now,
+    {int failStreak = 0,
+    int throttleStreak = 0,
+    int? fixedIntervalSeconds,
+    Set<String> providersWithUsageCooldowns = const {}}) {
   int? soonestReset;
   int? nearCapInterval;
-  var throttled = false;
+  int? confirmationInterval;
+  int? earliestProtectedRetry;
+  var liveMeasuredQuota = false;
+  var anyThrottled = false;
+  var unprotectedThrottled = false;
   var retryAfterFloor = 0;
   for (final q in data) {
-    // A throttled or slow read means the provider is pushing back. Note it (and
-    // any explicit retry-after) before the trusted filter, because a throttled
-    // read is stale by definition, so the escalating back-off below applies.
-    if (q.pipeHealth == providerPipeHealthThrottled ||
-        q.pipeHealth == providerPipeHealthDegraded) {
-      throttled = true;
-    }
+    final protected = providersWithUsageCooldowns.contains(q.provider);
+    final throttled = q.pipeHealth == providerPipeHealthThrottled ||
+        q.pipeHealth == providerPipeHealthDegraded;
+    anyThrottled = anyThrottled || throttled;
+    unprotectedThrottled = unprotectedThrottled || (throttled && !protected);
     final retryAfter = q.retryAfterSeconds;
-    if (retryAfter != null && retryAfter > retryAfterFloor) {
-      retryAfterFloor = retryAfter;
+    if (retryAfter != null && retryAfter > 0) {
+      if (protected) {
+        earliestProtectedRetry = earliestProtectedRetry == null
+            ? retryAfter
+            : math.min(earliestProtectedRetry, retryAfter);
+      } else {
+        retryAfterFloor = math.max(retryAfterFloor, retryAfter);
+      }
     }
-    if (q.isLocal || q.isManual || !isTrustedQuotaEvidenceAt(q, now)) {
-      continue;
+    if (q.isLocal || q.isManual) continue;
+
+    // Admission preserves last-trusted windows on a rejected or failed read.
+    // A recent capture near its known boundary can justify checking again, but
+    // cannot justify availability, a new cache sample, or a fabricated refill.
+    // Old, manual, passive, malformed and legacy quarantines cannot start this
+    // loop. It expires fifteen minutes after the reported boundary.
+    if (q.sourceClass == ProviderSourceClass.authoritativeLive &&
+        hasValidQuotaEvidenceShape(q) &&
+        q.suspect == null &&
+        q.asOf > 0 &&
+        q.asOf <= now + kQuotaEvidenceClockSkewSeconds &&
+        now - q.asOf <= 20 * 60 &&
+        !hasImplausibleFutureQuotaWindowAt(q, now) &&
+        q.windows.every((w) => w.resetsAt == null || w.resetsAt! > 0)) {
+      for (final window in q.windows) {
+        final reset = window.resetsAt;
+        if (reset == null || reset <= 0 || reset > now) continue;
+        final age = now - reset;
+        if (age >= 15 * 60) continue;
+        final delay = age < 120 ? 30 : 120;
+        confirmationInterval = confirmationInterval == null
+            ? delay
+            : math.min(confirmationInterval, delay);
+      }
     }
+    if (!isTrustedQuotaEvidenceAt(q, now)) continue;
+    liveMeasuredQuota = liveMeasuredQuota ||
+        q.sourceClass == ProviderSourceClass.authoritativeLive;
     for (final w in q.windows) {
       if (w.resetsAt != null && w.resetsAt! > now) {
         final dt = w.resetsAt! - now;
         soonestReset = soonestReset == null ? dt : math.min(soonestReset, dt);
       }
     }
-    // Watching a low provider closely only pays off while its binding window's
-    // own reset is near enough that the picture can still change soon. A window
-    // that is spent (or nearly so) with a far-off reset just sits there until it
-    // resets, so it must not pin the whole fleet to a fast poll and hammer the
-    // provider for days.
+    // Passive sources retain their gentler adaptive cadence. Current live
+    // sources have the five-minute freshness bound below, even when spent.
     final binding = bindingWindow(q, now);
     final bindingReset = binding?.resetsAt;
     final rem = providerHeadroom(q, now);
@@ -1991,27 +2086,43 @@ int nextRefreshSeconds(List<ProviderQuota> data, int now,
       }
     }
   }
-  // A reset about to flip the display: catch it promptly, even under throttle -
-  // the flip is a brief, one-time event worth catching.
-  if (soonestReset != null && soonestReset < 600) {
-    return soonestReset < 120 ? 30 : 60;
+  if (fixedIntervalSeconds != null) {
+    return math.max(math.max(1, fixedIntervalSeconds), retryAfterFloor);
   }
-  // Escalating back-off while a provider keeps throttling us: stop checking so
-  // much precisely when it keeps pushing back - twenty minutes, then forty, then
-  // ninety per consecutive throttled cycle - and honor an explicit retry-after.
-  if (throttled || throttleStreak > 0) {
+  // Ungated reads retain their fleet-wide throttle protection. Neither a reset
+  // nor an all-failed cycle can bypass an explicit provider Retry-After.
+  final unexplainedThrottleStreak = throttleStreak > 0 && !anyThrottled;
+  if (unprotectedThrottled || unexplainedThrottleStreak) {
     const steps = [1200, 2400, 5400];
     final idx = (throttleStreak - 1).clamp(0, steps.length - 1);
     return math.max(steps[idx], retryAfterFloor);
   }
-  // Healthy or moderate: a gentle default so a slow-moving quota is not polled
-  // hard enough to trip a rate limit; relax further as the nearest reset recedes.
-  final base = nearCapInterval ??
-      (soonestReset == null || soonestReset < 6 * 3600
-          ? 1200
-          : soonestReset < 24 * 3600
-              ? 3600
-              : 12 * 3600);
+
+  int base;
+  if (confirmationInterval != null) {
+    base = confirmationInterval;
+  } else if (soonestReset != null && soonestReset < 600) {
+    base = soonestReset < 120 ? 30 : 60;
+  } else if (liveMeasuredQuota) {
+    base = 300;
+  } else if (earliestProtectedRetry != null) {
+    base = math.max(30, earliestProtectedRetry);
+  } else if (anyThrottled) {
+    // A protected transport's first failed response may omit Retry-After. Its
+    // gate still stores bounded backoff; a later fleet read cannot bypass it.
+    base = 300;
+  } else if (failStreak >= 2) {
+    base = 6 * 3600;
+  } else if (failStreak >= 1) {
+    base = 3600;
+  } else {
+    base = nearCapInterval ??
+        (soonestReset == null || soonestReset < 6 * 3600
+            ? 1200
+            : soonestReset < 24 * 3600
+                ? 3600
+                : 12 * 3600);
+  }
   return math.max(base, retryAfterFloor);
 }
 

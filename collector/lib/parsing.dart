@@ -87,6 +87,7 @@ String codexLabel(dynamic minutes, String fallback) {
 typedef CodexLiveUsage = ({
   List<QuotaWindow> windows,
   List<ModelQuota> modelQuotas,
+  RequestAdmission requestAdmission,
 });
 
 /// Parses one live response atomically. Shared and model-scoped rate limits are
@@ -95,21 +96,26 @@ typedef CodexLiveUsage = ({
 CodexLiveUsage? codexLiveUsage(Map<String, dynamic>? resp) {
   if (resp == null) return null;
   final shared = _codexLiveRateLimitWindows(resp['rate_limit']);
-  if (!shared.valid) return null;
+  if (shared == null) return null;
   final scoped = _codexAdditionalRateLimits(resp);
   if (!scoped.valid) return null;
-  return (windows: shared.windows, modelQuotas: scoped.modelQuotas);
+  return (
+    windows: shared.windows,
+    modelQuotas: scoped.modelQuotas,
+    requestAdmission: shared.requestAdmission,
+  );
 }
 
 List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) =>
     codexLiveUsage(resp)?.windows ?? const [];
 
-({bool valid, List<QuotaWindow> windows}) _codexLiveRateLimitWindows(
+({List<QuotaWindow> windows, RequestAdmission requestAdmission})?
+    _codexLiveRateLimitWindows(
   dynamic raw,
 ) {
-  if (raw is! Map) return (valid: false, windows: const []);
+  if (raw is! Map) return null;
   if (_codexHasUnknownQuotaWindow(raw)) {
-    return (valid: false, windows: const []);
+    return null;
   }
   final out = <QuotaWindow>[];
   for (final key in const ['primary_window', 'secondary_window']) {
@@ -120,13 +126,13 @@ List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) =>
     // still has to be structurally complete and bounded.
     if (window == null) continue;
     if (window is! Map) {
-      return (valid: false, windows: const []);
+      return null;
     }
     final pct = _codexLivePercent(window['used_percent']);
     final reset = parseReset(window['reset_at']);
     final seconds = _codexLiveWindowSeconds(window['limit_window_seconds']);
     if (pct == null || reset == null || reset <= 0 || seconds == null) {
-      return (valid: false, windows: const []);
+      return null;
     }
     out.add(
       QuotaWindow(
@@ -136,10 +142,11 @@ List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) =>
       ),
     );
   }
-  if (out.isEmpty || !_codexLiveFlagsAreConsistent(raw)) {
-    return (valid: false, windows: const []);
+  final admission = _codexLiveRequestAdmission(raw);
+  if (out.isEmpty || admission == null) {
+    return null;
   }
-  return (valid: true, windows: out);
+  return (windows: out, requestAdmission: admission);
 }
 
 const _codexKnownRateLimitKeys = {
@@ -192,27 +199,30 @@ int? _codexLiveWindowSeconds(dynamic raw) {
   return seconds;
 }
 
-bool _codexLiveFlagsAreConsistent(Map<dynamic, dynamic> raw) {
+RequestAdmission? _codexLiveRequestAdmission(Map<dynamic, dynamic> raw) {
   bool? allowed;
   bool? limitReached;
   if (raw.containsKey('allowed')) {
     final value = raw['allowed'];
-    if (value is! bool) return false;
+    if (value is! bool) return null;
     allowed = value;
   }
   if (raw.containsKey('limit_reached')) {
     final value = raw['limit_reached'];
-    if (value is! bool) return false;
+    if (value is! bool) return null;
     limitReached = value;
   }
   // Admission flags say whether ChatGPT will take a new request. They are not
   // a second encoding of used_percent. Plus currently reports a rounded 100%
-  // weekly window with allowed: true. Fail closed only when both flags are
-  // present and agree with each other.
+  // weekly window with allowed: true. Preserve a valid negative separately
+  // from these measurements; only contradictory or malformed flags reject the
+  // atomic observation.
   if (allowed != null && limitReached != null && allowed == limitReached) {
-    return false;
+    return null;
   }
-  return true;
+  if (allowed == false || limitReached == true) return RequestAdmission.denied;
+  if (allowed == true || limitReached == false) return RequestAdmission.allowed;
+  return RequestAdmission.notReported;
 }
 
 /// Model-scoped Codex pools from `additional_rate_limits`. These are sparse
@@ -244,8 +254,9 @@ List<ModelQuota> codexModelQuotas(Map<String, dynamic>? resp) {
     if (model == null) return (valid: false, modelQuotas: const []);
 
     final parsed = _codexLiveRateLimitWindows(row['rate_limit']);
-    if (!parsed.valid) return (valid: false, modelQuotas: const []);
-    final candidate = _codexBindingModelQuota(model, parsed.windows);
+    if (parsed == null) return (valid: false, modelQuotas: const []);
+    final candidate =
+        _codexBindingModelQuota(model, parsed.windows, parsed.requestAdmission);
     final key = model.toLowerCase();
     final current = byModel[key];
     byModel[key] = current == null
@@ -269,6 +280,7 @@ String? _codexScopedModelName(dynamic raw) {
 ModelQuota _codexBindingModelQuota(
   String model,
   List<QuotaWindow> windows,
+  RequestAdmission admission,
 ) {
   var binding = windows.first;
   for (final candidate in windows.skip(1)) {
@@ -285,6 +297,7 @@ ModelQuota _codexBindingModelQuota(
     usedPercent: binding.usedPercent,
     resetsAt: binding.resetsAt,
     windowLabel: binding.label,
+    requestAdmission: admission,
   );
 }
 
@@ -294,6 +307,8 @@ ModelQuota _conservativeCodexModelQuota(
 ) {
   final currentUsed = current.usedPercent;
   final candidateUsed = candidate.usedPercent;
+  final admission =
+      current.requestAdmission.combine(candidate.requestAdmission);
   if (currentUsed == null || candidateUsed == null) {
     return ModelQuota(
       model: current.model,
@@ -301,13 +316,21 @@ ModelQuota _conservativeCodexModelQuota(
           ? current.windowLabel
           : null,
       note: 'provider returned conflicting scoped quota rows',
+      requestAdmission: admission,
     );
   }
-  if (candidateUsed > currentUsed) return candidate;
-  if (candidateUsed < currentUsed) return current;
-  return (candidate.resetsAt ?? -1) > (current.resetsAt ?? -1)
+  final binding = candidateUsed > currentUsed ||
+          (candidateUsed == currentUsed &&
+              (candidate.resetsAt ?? -1) > (current.resetsAt ?? -1))
       ? candidate
       : current;
+  return ModelQuota(
+    model: binding.model,
+    usedPercent: binding.usedPercent,
+    resetsAt: binding.resetsAt,
+    windowLabel: binding.windowLabel,
+    requestAdmission: admission,
+  );
 }
 
 /// The number of banked resets Codex reports as available to redeem,

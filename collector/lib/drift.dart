@@ -123,6 +123,14 @@ bool _isReRatingWindow(String provider, String? label) =>
 /// bypass this structural check.
 bool isTrustedQuotaEvidence(ProviderQuota quota) =>
     quota.ok &&
+    hasValidQuotaEvidenceShape(quota) &&
+    !quota.stale &&
+    quota.suspect == null &&
+    quota.driftReason == null;
+
+/// Structural metadata validity, independent of freshness or request admission.
+/// This never proves that an observed pool is still current or available.
+bool hasValidQuotaEvidenceShape(ProviderQuota quota) =>
     quota.hasWindows &&
     quota.sourceClassViolation == null &&
     quota.windows.every((window) {
@@ -133,10 +141,7 @@ bool isTrustedQuotaEvidence(ProviderQuota quota) =>
           percent <= 100;
     }) &&
     quota.modelQuotas.every((modelQuota) =>
-        _unusableModelQuotaReason(modelQuota, observedAt: null) == null) &&
-    !quota.stale &&
-    quota.suspect == null &&
-    quota.driftReason == null;
+        _unusableModelQuotaReason(modelQuota, observedAt: null) == null);
 
 /// Timestamp-aware trust boundary for routing, analytics, and direct cache
 /// writes. [isTrustedQuotaEvidence] validates the evidence shape; this variant
@@ -464,6 +469,7 @@ ProviderQuota quarantineUnusableQuotaEvidence(
     planEvidenceAsOf: fresh.planEvidenceAsOf,
     source: fresh.source,
     sourceClass: fresh.sourceClass,
+    requestAdmission: fresh.requestAdmission,
     ok: false,
     error: 'provider drift detected; fresh quota evidence is unusable and '
         'no trusted snapshot is available',

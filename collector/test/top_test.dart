@@ -72,6 +72,54 @@ List<String> _frame(
 }
 
 void main() {
+  for (final value in ['denied', 'future-admission']) {
+    test('$value remains visible on ordinary-width measured top rows', () {
+      final quota = ProviderQuota.fromJson({
+        'provider': 'codex',
+        'display_name': 'Codex',
+        'account': 'fixture',
+        'as_of': _now,
+        'request_admission': value,
+        'windows': [
+          {'label': 'weekly', 'used_percent': 50, 'resets_at': _now + 3600}
+        ],
+      });
+      for (final width in [60, 80, 120]) {
+        final output = _frame([quota], width: width).map(_plain).join('\n');
+        expect(output, contains('50%'), reason: 'width=$width');
+        expect(
+            output,
+            contains(value == 'denied'
+                ? 'requests denied'
+                : 'request status unverified'),
+            reason: 'width=$width');
+        expect(suggestRoute([quota], _now).recommended, isNull);
+        expect(output, isNot(contains('50% last')));
+      }
+    });
+  }
+
+  test('spent inline top rows retain denial after their trust tag is omitted',
+      () {
+    final quota = ProviderQuota(
+      provider: 'codex',
+      displayName: 'Codex',
+      account: 'fixture',
+      asOf: _now,
+      requestAdmission: RequestAdmission.denied,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: _now + 3600)
+      ],
+    );
+    for (final width in [60, 80, 120]) {
+      final lines = _frame([quota], width: width).map(_plain).toList();
+      expect(lines.join('\n'), contains('requests denied'),
+          reason: 'width=$width');
+      expect(lines.join('\n'), contains('spent'));
+      expect(lines.every((line) => line.length == width), isTrue);
+    }
+  });
+
   test('hidden providers are removed before routing and rendering', () {
     final claude = _q(
       'claude',
@@ -322,13 +370,12 @@ void main() {
 
     expect(
       throttled,
-      contains('rate limited - retrying in 2m, showing last known: HTTP 429'),
+      contains('quota check rate limited, showing last known: HTTP 429'),
     );
     expect(throttled, isNot(contains('provider error')));
     expect(
       degraded,
-      contains(
-          'provider error - retrying in 45s, showing last known: HTTP 503'),
+      contains('quota service error, showing last known: HTTP 503'),
     );
     expect(degraded, isNot(contains('rate limited')));
   });
@@ -349,7 +396,7 @@ void main() {
           .join('\n'),
     );
 
-    expect(rendered, contains('rate limited - retrying in 2m'));
+    expect(rendered, contains('quota check rate limited'));
     expect(
       rendered,
       contains(

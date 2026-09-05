@@ -9,6 +9,8 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import 'models.dart' show RequestAdmission;
+
 enum RouteDecisionCode {
   noData('no_data'),
   localFirst('local_first'),
@@ -20,6 +22,7 @@ enum RouteDecisionCode {
   adjustedHeadroomDepleted('adjusted_headroom_depleted'),
   capabilityBudgetBlocked('capability_budget_blocked'),
   capabilityBlocked('capability_blocked'),
+  requestBlocked('request_blocked'),
   providerDrift('provider_drift'),
   staleEvidence('stale_evidence'),
   spentWait('spent_wait'),
@@ -58,6 +61,12 @@ enum RouteCandidateVerdict {
     'routing adjustments consumed the usable effective headroom',
   ),
   unavailable('unavailable', 'current evidence does not prove availability'),
+  requestDenied(
+      'request_denied', 'the provider denies admission for this route'),
+  requestAdmissionUnresolved(
+    'request_admission_unresolved',
+    'request admission evidence is not understood',
+  ),
   spent('spent', 'the binding quota pool is spent'),
   stale('stale', 'cached evidence is not current enough to route from'),
   providerDrift(
@@ -121,6 +130,7 @@ class RouteCandidateReceipt {
   final int evidenceAgeSeconds;
   final int? resetsAt;
   final bool available;
+  final RequestAdmission requestAdmission;
   final bool stale;
   final double? confidence;
   final List<String> confidenceReasons;
@@ -140,6 +150,7 @@ class RouteCandidateReceipt {
     required this.evidenceAgeSeconds,
     required this.resetsAt,
     required this.available,
+    this.requestAdmission = RequestAdmission.notReported,
     required this.stale,
     required this.confidence,
     required this.confidenceReasons,
@@ -160,6 +171,8 @@ class RouteCandidateReceipt {
         'evidence_age_seconds': evidenceAgeSeconds,
         if (resetsAt != null) 'resets_at': resetsAt,
         'available': available,
+        if (requestAdmission != RequestAdmission.notReported)
+          'request_admission': requestAdmission.wireName,
         'stale': stale,
         if (confidence != null) 'confidence': _receiptNumber(confidence!),
         'confidence_reasons': confidenceReasons,

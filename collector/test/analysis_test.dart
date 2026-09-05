@@ -1798,7 +1798,7 @@ void main() {
       final nearCap = _q('claude', [
         QuotaWindow(label: 'weekly', usedPercent: 95, resetsAt: _now + 3 * 3600)
       ]);
-      expect(nextRefreshSeconds([nearCap], _now), 600);
+      expect(nextRefreshSeconds([nearCap], _now), 300);
 
       final throttled = ProviderQuota.error(
         'codex',
@@ -1831,9 +1831,7 @@ void main() {
           1800);
     });
 
-    test('a throttled provider still yields to an imminent reset', () {
-      // The reset flip is a brief, one-time event, so catch it promptly even
-      // while another provider is throttling.
+    test('an imminent reset cannot bypass an ungated provider cooldown', () {
       final imminent = _q('claude',
           [QuotaWindow(label: '5h', usedPercent: 50, resetsAt: _now + 60)]);
       final throttled = ProviderQuota.error(
@@ -1842,8 +1840,14 @@ void main() {
         'timed out',
         _now,
         pipeHealth: providerPipeHealthThrottled,
+        retryAfterSeconds: 7200,
       );
-      expect(nextRefreshSeconds([imminent, throttled], _now), 30);
+      expect(nextRefreshSeconds([imminent, throttled], _now), 7200);
+      expect(
+          nextRefreshSeconds([imminent, throttled], _now,
+              providersWithUsageCooldowns: {'codex'}),
+          30);
+      expect(providerAvailability(throttled, _now).available, isFalse);
     });
 
     test('polls fast when a reset is imminent', () {
@@ -1870,41 +1874,37 @@ void main() {
           _q('codex',
               [QuotaWindow(label: 'weekly', usedPercent: 95, resetsAt: near)])
         ], _now),
-        600, // 5% free, resets soon
+        300, // The measured balance stays current while the cap is low.
       );
       expect(
         nextRefreshSeconds([
           _q('codex',
               [QuotaWindow(label: 'weekly', usedPercent: 70, resetsAt: near)])
         ], _now),
-        1200, // 30% free, resets soon
+        300,
       );
     });
 
-    test('a window spent for days backs off instead of fast polling', () {
-      // Nearly or fully spent with a far-off reset has nothing to watch until it
-      // resets, so it must not pin the fleet to a fast poll and hammer the
-      // provider. It relaxes to the far-reset cadence like a healthy provider.
+    test('weekly-only Codex keeps checking for off-cycle balance changes', () {
       final far = _now + 5 * 86400;
       expect(
         nextRefreshSeconds([
           _q('codex',
               [QuotaWindow(label: 'weekly', usedPercent: 95, resetsAt: far)])
         ], _now),
-        12 * 3600, // 5% free but resets in 5 days
+        300,
       );
       expect(
         nextRefreshSeconds([
           _q('codex',
               [QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: far)])
         ], _now),
-        12 * 3600, // fully spent, resets in 5 days
+        300,
       );
     });
 
     test('a spent far-reset provider does not speed up a healthy fleet', () {
-      // A live but spent Codex (reset days away) alongside a healthy Claude must
-      // not drag the whole fleet to a fast poll; the binding reset is far.
+      // A distant spent window does not need the short reset-confirmation loop.
       final far = _now + 5 * 86400;
       final spent = _q('codex',
           [QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: far)]);
@@ -1913,12 +1913,10 @@ void main() {
             label: 'weekly', usedPercent: 50, resetsAt: _now + 3 * 86400),
         QuotaWindow(label: '5h', usedPercent: 20, resetsAt: _now + 4 * 3600),
       ]);
-      // Soonest reset is Claude's 5h window (~4h), so it relaxes to the gentle
-      // baseline, not the fast poll the spent Codex would otherwise force.
-      expect(nextRefreshSeconds([spent, healthy], _now), 1200);
+      expect(nextRefreshSeconds([spent, healthy], _now), 300);
     });
 
-    test('relaxes when healthy and resets are far off', () {
+    test('keeps healthy live quota current despite a distant reset', () {
       expect(
         nextRefreshSeconds([
           _q('claude', [
@@ -1926,7 +1924,7 @@ void main() {
                 label: 'weekly', usedPercent: 10, resetsAt: _now + 5 * 86400)
           ])
         ], _now),
-        12 * 3600,
+        300,
       );
     });
 
@@ -1951,7 +1949,7 @@ void main() {
         ),
       ]);
 
-      expect(nextRefreshSeconds([stale, healthy], _now), 12 * 3600);
+      expect(nextRefreshSeconds([stale, healthy], _now), 300);
       expect(nextRefreshSeconds([stale], _now), 1200);
       expect(nextRefreshSeconds([stale], _now, failStreak: 1), 3600);
     });
@@ -1976,7 +1974,137 @@ void main() {
         ),
       ]);
 
-      expect(nextRefreshSeconds([manual, healthy], _now), 12 * 3600);
+      expect(nextRefreshSeconds([manual, healthy], _now), 300);
+      expect(nextRefreshSeconds([manual], _now), 1200);
+    });
+
+    test('failed cycles and recent reset checks honor an ungated Retry-After',
+        () {
+      final delayed = ProviderQuota.error(
+          'antigravity', 'Antigravity', 'metadata unavailable', _now,
+          retryAfterSeconds: 48 * 3600);
+      final expired = _q('codex', [
+        QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: _now - 1),
+      ]);
+      for (final failures in [0, 1, 2, 10]) {
+        expect(nextRefreshSeconds([delayed], _now, failStreak: failures),
+            48 * 3600);
+        expect(
+            nextRefreshSeconds([expired, delayed], _now,
+                failStreak: failures,
+                providersWithUsageCooldowns: {'codex', 'claude', 'grok'}),
+            48 * 3600);
+      }
+    });
+
+    test('fixed cadence retains explicit uncovered retry floors', () {
+      final delayed = ProviderQuota.error('claude', 'Claude', 'HTTP 429', _now,
+          pipeHealth: providerPipeHealthThrottled, retryAfterSeconds: 7200);
+      for (final seconds in [1, 900, 3600]) {
+        expect(
+            nextRefreshSeconds([delayed], _now,
+                fixedIntervalSeconds: seconds, failStreak: 5),
+            7200);
+        expect(
+            nextRefreshSeconds([delayed], _now,
+                fixedIntervalSeconds: seconds,
+                failStreak: 5,
+                providersWithUsageCooldowns: {'claude'}),
+            seconds);
+      }
+      expect(nextRefreshSeconds([delayed], _now, fixedIntervalSeconds: 86400),
+          86400);
+      expect(
+          nextRefreshSeconds([], _now,
+              fixedIntervalSeconds: 900, failStreak: 5),
+          900);
+      expect(nextRefreshSeconds([], _now, fixedIntervalSeconds: 0), 1);
+    });
+
+    test('a protected usage cooldown does not delay another live account', () {
+      final healthy = _q('codex', [
+        QuotaWindow(label: 'weekly', usedPercent: 30, resetsAt: _now + 86400),
+      ]);
+      final delayed = ProviderQuota.error('claude', 'Claude', 'HTTP 429', _now,
+          pipeHealth: providerPipeHealthThrottled, retryAfterSeconds: 7200);
+      expect(
+          nextRefreshSeconds([healthy, delayed], _now,
+              throttleStreak: 9,
+              providersWithUsageCooldowns: {'claude', 'codex'}),
+          300);
+      expect(
+          nextRefreshSeconds([delayed], _now,
+              failStreak: 9, providersWithUsageCooldowns: {'claude'}),
+          7200);
+      expect(needsFleetReadBackoff(delayed), isTrue);
+      expect(
+          needsFleetReadBackoff(delayed,
+              providersWithUsageCooldowns: {'claude'}),
+          isFalse);
+      expect(providerAvailability(delayed, _now).available, isFalse);
+    });
+
+    test('a rejected old pool gets bounded confirmation without a refill', () {
+      final previous = _q(
+          'codex',
+          [
+            QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: _now - 1),
+          ],
+          asOf: _now - 120);
+      final freshOldPool = _q('codex', previous.windows);
+      final rejected =
+          admitQuotaEvidence(freshOldPool, previous, observedAt: _now);
+      final pending = rejected.snapshot;
+      expect(rejected.shouldPersist, isFalse);
+      expect(pending.driftReason, isNotNull);
+      expect(pending.asOf, previous.asOf);
+      expect(providerAvailability(pending, _now).available, isFalse);
+      expect(providerHeadroom(pending, _now), 0);
+      expect(nextRefreshSeconds([pending], _now, failStreak: 3), 30);
+      expect(nextRefreshSeconds([pending], _now + 120, failStreak: 4), 120);
+      expect(
+          nextRefreshSeconds([pending], _now + 899, failStreak: 5), 6 * 3600);
+
+      final renewed = _q('codex', [
+        QuotaWindow(label: 'weekly', usedPercent: 5, resetsAt: _now + 86400),
+      ]);
+      final accepted = admitQuotaEvidence(renewed, previous, observedAt: _now);
+      expect(accepted.shouldPersist, isTrue);
+      expect(providerAvailability(accepted.snapshot, _now).available, isTrue);
+      expect(providerHeadroom(accepted.snapshot, _now), 95);
+      expect(nextRefreshSeconds([accepted.snapshot], _now), 300);
+    });
+
+    test('old or passive reset evidence cannot start a confirmation loop', () {
+      final expired = [
+        QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: _now - 1),
+      ];
+      for (final row in [
+        _q('codex', expired, stale: true, asOf: _now - 3 * 86400),
+        _q('cursor', expired),
+        _q('custom-ai', expired, source: providerQuotaManualSource),
+        _q('codex', expired, asOf: _now + 3600),
+        _q('codex', [
+          ...expired,
+          QuotaWindow(
+              label: 'invalid', usedPercent: 20, resetsAt: _now + 500 * 86400),
+        ]),
+        _q('codex', [
+          QuotaWindow(
+              label: 'weekly', usedPercent: double.nan, resetsAt: _now - 1),
+        ]),
+      ]) {
+        expect(nextRefreshSeconds([row], _now, failStreak: 1), 3600);
+        expect(providerAvailability(row, _now).available, isFalse);
+      }
+    });
+
+    test('passive-only fleets keep the gentle far-reset cadence', () {
+      final passive = _q('cursor', [
+        QuotaWindow(
+            label: 'monthly', usedPercent: 10, resetsAt: _now + 5 * 86400),
+      ]);
+      expect(nextRefreshSeconds([passive], _now), 12 * 3600);
     });
   });
 

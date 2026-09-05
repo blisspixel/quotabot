@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -18,6 +17,7 @@ import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as cli_demo;
 import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/labels.dart';
+import 'package:quotabot_collector/refresh_timer.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
@@ -30,8 +30,10 @@ import 'package:window_manager/window_manager.dart';
 import 'chrome_controls.dart';
 import 'demo.dart';
 import 'desktop_analytics.dart';
+import 'desktop_collection.dart';
 import 'desktop_notification_policy.dart';
 import 'desktop_readiness.dart';
+import 'desktop_refresh_recovery.dart';
 import 'first_run.dart';
 import 'fleet.dart';
 import 'headroom_colors.dart';
@@ -642,6 +644,8 @@ class Dashboard extends StatefulWidget {
   @visibleForTesting
   final DesktopNotificationPolicy? notificationPolicy;
   @visibleForTesting
+  final DesktopRefreshRecovery? refreshRecovery;
+  @visibleForTesting
   final FirstRunSession? firstRunSession;
   @visibleForTesting
   final UpdateChecker? updateChecker;
@@ -665,6 +669,7 @@ class Dashboard extends StatefulWidget {
       trayInitializer = null,
       notificationClient = null,
       notificationPolicy = null,
+      refreshRecovery = null,
       firstRunSession = null,
       updateChecker = null,
       releaseOpener = null,
@@ -691,6 +696,7 @@ class Dashboard extends StatefulWidget {
     this.trayInitializer,
     this.notificationClient,
     this.notificationPolicy,
+    this.refreshRecovery,
     this.firstRunSession,
     this.updateChecker,
     this.releaseOpener,
@@ -738,10 +744,13 @@ class _DashboardState extends State<Dashboard>
   bool _alertCheckPending = false;
   bool _isRefreshing = false;
   Future<void>? _refreshInFlight;
+  DesktopCollectionWorker? _collectionWorker;
+  bool _collectionClosing = false;
   bool _firstRunReviewOpen = false;
   late final FirstRunSession _firstRunSession;
   late final DesktopNotificationClient? _notificationClient;
   late final DesktopAnalyticsScheduler? _analyticsScheduler;
+  late final DesktopRefreshRecovery _refreshRecovery;
   DesktopAnalyticsState _analyticsState = DesktopAnalyticsState.ready;
   int _quotaRevision = 0;
   final FocusNode _routeExplanationFocusNode = FocusNode(
@@ -973,6 +982,13 @@ class _DashboardState extends State<Dashboard>
   @override
   void initState() {
     super.initState();
+    _refreshRecovery =
+        widget.refreshRecovery ??
+        DesktopRefreshRecovery(
+          screenshotCapture:
+              _shotsMode || Platform.environment['QUOTABOT_SHOT'] == '1',
+          readinessProbe: _desktopReadiness.enabled,
+        );
     _firstRunSession =
         widget.firstRunSession ??
         (widget._hostIntegration ? _processFirstRunSession : FirstRunSession());
@@ -1029,7 +1045,11 @@ class _DashboardState extends State<Dashboard>
     // Thirty seconds is plenty when the labels are in minutes, and avoids the
     // distraction of a per-second ticking clock.
     _tick = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted && _windowVisible) setState(() {});
+      final paused = _refreshRecovery.observeDisplayTick();
+      if (mounted && _windowVisible) {
+        if (paused) _refreshOnReturn();
+        setState(() {});
+      }
     });
   }
 
@@ -1153,6 +1173,8 @@ class _DashboardState extends State<Dashboard>
 
   @override
   void dispose() {
+    _collectionClosing = true;
+    unawaited(_collectionWorker?.close());
     _windowGeometryRevision++;
     _analyticsScheduler?.dispose();
     if (widget._hostIntegration) {
@@ -1268,14 +1290,24 @@ class _DashboardState extends State<Dashboard>
     _windowVisible = true;
     await windowManager.show();
     await windowManager.focus();
-    if (mounted) setState(() {});
+    if (mounted) {
+      _refreshOnReturn();
+      setState(() {});
+    }
   }
 
   Future<void> _quit() async {
+    if (_collectionClosing) return;
+    _collectionClosing = true;
+    _refreshTimer?.cancel();
     _windowMoveRevision++;
     _windowMovePersistTimer?.cancel();
     await _persistPrefs();
     await Prefs.flush();
+    await waitForDesktopCollectionBeforeExit(
+      _collectionWorker?.close(),
+      exitProcess: () => exit(0),
+    );
     await windowManager.setPreventClose(false);
     await trayManager.destroy();
     await windowManager.destroy();
@@ -1334,7 +1366,13 @@ class _DashboardState extends State<Dashboard>
       'hide' || 'minimize' => false,
       _ => null,
     };
-    if (visible == null || visible == _windowVisible) return;
+    if (!mounted || visible == null) return;
+    // A visible window can regain focus without a visibility transition.
+    // Check these events before the repaint-only early return.
+    if (eventName == 'show' || eventName == 'restore' || eventName == 'focus') {
+      _refreshOnReturn();
+    }
+    if (visible == _windowVisible) return;
     _windowVisible = visible;
     if (visible && mounted) setState(() {});
   }
@@ -1400,17 +1438,12 @@ class _DashboardState extends State<Dashboard>
   /// synchronous parts of a collect (SQLite reads, protobuf decode, JSON
   /// parsing) do not block the main isolate and stall the loading animation.
   ///
-  /// Falls back to the main isolate if the background isolate cannot run the
-  /// collector (for example a native-library initialization failure), so
-  /// collection always works, just less smoothly. Test injection bypasses the
-  /// isolate entirely.
-  Future<List<ProviderQuota>> _collectProviders() async {
+  /// The reusable worker retains ownership of requests beyond a fleet timeout.
+  /// Test injection bypasses the worker; an unknown production worker failure
+  /// never starts an overlapping fallback collection in the UI isolate.
+  Future<List<ProviderQuota>> _collectProviders() {
     if (widget.collector != null) return widget.collector!();
-    try {
-      return await Isolate.run(collectAll);
-    } catch (_) {
-      return collectAll();
-    }
+    return (_collectionWorker ??= DesktopCollectionWorker()).collect();
   }
 
   String? get _analyticsStatusLine {
@@ -1499,6 +1532,7 @@ class _DashboardState extends State<Dashboard>
   }
 
   Future<void> _refresh() {
+    if (_collectionClosing) return Future.value();
     final inFlight = _refreshInFlight;
     if (inFlight != null) return inFlight;
 
@@ -1510,6 +1544,31 @@ class _DashboardState extends State<Dashboard>
     });
     _refreshInFlight = tracked;
     return tracked;
+  }
+
+  void _refreshOnReturn() {
+    if (!mounted ||
+        _loading ||
+        _refreshInFlight != null ||
+        (widget._demoModeOverride ?? _demoMode)) {
+      return;
+    }
+    // Reuse the actual scheduled due time while the collector is backing off.
+    // Manual refresh and the existing timer retain their current behavior.
+    final guardedProviders = widget._hostIntegration
+        ? providersWithMetadataUsageCooldowns()
+        : const <String>{};
+    final backingOff =
+        _failStreak > 0 ||
+        _data.any(
+          (quota) => needsFleetReadBackoff(
+            quota,
+            providersWithUsageCooldowns: guardedProviders,
+          ),
+        );
+    if (_refreshRecovery.shouldRefreshOnReturn(backingOff: backingOff)) {
+      unawaited(_refresh());
+    }
   }
 
   Future<void> _performRefresh() async {
@@ -1601,7 +1660,8 @@ class _DashboardState extends State<Dashboard>
         });
       }
     } finally {
-      if (mounted) {
+      if (mounted && !_collectionClosing) {
+        _refreshRecovery.recordCompletedAttempt();
         _scheduleNext();
         setState(() => _isRefreshing = false);
       }
@@ -1659,26 +1719,31 @@ class _DashboardState extends State<Dashboard>
     }
   }
 
-  /// Adaptive polling: fast only when a reset is imminent or a cap is nearly
-  /// hit; slow when everything is healthy and resets are far away.
+  /// Adaptive polling keeps live balances current and confirms reset boundaries.
+  /// Each covered provider enforces its own usage cooldown below this timer.
   void _scheduleNext() {
     _refreshTimer?.cancel();
-    _refreshTimer = Timer(_nextInterval(), _refresh);
+    final seconds = _nextIntervalSeconds();
+    _refreshRecovery.recordScheduleSeconds(seconds);
+    _refreshTimer = RefreshTimer.seconds(seconds, _refresh);
   }
 
-  Duration _nextInterval() {
-    // Fixed cadences override the smart logic.
-    if (_cadence == Cadence.m15) return const Duration(minutes: 15);
-    if (_cadence == Cadence.h1) return const Duration(hours: 1);
-    // The adaptive cadence is shared with the CLI's `top` so both poll alike.
+  int _nextIntervalSeconds() {
+    // A fixed cadence still honors uncovered providers' explicit retry floor.
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    return Duration(
-      seconds: nextRefreshSeconds(
-        _data,
-        now,
-        failStreak: _failStreak,
-        throttleStreak: _throttleStreak,
-      ),
+    return nextRefreshSeconds(
+      _data,
+      now,
+      failStreak: _failStreak,
+      throttleStreak: _throttleStreak,
+      fixedIntervalSeconds: switch (_cadence) {
+        Cadence.m15 => 15 * 60,
+        Cadence.h1 => 3600,
+        Cadence.smart => null,
+      },
+      providersWithUsageCooldowns: widget._hostIntegration
+          ? providersWithMetadataUsageCooldowns()
+          : const <String>{},
     );
   }
 
@@ -5097,6 +5162,8 @@ class ProviderTile extends StatelessWidget {
         ? const Color(0xFFD29922)
         : !trustedEvidence
         ? muted
+        : quota.requestAdmission.blocksRequests
+        ? muted
         : binding == null
         ? muted
         : _availColor(binding.remaining);
@@ -5137,6 +5204,7 @@ class ProviderTile extends StatelessWidget {
     final forecast =
         (quota.isLocal ||
             !trustedEvidence ||
+            quota.requestAdmission.blocksRequests ||
             blocked ||
             binding == null ||
             !hasInsights)
@@ -5298,6 +5366,19 @@ class ProviderTile extends StatelessWidget {
                 ),
               if (quota.suspect != null && quota.driftReason == null)
                 _providerSuspectRow(quota.suspect!, const Color(0xFFD29922)),
+              if (requestAdmissionLabel(quota.requestAdmission)
+                  case final admission?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text(
+                    admission,
+                    style: TextStyle(
+                      fontSize: AppType.small,
+                      fontWeight: FontWeight.w600,
+                      color: muted,
+                    ),
+                  ),
+                ),
               if (resetMessage != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 3),
@@ -5388,6 +5469,7 @@ class ProviderTile extends StatelessWidget {
                   now,
                   muted,
                   evidenceLabel: evidenceLabel,
+                  requestsBlocked: quota.requestAdmission.blocksRequests,
                   largeText: MediaQuery.textScalerOf(context).scale(10) > 14,
                 ),
                 if (secondaryWin != null)
@@ -5398,6 +5480,7 @@ class ProviderTile extends StatelessWidget {
                       muted: muted,
                       fg: fg,
                       evidenceLabel: evidenceLabel,
+                      requestsBlocked: quota.requestAdmission.blocksRequests,
                     ),
                   ),
               ] else
@@ -5409,6 +5492,7 @@ class ProviderTile extends StatelessWidget {
                       muted: muted,
                       fg: fg,
                       evidenceLabel: evidenceLabel,
+                      requestsBlocked: quota.requestAdmission.blocksRequests,
                     ),
                   ),
                 ),
@@ -5822,6 +5906,7 @@ class ProviderTile extends StatelessWidget {
     int now,
     Color muted, {
     String? evidenceLabel,
+    bool requestsBlocked = false,
     required bool largeText,
   }) {
     const red = Color(0xFFF85149);
@@ -5834,7 +5919,7 @@ class ProviderTile extends StatelessWidget {
         ? ''
         : resetPassedWithoutCurrentEvidence
         ? 'refresh to confirm'
-        : evidenceLabel == null
+        : evidenceLabel == null && !requestsBlocked
         ? 'available ${backLabel(v.resetsAt, now)}'
         : 'reset ${backLabel(v.resetsAt, now)}';
     final stateColor = evidenceLabel == null ? red : muted;
@@ -6092,7 +6177,9 @@ String? desktopScopedModelEvidenceLabel(
   final reset = modelQuota.resetsAt;
   if (reset != null && reset <= now) return 'last observed';
   if (!isTrustedQuotaEvidenceAt(quota, now)) return 'unverified';
-  return null;
+  return requestAdmissionLabel(
+    quota.requestAdmission.combine(modelQuota.requestAdmission),
+  );
 }
 
 /// Deterministic quota-row estimate used by the native window sizing fallback.
@@ -6169,18 +6256,22 @@ class WindowBar extends StatelessWidget {
   final Color muted;
   final Color fg;
   final String? evidenceLabel;
+  final bool requestsBlocked;
   const WindowBar({
     super.key,
     required this.view,
     required this.muted,
     required this.fg,
     this.evidenceLabel,
+    this.requestsBlocked = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final remaining = view.remaining;
-    final color = evidenceLabel == null ? _availColor(remaining) : muted;
+    final color = evidenceLabel == null && !requestsBlocked
+        ? _availColor(remaining)
+        : muted;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final chrome = AppChromeTheme.of(context);
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
@@ -6739,6 +6830,10 @@ PStatus providerStatus(ProviderQuota q, int now) {
     if (q.suspect != null && q.driftReason == null) {
       return const PStatus(Color(0xFFD29922), true, false);
     }
+    return const PStatus(Color(0xFF8A91A0), true, false);
+  }
+  if (q.requestAdmission.blocksRequests) {
+    // Keep measured windows visible. An access denial is not a spent balance.
     return const PStatus(Color(0xFF8A91A0), true, false);
   }
   return PStatus(_availColor(h), true, h <= kSpentHeadroomFloor);
