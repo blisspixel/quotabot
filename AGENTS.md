@@ -46,10 +46,11 @@ shipped routing policies are `balanced`,
 `local_first`, and opt-in `quota_stretch`. The bounded provider-ID cache
 coordinator passed the complete release, install, update, and source-setup
 lifecycle on Windows, macOS, and Linux; the shipped alias map remains empty. The
-next work continues native field validation and signed 1.0 readiness, with no
-new product breadth during stabilization. Later credit-backed balance visibility
-and expanded local-resource sampling remain explicit post-stabilization tracks.
-The
+next work makes local models inspectable, improves native platform quality, and
+adds versioned advisory support for named agent harnesses. Useful product work
+continues while publisher identities are provisioned; signed native evidence
+remains a 1.0 release gate. Credit-backed balances retain their separate typed
+pool and explicit-spend requirements. The
 [roadmap Next section](ROADMAP.md#next) is the sole source for its
 behavior, guardrails, completion criteria, and rationale.
 
