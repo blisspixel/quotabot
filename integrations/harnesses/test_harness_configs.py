@@ -82,7 +82,10 @@ class HarnessConfigurationTests(unittest.TestCase):
                 server = server_for(harness, fragment)
                 command = server["command"]
                 self.assertEqual(
-                    command, [str(binary)] if isinstance(command, list) else str(binary)
+                    command,
+                    [str(binary.resolve())]
+                    if isinstance(command, list)
+                    else str(binary.resolve()),
                 )
                 self.assertNotIn("cwd", server)
                 self.assertNotIn("run", server.get("args", []))
@@ -121,7 +124,7 @@ class HarnessConfigurationTests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             self.assertEqual(main(["hermes", "--quotabot", str(binary)]), 0)
         server = server_for("hermes", json.loads(output.getvalue()))
-        self.assertEqual(server["command"], str(binary))
+        self.assertEqual(server["command"], str(binary.resolve()))
         self.assertEqual(server["args"], ["mcp"])
 
     def test_http_fragments_never_read_the_bearer_value(self) -> None:
@@ -198,7 +201,9 @@ class HarnessConfigurationTests(unittest.TestCase):
     def test_path_lookup_is_explicit_and_does_not_launch_dart(self) -> None:
         with patch("render_config.shutil.which", return_value=str(self.dart)):
             config = render_config("openclaw", "stdio", collector=self.collector)
-        self.assertEqual(server_for("openclaw", config)["command"], str(self.dart))
+        self.assertEqual(
+            server_for("openclaw", config)["command"], str(self.dart.resolve())
+        )
         with patch("render_config.shutil.which", return_value=None):
             with self.assertRaisesRegex(ValueError, "Dart was not found"):
                 render_config("openclaw", "stdio", collector=self.collector)
@@ -260,7 +265,7 @@ class HarnessConfigurationTests(unittest.TestCase):
         self.assertTrue(serialized.isascii())
         self.assertEqual(
             json.loads(serialized)["mcp_servers"]["quotabot"]["command"],
-            str(executable),
+            str(executable.resolve()),
         )
 
     def test_main_prints_one_json_document_and_no_file(self) -> None:
