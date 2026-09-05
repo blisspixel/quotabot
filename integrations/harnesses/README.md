@@ -4,8 +4,9 @@ Connect a harness to quotabot's quota tools, or consult the CLI before choosing
 a model. These examples do not automatically select a model or route a request.
 They do not read or modify a harness's configuration, credentials, or sessions.
 
-Reviewed 2026-09-04 against quotabot 0.10.3. Configuration is based on the
-upstream versions below. Installed-harness smoke has not been performed;
+Originally reviewed against quotabot 0.10.3; tool visibility was rechecked on
+2026-09-05 against the pinned upstream commits below. Installed-harness loading
+has not been validated;
 parseable configuration and a working quotabot transport do not prove that a
 particular harness has loaded it.
 
@@ -144,20 +145,33 @@ quotabot's bearer-only endpoint. The two current lease tools are disabled by
 name in the tool configuration. Other MCP metadata tools remain visible.
 [OpenCode MCP](https://opencode.ai/docs/mcp-servers/).
 
-OpenClaw uses `mcp.servers.quotabot` and an explicit advisory tool allowlist.
+OpenClaw uses `mcp.servers.quotabot.toolFilter.include` for its advisory
+allowlist. `tools.include` is not an alias in the reviewed runtime and would
+leave the tools unfiltered. Its generated resource/prompt helpers pass through
+the same allowlist, so they remain hidden.
 Its HTTP fragment explicitly selects `streamable-http`; omitting this would
 select SSE in current OpenClaw. This is an outbound MCP client configuration.
 `openclaw mcp serve` instead exposes OpenClaw itself and is not needed here.
 [MCP reference](https://docs.openclaw.ai/cli/mcp),
 [transport details](https://docs.openclaw.ai/plugins/bundles),
-[tagged fields](https://github.com/openclaw/openclaw/blob/v2026.9.1/src/config/types.mcp.ts).
+[pinned filter implementation](https://github.com/openclaw/openclaw/blob/ad6fe23aecb9b833d68139b0ddc9f239b894d2f1/src/agents/agent-bundle-mcp-runtime.ts).
 
-Hermes uses `mcp_servers.quotabot`, an advisory tool allowlist, and disabled MCP
-sampling. Its default URL transport is Streamable HTTP. The tagged implementation
+Hermes uses `mcp_servers.quotabot.tools.include` and separately sets
+`tools.resources: false` and `tools.prompts: false`. These utility families
+default to enabled independently of the native tool allowlist. MCP sampling
+is disabled. Its default URL transport is Streamable HTTP. The pinned implementation
 accepts a stdio working directory and separate executable/argument fields.
 [configuration reference](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference),
 [MCP sampling](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp),
-[tagged transport source](https://github.com/NousResearch/hermes-agent/blob/v2026.8.31/tools/mcp_tool.py).
+[pinned transport and utility policy](https://github.com/NousResearch/hermes-agent/blob/29112bef099274229cadff79cdff7bf7b99c4b77/tools/mcp_tool.py).
+
+Both recipes expose exactly six advisory tools: `decide_now`, `list_quotas`,
+`suggest_provider`, `check_provider_availability`, `list_models`, and
+`suggest_model`. Lease operations and resource/prompt helpers remain hidden.
+If you applied an earlier fragment, render a new one and replace only the
+quotabot server entry using the client's configuration controls. For OpenClaw,
+remove the old `tools` key when adding `toolFilter`; for Hermes, retain the
+include list and add both explicit utility toggles.
 
 Client tool filters control visibility in that harness. They are not a server
 authorization boundary. Metadata calls can still refresh quotabot's own cache,
@@ -205,12 +219,19 @@ python -m unittest discover -s integrations/harnesses -p "test_*.py"
 The configuration tests check machine-readable output, real source/file
 assumptions, paths, the three different config shapes, fixed loopback endpoints,
 secret references, disabled sampling, and absence of model/provider changes.
+An independent [source-derived catalog fixture](fixtures/README.md) pins the
+OpenClaw and Hermes filter rules to exact commits. Its tests compare rendered
+recipes with the six-tool catalog and reproduce the ignored-key and implicit
+utility-default failures. They do not run either upstream harness.
 The optional entrypoint smoke runs only when `QUOTABOT_HARNESS_SMOKE=1` or an
 explicit `QUOTABOT_HARNESS_TEST_DART` executable path is supplied. It uses that
 path or resolves Dart from PATH and performs only legacy MCP initialization and
 tool-list exchange. It isolates the child home directories and removes provider
 credentials from the child's environment. It never invokes a quota tool, model,
 harness diagnostic, or onboarding command.
+The returned native catalog is also checked against the same source-derived
+visibility contract. This proves that the requested advice tools exist in the
+actual server, while successful client loading remains a separate check.
 
 Run it sequentially after other collector processes finish. Bash:
 
@@ -229,7 +250,16 @@ Remove-Item Env:QUOTABOT_HARNESS_SMOKE
 An executed quotabot entrypoint smoke proves the server launch contract on that
 host. It does not prove the harness parsed the fragment, loaded its filters,
 inherited its environment, or changed its selected model. Native harness smoke
-remains explicitly unperformed in the compatibility record.
+remains unverified in the compatibility record.
+
+An isolated Windows attempt on 2026-09-05 used the exact OpenClaw `2026.9.1`
+distribution, Node `24.15.0`, the corrected renderer, and the native quotabot
+CLI. Its `mcp probe quotabot --json` startup hit the fixture's synchronous-child
+process restriction before MCP initialization. No catalog was obtained, so
+this is an incomplete validation attempt. Input configuration and the quotabot
+bundle were unchanged, and the isolated quotabot profile stayed empty. The
+source-derived filter checks above pass independently; they do not turn this
+attempt into a supported native-loader claim.
 
 On 2026-09-05, the installed Windows OpenCode package and its native
 `--version` output both identified version `1.15.13`, older than the reviewed

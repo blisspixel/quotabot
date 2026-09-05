@@ -164,7 +164,8 @@ class HarnessConfigurationTests(unittest.TestCase):
     def test_openclaw_explicitly_selects_streamable_http(self) -> None:
         server = server_for("openclaw", render_config("openclaw", "http"))
         self.assertEqual(server["transport"], "streamable-http")
-        self.assertEqual(server["tools"]["include"], list(ADVISORY_TOOLS))
+        self.assertEqual(server["toolFilter"]["include"], list(ADVISORY_TOOLS))
+        self.assertNotIn("tools", server)
         self.assertNotIn("auth", server)
         self.assertLessEqual(server["requestTimeoutMs"], 30000)
 
@@ -179,6 +180,8 @@ class HarnessConfigurationTests(unittest.TestCase):
             self.assertEqual(server["protocol"], "legacy")
             self.assertFalse(server["sampling"]["enabled"])
             self.assertEqual(server["tools"]["include"], list(ADVISORY_TOOLS))
+            self.assertFalse(server["tools"]["resources"])
+            self.assertFalse(server["tools"]["prompts"])
             self.assertNotIn("transport", server)
 
     def test_missing_source_package_dart_and_binary_fail_before_output(self) -> None:
@@ -309,7 +312,7 @@ class HarnessConfigurationTests(unittest.TestCase):
         self.assertEqual(manifest["protocol_mode"], "legacy_initialize")
         self.assertEqual(manifest["cli_mcp_minimum_version"], "0.11.0")
         self.assertFalse(manifest["automatic_model_selection"])
-        self.assertEqual(manifest["harness_native_smoke"], "not_performed")
+        self.assertEqual(manifest["harness_native_smoke"], "not_validated")
         harnesses = {entry["id"]: entry for entry in manifest["harnesses"]}
         for harness in HARNESS_IDS:
             self.assertEqual(harnesses[harness]["support"], "documented_configuration")

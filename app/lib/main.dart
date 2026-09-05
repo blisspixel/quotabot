@@ -502,7 +502,7 @@ class QuotaBotApp extends StatelessWidget {
     final base = ThemeData(
       brightness: b,
       scaffoldBackgroundColor: chrome.scaffold,
-      fontFamily: 'Segoe UI',
+      fontFamily: AppType.fontFamily,
       colorScheme: ColorScheme.fromSeed(seedColor: chrome.accent, brightness: b)
           .copyWith(
             primary: chrome.accent,

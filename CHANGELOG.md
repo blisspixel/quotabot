@@ -6,6 +6,12 @@ Notable changes to quotabot. Newest first.
 
 ## 0.11.1 - 2026-09-05
 
+### Changed
+
+- The README presents four static views and a wide mini-view strip, with a
+  repeatable capture command. Analytics chart labels share the application's
+  font family instead of relying on a separate canvas default.
+
 ### Fixed
 
 - Desktop refresh publishes collected quota before reading advisory analytics.
@@ -21,6 +27,9 @@ Notable changes to quotabot. Newest first.
 - A CLI schedule-hint test now keeps its supported slot ahead of a possible
   startup hour boundary, with a fixed-clock regression preserving strict
   before-reset scheduling.
+- Harness recipes use OpenClaw's supported advisory filter key and explicitly
+  disable Hermes resource and prompt utility tools. The configured advisory
+  surface remains distinct from the MCP server's complete tool catalog.
 
 ## 0.11.0 - 2026-09-05
 

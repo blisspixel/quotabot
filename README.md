@@ -27,17 +27,40 @@ is the complete workflow; the desktop app is optional.
 
 ## What it looks like
 
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/gallery/quota.png"><img src="docs/gallery/quota.png" alt="Quota overview with remaining five-hour and weekly allowances" width="420"></a><br>
+      <strong>Quota at a glance</strong><br>
+      Remaining allowance and the next available account.
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/gallery/local-models.png"><img src="docs/gallery/local-models.png" alt="Local model details with loaded state, context, capabilities and memory evidence" width="420"></a><br>
+      <strong>Local model detail</strong><br>
+      Inspect what is loaded and what the runtime reports.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/gallery/analytics.png"><img src="docs/gallery/analytics.png" alt="Ninety-day quota distributions and reliability trends" width="420"></a><br>
+      <strong>Usage over time</strong><br>
+      Compare headroom, reliability and changing demand.
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/gallery/terminal.png"><img src="docs/gallery/terminal.png" alt="quotabot top terminal view with quota bars and a provider recommendation" width="420"></a><br>
+      <strong>The terminal dashboard</strong><br>
+      Keep quota advice beside your command-line work.
+    </td>
+  </tr>
+</table>
+
 <p align="center">
-  <a href="docs/screenshot-top.png"><img src="docs/screenshot-top.png" alt="quotabot top CLI terminal dashboard using synthetic demo quota" width="760"></a>
+  <a href="docs/gallery/mini.png"><img src="docs/gallery/mini.png" alt="Wide mini view with the suggested account and provider status indicators" width="860"></a><br>
+  <strong>Mini view</strong> - a quiet status strip alongside your work.
 </p>
 
-<p align="center"><sub>The standalone <code>quotabot top</code> CLI, captured from the real terminal dashboard renderer with built-in synthetic demo data.</sub></p>
-
-<p align="center">
-  <a href="docs/quotabot-demo.gif"><img src="docs/quotabot-demo.gif" alt="quotabot CLI and optional desktop views using synthetic demo quota" width="520"></a>
-</p>
-
-<p align="center"><sub>Five generated demo views at 3 seconds per frame. <a href="docs/screenshot-widget.png">Desktop still</a> | <a href="docs/screenshot-analytics.png">Analytics still</a></sub></p>
+Synthetic demo data, rendered with the real app widgets and terminal renderer.
+Click any image for the full size. [Reproduce the gallery](docs/gallery/README.md).
 
 ## Quick start
 
