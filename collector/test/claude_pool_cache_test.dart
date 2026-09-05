@@ -1,3 +1,6 @@
+@Timeout(Duration(minutes: 2))
+library;
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,8 +11,21 @@ void main() {
   setUp(() {
     temp = Directory.systemTemp.createTempSync('quotabot_claude_pool_');
   });
-  tearDown(() {
-    temp.deleteSync(recursive: true);
+  tearDown(() async {
+    for (var attempt = 0;; attempt++) {
+      try {
+        await temp.delete(recursive: true);
+        break;
+      } on FileSystemException catch (error) {
+        if (!Platform.isWindows ||
+            error.osError?.errorCode != 32 ||
+            attempt >= 5) {
+          rethrow;
+        }
+        // A terminated fixture's native helper may still be releasing its cwd.
+        await Future<void>.delayed(Duration(milliseconds: 100 * (attempt + 1)));
+      }
+    }
   });
 
   Future<Map<String, dynamic>> scenario(String name) async {
@@ -48,8 +64,10 @@ void main() {
     final errors = process.stderr.transform(utf8.decoder).join();
     var timedOut = false;
     try {
-      final code = await process.exitCode.timeout(const Duration(seconds: 25),
-          onTimeout: () {
+      // This budget includes native ACL operations across several fresh
+      // isolates, rather than measuring one adapter's publication deadline.
+      final code = await process.exitCode.timeout(
+          Duration(seconds: Platform.isWindows ? 90 : 30), onTimeout: () {
         timedOut = true;
         process.kill();
         return process.exitCode;
@@ -63,6 +81,7 @@ void main() {
     } finally {
       process.kill();
       await process.exitCode;
+      await Future.wait([output, errors]);
     }
   }
 
