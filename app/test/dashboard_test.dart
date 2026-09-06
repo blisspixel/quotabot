@@ -3299,6 +3299,37 @@ void main() {
     expect(find.text('82% free'), findsOneWidget);
   });
 
+  testWidgets('a healthy window names the reset event, not just its time', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    await tester.pumpWidget(
+      _wrap(
+        SizedBox(
+          width: 500,
+          // Far enough out to render an absolute day and time rather than a
+          // countdown, which is the ambiguous case: a bare "Fri 1:59 AM" beside
+          // a headroom percentage does not say whether quota arrives or expires.
+          child: WindowBar(
+            view: WinView('weekly', 23, false, now + 3 * 86400),
+            muted: Colors.grey,
+            fg: Colors.white,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.textContaining('23% free'), findsOneWidget);
+    expect(
+      find.textContaining('resets'),
+      findsOneWidget,
+      reason:
+          'the spent card already says "available"; a healthy card must '
+          'name its event too, and top already says "resets"',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('a withdrawn meter keeps the number and drops the track', (
     tester,
   ) async {
@@ -3321,7 +3352,8 @@ void main() {
     expect(
       find.byType(QuotaMeter),
       findsNothing,
-      reason: 'an empty or full track still reads as a level, which unbounded '
+      reason:
+          'an empty or full track still reads as a level, which unbounded '
           'stale evidence cannot assert',
     );
     expect(

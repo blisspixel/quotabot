@@ -1499,7 +1499,7 @@ void main() {
     // Safe spaces let the full day and time wrap only when the column needs it.
     expect(
       find.textContaining(
-        RegExp(r'37% free\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s\d.*[AP]M'),
+        RegExp(r'37% free\s+resets\s(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s\d.*[AP]M'),
       ),
       findsOneWidget,
     );

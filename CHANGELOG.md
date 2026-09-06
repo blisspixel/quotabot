@@ -27,6 +27,11 @@ Notable changes to quotabot. Newest first.
   evidence and hard failures alike, and a signed-out or errored provider has no
   cached value, so `CACHED` became `NEEDS ATTENTION`. Grouping is unchanged: a
   failure is still never idle.
+- A healthy desktop window names its reset event instead of showing a bare time.
+  "23% free   Fri 1:59 AM" read equally as "expires then" or "refills then",
+  while a spent card already said "available Sat 7:03 AM" and `top` already said
+  "resets". Healthy cards now say "resets Fri 1:59 AM", so both states and both
+  surfaces name the event rather than only its time.
 - The desktop update dialog states that quotabot cannot install its own update
   and that the next steps are manual, and its actions all say `release` rather
   than promising an `update` that opens a web page. On macOS an available update

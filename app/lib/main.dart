@@ -6318,8 +6318,8 @@ class WindowBar extends StatelessWidget {
         ? 'ready'
         : showsReset
         ? largeText
-              ? '${remaining.round()}% free\n${resetLabel(view.resetsAt, now)}'
-              : '${remaining.round()}% free  ${resetLabel(view.resetsAt, now)}'
+              ? '${remaining.round()}% free\n${resetsLabel(view.resetsAt, now)}'
+              : '${remaining.round()}% free  ${resetsLabel(view.resetsAt, now)}'
         : '${remaining.round()}% free';
 
     final label = _WindowBarText(
