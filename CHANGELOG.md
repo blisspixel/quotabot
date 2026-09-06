@@ -20,6 +20,21 @@ Notable changes to quotabot. Newest first.
   ellipsis, so a row states both the diagnosis and the repair step at ordinary
   widths. The line budget stays bounded, and only the last line can still be
   trimmed.
+- Antigravity fails closed on a malformed model fraction whether or not a reset
+  accompanies it. The fraction parser returns null for an absent value and an
+  out-of-range one alike, so an unparseable fraction was fatal when a reset was
+  present but silently skipped when it was not, dropping a possibly-binding pool
+  and reporting the survivors as the whole account. A genuinely absent fraction
+  still identifies the non-metered helper rows.
+- Kiro reports a spent pool from any usage breakdown, not only the first. Its
+  breakdowns arrive in producer order rather than severity order, so a healthy
+  leading row hid a fully spent sibling. It now uses the same scan Cursor and
+  Windsurf already shared, promoted to one function instead of three copies.
+- Local host memory, adapter, and utilization are separate detail lines rather
+  than one joined sentence. Joined they formed the longest string in the
+  product, which no provider card or terminal row could render whole, so the
+  local runtime section was cut off mid-figure on both surfaces. Local card
+  details also wrap now; cloud details already did.
 
 ### Changed
 

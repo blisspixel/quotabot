@@ -963,11 +963,19 @@ List<_AntigravityLiveQuotaRow>? _antigravityLiveQuotaRows(
     // still carry a quota block with a full remaining fraction and no reset. A
     // fully absent block could hide a constrained variant, so fail closed.
     if (quotaInfo is! Map) return null;
-    final remainingFraction = _fraction(quotaInfo['remainingFraction']);
+    final rawFraction = quotaInfo['remainingFraction'];
+    final remainingFraction = _fraction(rawFraction);
     final resetsAt = parseReset(quotaInfo['resetTime']);
     final exhausted = quotaInfo['isExhausted'];
     if (exhausted != null && exhausted is! bool) return null;
     if (resetsAt == null || resetsAt <= 0) {
+      // A fraction that is present but unparseable is the same malformed
+      // evidence that is fatal when a reset exists, so it fails closed here
+      // too. Only a genuinely absent fraction identifies the non-metered
+      // helper rows below. Without this split, `_fraction` returning null for
+      // absent and malformed alike let an out-of-range value skip the row and
+      // overstate the account's headroom.
+      if (rawFraction != null && remainingFraction == null) return null;
       // No rolling window. That is a non-metered helper only when it also shows
       // no consumption (a full or absent fraction, like the tab-completion and
       // chat rows). A row that shows real consumption but carries no reset is an

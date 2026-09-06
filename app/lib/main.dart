@@ -1887,7 +1887,11 @@ class _DashboardState extends State<Dashboard>
             card += 28;
           }
           if (q.isLocal || isExpanded) {
-            card += q.details.length * 14; // detail lines
+            // Local detail lines wrap to as many as three rows, and the host
+            // memory line usually needs two. Budget two so the first frame,
+            // which is drawn before the rendered height can be measured, does
+            // not open too short and clip the runtime section.
+            card += q.details.length * (q.isLocal ? 28 : 14);
           }
           if (q.isLocal) card += 34; // model inventory detail control
           if (isExpanded && (_history[key] ?? const []).isNotEmpty) {
@@ -6069,7 +6073,11 @@ class ProviderTile extends StatelessWidget {
             padding: const EdgeInsets.only(top: 3, left: 19),
             child: Text(
               detail,
-              maxLines: 1,
+              // Local runtimes carry the longest detail strings in the product
+              // - the host memory line names RAM, VRAM, the adapter, and
+              // utilization in one sentence - so a single line cut them off
+              // mid-figure. Cloud details already had two.
+              maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: AppType.small, color: muted),
             ),
@@ -6138,7 +6146,9 @@ class ProviderTile extends StatelessWidget {
             padding: const EdgeInsets.only(top: 3, left: 19),
             child: Text(
               d,
-              maxLines: 1,
+              // Matches the other local detail list: the host memory line does
+              // not fit on one line at ordinary card widths.
+              maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: AppType.small, color: muted),
             ),

@@ -1825,6 +1825,55 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('the local host memory line is not clipped to one line', (
+    tester,
+  ) async {
+    // The host facts now arrive as separate observations rather than one
+    // joined sentence. Each must still render whole on an ordinary card.
+    const hostLines = [
+      'Local host RAM 32.8 GB of 63.9 GB used (51%)',
+      'Local host VRAM 3.0 GB of 24.0 GB used (12%) . NVIDIA GeForce RTX 4090',
+      'Local host GPU utilization 27%',
+    ];
+    final q = ProviderQuota(
+      provider: 'ollama',
+      displayName: 'Ollama',
+      account: '14 models',
+      kind: ProviderQuotaKind.local,
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      status: 'qwen3.5 9.7B Q4_K_M loaded',
+      perMachine: true,
+      details: const ['14 installed . 203.3 GB on disk', ...hostLines],
+      models: const [ModelInfo(id: 'qwen3.5:9b', local: true, loaded: true)],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        SizedBox(
+          width: 340,
+          child: ProviderTile(quota: q, cardColor: const Color(0xFF1A1A1A)),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    for (final hostLine in hostLines) {
+      final line = find.text(hostLine);
+      expect(line, findsOneWidget, reason: hostLine);
+      expect(
+        tester.widget<Text>(line).maxLines,
+        greaterThan(1),
+        reason: 'host detail lines wrap at ordinary card widths: $hostLine',
+      );
+      expect(
+        tester.renderObject<RenderParagraph>(line).didExceedMaxLines,
+        isFalse,
+        reason: 'each host fact must render whole, not ellipsized: $hostLine',
+      );
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('unavailable local runtime never appears active', (tester) async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final staleLocal = ProviderQuota(

@@ -66,14 +66,16 @@ class KiroAdapter {
       if (windows.isEmpty) {
         err = 'no quota data found in local state';
       } else {
-        final main = windows.first;
-        // Once this passive window's reset has passed, the stored percentage is
-        // last-known evidence rather than proof that the new pool is spent. The
-        // collector marks it stale; do not also claim current out-of-quota.
-        if (!windowHasRolledOver(main, asOf) &&
-            windowHeadroom(main, asOf) <= kSpentHeadroomFloor) {
+        // Kiro reports one window per usage breakdown in producer order, which
+        // is not severity order, so naming only the first could report a
+        // healthy pool while a sibling pool is fully spent. Scan every window
+        // the way the other passive adapters do. A window whose reset has
+        // already passed is last-known evidence rather than proof the
+        // replacement pool is spent, and the shared helper skips it.
+        final spent = bindingCurrentSpentWindow(windows, asOf);
+        if (spent != null) {
           err =
-              'out of quota (resets ${resetCountdownLabel(main.resetsAt, asOf)})';
+              'out of quota (resets ${resetCountdownLabel(spent.resetsAt, asOf)})';
         }
       }
 

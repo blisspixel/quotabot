@@ -575,7 +575,7 @@ Future<List<ProviderQuota>> _collectAllProviders({
                 quota.models.any((model) => !model.hasLocalExecutionVeto)
             ? quota.withLocalHardware(
                 hardware,
-                detail: _localHardwareDetail(hardware),
+                detailLines: _localHardwareDetails(hardware),
               )
             : quota,
       ),
@@ -658,7 +658,12 @@ List<ProviderAdapterRegistration> _selectedAdapterRegistry(
   ];
 }
 
-String _localHardwareDetail(LocalHardwareInfo hardware) {
+/// The host hardware facts as separate lines.
+///
+/// These are independent observations - system memory, adapter memory, adapter
+/// name, utilization - and joining them into one sentence produced a string no
+/// surface could render whole, so each one stands on its own row.
+List<String> _localHardwareDetails(LocalHardwareInfo hardware) {
   final parts = <String>[];
   final systemTotal = hardware.systemMemoryTotalBytes;
   final systemAvailable = hardware.systemMemoryAvailableBytes;
@@ -696,7 +701,7 @@ String _localHardwareDetail(LocalHardwareInfo hardware) {
   if (gpuUtilization != null) {
     parts.add('Local host GPU utilization $gpuUtilization%');
   }
-  return parts.join(' . ');
+  return parts;
 }
 
 int _usedPercent(int total, int available) =>
