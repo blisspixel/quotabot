@@ -4,6 +4,36 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+
+- Cached quota with no reset boundary anywhere no longer keeps drawing a meter
+  indefinitely. A credit or metered pool carries no reset for the existing
+  boundary rule to act on, so a seven-week-old reading still rendered as a
+  confident bar that read, at a glance, as fully free. Past one weekly window the
+  last known percentage and its age are still reported, because that number
+  remains the most useful evidence available, but the meter is withdrawn rather
+  than asserting a currency the reading cannot support. `top` and the desktop
+  share one rule, so neither surface draws a level the other withholds.
+  Evidence inside a live window and every row with a reset boundary are
+  unchanged.
+- Terminal recovery instructions wrap instead of losing their second half to an
+  ellipsis, so a row states both the diagnosis and the repair step at ordinary
+  widths. The line budget stays bounded, and only the last line can still be
+  trimmed.
+
+### Changed
+
+- The middle `top` band is named for what its rows share. It holds stale
+  evidence and hard failures alike, and a signed-out or errored provider has no
+  cached value, so `CACHED` became `NEEDS ATTENTION`. Grouping is unchanged: a
+  failure is still never idle.
+- The desktop update dialog states that quotabot cannot install its own update
+  and that the next steps are manual, and its actions all say `release` rather
+  than promising an `update` that opens a web page. On macOS an available update
+  also names Gatekeeper's block on the current unsigned builds and points at
+  System Settings, Privacy and Security, without suggesting anyone weaken a
+  platform protection.
+
 ## 0.11.2 - 2026-09-05
 
 ### Fixed

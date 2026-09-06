@@ -1371,4 +1371,93 @@ void main() {
       expect(_plain(footer), contains('x'));
     });
   });
+
+  group('unbounded stale evidence', () {
+    ProviderQuota kiro(int capturedAt) => ProviderQuota(
+          provider: 'kiro',
+          displayName: 'Kiro',
+          account: 'fixture',
+          asOf: capturedAt,
+          stale: true,
+          // Kiro's real row is passively detected and machine-scoped; passive
+          // local quota is only valid evidence when it says so.
+          perMachine: true,
+          windows: [QuotaWindow(label: 'credit', usedPercent: 0)],
+        );
+
+    String kiroRow(List<String> lines) =>
+        _plain(lines.firstWhere((line) => _plain(line).contains('Kiro')));
+
+    test('a recent cached row still draws its meter', () {
+      final row = kiroRow(_frame([kiro(_now - 2 * 86400)], width: 120));
+      expect(row, contains('░'));
+      expect(row, contains('100% last known'));
+    });
+
+    test('a 49-day-old credit row keeps its number and loses its meter', () {
+      final row = kiroRow(_frame([kiro(_now - 49 * 86400)], width: 120));
+      expect(
+        row,
+        isNot(contains('░')),
+        reason: 'an empty bar reads as fully free, which seven-week-old '
+            'evidence cannot assert',
+      );
+      expect(row, isNot(contains('█')));
+      expect(
+        row,
+        contains('100% last known'),
+        reason: 'the last observed value is still the most useful thing left',
+      );
+      expect(row, contains('cached 49d'));
+    });
+
+    test('withdrawing the meter preserves the frame width', () {
+      final fresh = _frame([kiro(_now - 2 * 86400)], width: 120);
+      final aged = _frame([kiro(_now - 49 * 86400)], width: 120);
+      expect(
+        _plain(kiroRow(aged)).length,
+        _plain(kiroRow(fresh)).length,
+        reason: 'columns right of the meter must stay aligned with rows that '
+            'still draw one',
+      );
+    });
+  });
+
+  test('a recovery instruction wraps instead of losing its second half', () {
+    const error = 'local quota evidence is 49d old; open Kiro and refresh its '
+        'usage view before trusting this number';
+    final lines = _frame([
+      _q('kiro', [QuotaWindow(label: 'credit', usedPercent: 0)],
+          stale: true, perMachine: true, error: error),
+    ], width: 120)
+        .map(_plain)
+        .toList();
+    final detail = lines.where((l) => l.contains('live read failed')).toList();
+    expect(detail, hasLength(1));
+    final continuation = lines[lines.indexOf(detail.single) + 1];
+    expect(
+      '${detail.single.trim()} ${continuation.trim()}',
+      contains('trusting this number'),
+      reason: 'the instruction must arrive whole across the wrapped rows',
+    );
+    for (final line in lines) {
+      expect(line.length, lessThanOrEqualTo(120));
+    }
+  });
+
+  test('the unconfirmed band is not named for a cache a failure never had', () {
+    // A hard identity failure has no cached value at all, yet it shares this
+    // band with genuinely cached rows, so the heading must describe both.
+    // Band headings only render when more than one band is populated, so the
+    // fleet needs a live row alongside the unconfirmed ones.
+    final lines = _frame([
+      _q('claude', [
+        QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: _now + 86400),
+      ]),
+      _q('grok', const [], ok: false, error: 'account identity unavailable'),
+    ], width: 120);
+    final banner = lines.map(_plain).join('\n');
+    expect(banner, contains('NEEDS ATTENTION'));
+    expect(banner, isNot(contains('CACHED')));
+  });
 }

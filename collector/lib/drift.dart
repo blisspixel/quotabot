@@ -184,6 +184,37 @@ bool hasExpiredQuotaWindowAt(ProviderQuota quota, int observedAt) =>
       return reset != null && reset <= observedAt;
     });
 
+/// The longest a cached percentage with no reset boundary may still be drawn as
+/// a meter. Seven days is one full weekly window, the longest shared window
+/// quotabot models, so evidence older than this cannot be asserted to describe
+/// whatever pool is current now.
+const int kUnboundedStaleMeterCeilingSeconds = 7 * 86400;
+
+/// Whether a stale row's last known percentage may still be drawn as a meter.
+///
+/// A window that carries a reset boundary is already withdrawn by
+/// [hasExpiredQuotaWindowAt] the moment that boundary passes. Evidence with no
+/// reset boundary anywhere - a credit balance, a metered pool, a window a
+/// provider reports without a reset - has no such trigger, so nothing bounds how
+/// long a seven-week-old reading keeps rendering as a confident bar.
+///
+/// Past [kUnboundedStaleMeterCeilingSeconds] the value is still reported as last
+/// known, with its age: the number is the most useful thing left. Only the meter
+/// is withdrawn, because a filled or empty bar asserts a currency this evidence
+/// cannot support. Fresh evidence and evidence still inside a live window are
+/// unaffected.
+bool hasDisplayableStaleMeterAt(ProviderQuota quota, int observedAt) {
+  if (!quota.stale) return true;
+  final boundedByReset =
+      quota.windows.any((window) => window.resetsAt != null) ||
+          quota.modelQuotas.any((model) => model.resetsAt != null);
+  if (boundedByReset) return true;
+  final capturedAt = quota.asOf;
+  if (capturedAt <= 0) return false;
+  final age = observedAt - capturedAt;
+  return age <= kUnboundedStaleMeterCeilingSeconds;
+}
+
 /// Whether a shared quota reset is too far from its observation to be credible.
 /// This mirrors the model-scoped reset boundary so cache-only and live routing
 /// cannot trust a malformed year-9999 timestamp indefinitely.

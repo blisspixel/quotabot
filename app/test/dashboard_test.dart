@@ -2216,7 +2216,18 @@ void main() {
     );
     expect(find.text('Latest stable: 0.10.0'), findsNothing);
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Open stable update'));
+    // The app cannot install its own update, so no control here may promise
+    // one. Every action opens a release page.
+    expect(
+      find.textContaining('cannot update the desktop app'),
+      findsOneWidget,
+    );
+    expect(
+      find.widgetWithText(FilledButton, 'Open stable update'),
+      findsNothing,
+    );
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Open stable release'));
     await tester.pumpAndSettle();
     expect(opened, [latest.url]);
     expect(tester.takeException(), isNull);
@@ -3286,6 +3297,39 @@ void main() {
       expect(tester.takeException(), isNull);
     }
     expect(find.text('82% free'), findsOneWidget);
+  });
+
+  testWidgets('a withdrawn meter keeps the number and drops the track', (
+    tester,
+  ) async {
+    const view = WinView('credit', 100, false, null);
+    await tester.pumpWidget(
+      _wrap(
+        SizedBox(
+          width: 500,
+          child: WindowBar(
+            view: view,
+            muted: Colors.grey,
+            fg: Colors.white,
+            evidenceLabel: 'last known',
+            showMeter: false,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(
+      find.byType(QuotaMeter),
+      findsNothing,
+      reason: 'an empty or full track still reads as a level, which unbounded '
+          'stale evidence cannot assert',
+    );
+    expect(
+      find.text('100% last known'),
+      findsOneWidget,
+      reason: 'the last observed value stays; only the meter is withdrawn',
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('insights panel renders reliability, trend, pace, and heatmap', (

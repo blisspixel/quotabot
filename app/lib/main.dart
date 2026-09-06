@@ -3640,10 +3640,28 @@ class _DashboardState extends State<Dashboard>
                   if (status.stable != null && status.stable!.tag != newest.tag)
                     Text('Latest stable: ${status.stable!.version}'),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Open the release to review signing status, checksums, '
-                    'assets, and update instructions.',
+                  // The desktop app cannot replace itself yet, so the dialog
+                  // says what the person is about to do rather than only what
+                  // the release page contains. Leaving that implicit sent
+                  // people to a manual download expecting an installer.
+                  Text(
+                    status.updateAvailable
+                        ? 'quotabot cannot update the desktop app for you yet. '
+                              'The release page has the download, its checksum, '
+                              'and the steps to replace this build by hand.'
+                        : 'Open the release to review signing status, '
+                              'checksums, assets, and update instructions.',
                   ),
+                  if (status.updateAvailable && Platform.isMacOS) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'On macOS this build is not yet signed or notarized, so '
+                      'Gatekeeper blocks it after a browser download. Approve '
+                      'it under System Settings, Privacy & Security. Do not '
+                      'remove the quarantine attribute to bypass the warning.',
+                      style: Theme.of(resultContext).textTheme.bodySmall,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -3676,9 +3694,12 @@ class _DashboardState extends State<Dashboard>
                     Navigator.of(resultContext).pop();
                     unawaited(_openRelease(recommended.url));
                   },
+                  // Every action here opens a web page. Naming one of them an
+                  // "update" promised an install the app cannot perform, so
+                  // the primary action matches the others and says "release".
                   child: Text(
                     '${recommended.prerelease ? 'Open preview' : 'Open stable'} '
-                    '${status.updateAvailable ? 'update' : 'release'}',
+                    'release',
                   ),
                 ),
             ],
@@ -5481,6 +5502,7 @@ class ProviderTile extends StatelessWidget {
                       fg: fg,
                       evidenceLabel: evidenceLabel,
                       requestsBlocked: quota.requestAdmission.blocksRequests,
+                      showMeter: hasDisplayableStaleMeterAt(quota, now),
                     ),
                   ),
               ] else
@@ -5493,6 +5515,7 @@ class ProviderTile extends StatelessWidget {
                       fg: fg,
                       evidenceLabel: evidenceLabel,
                       requestsBlocked: quota.requestAdmission.blocksRequests,
+                      showMeter: hasDisplayableStaleMeterAt(quota, now),
                     ),
                   ),
                 ),
@@ -5547,6 +5570,7 @@ class ProviderTile extends StatelessWidget {
                         modelQuota,
                         now,
                       ),
+                      showMeter: hasDisplayableStaleMeterAt(quota, now),
                     ),
                   );
                 }),
@@ -5632,6 +5656,7 @@ class ProviderTile extends StatelessWidget {
     required Color fg,
     required ScopedModelSpendEvidence? spendEvidence,
     required String? evidenceLabel,
+    required bool showMeter,
   }) {
     final model = modelQuota.model.trim();
     final modelLabel = model.isEmpty ? 'Unnamed model' : model;
@@ -5694,6 +5719,7 @@ class ProviderTile extends StatelessWidget {
           muted: muted,
           fg: fg,
           evidenceLabel: evidenceLabel,
+          showMeter: showMeter,
         ),
       ],
     );
@@ -6257,6 +6283,12 @@ class WindowBar extends StatelessWidget {
   final Color fg;
   final String? evidenceLabel;
   final bool requestsBlocked;
+
+  /// Whether the proportional meter may still be drawn. Cached evidence with no
+  /// reset boundary keeps its last known number past the age ceiling, but a
+  /// filled track would assert a currency it cannot support. See
+  /// [hasDisplayableStaleMeterAt]; `top` withdraws the same bar.
+  final bool showMeter;
   const WindowBar({
     super.key,
     required this.view,
@@ -6264,6 +6296,7 @@ class WindowBar extends StatelessWidget {
     required this.fg,
     this.evidenceLabel,
     this.requestsBlocked = false,
+    this.showMeter = true,
   });
 
   @override
@@ -6299,17 +6332,21 @@ class WindowBar extends StatelessWidget {
         color: muted,
       ),
     );
-    final meter = TweenAnimationBuilder<double>(
-      // Ease the fill to its new level on refresh so a jump reads as motion,
-      // not a flicker.
-      tween: Tween(begin: 0, end: (remaining / 100.0).clamp(0.0, 1.0)),
-      duration: MediaQuery.maybeOf(context)?.disableAnimations ?? false
-          ? Duration.zero
-          : const Duration(milliseconds: 320),
-      curve: Curves.easeOutCubic,
-      builder: (context, v, _) =>
-          QuotaMeter(value: v, color: color, track: chrome.gaugeTrack),
-    );
+    final meter = showMeter
+        ? TweenAnimationBuilder<double>(
+            // Ease the fill to its new level on refresh so a jump reads as
+            // motion, not a flicker.
+            tween: Tween(begin: 0, end: (remaining / 100.0).clamp(0.0, 1.0)),
+            duration: MediaQuery.maybeOf(context)?.disableAnimations ?? false
+                ? Duration.zero
+                : const Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic,
+            builder: (context, v, _) =>
+                QuotaMeter(value: v, color: color, track: chrome.gaugeTrack),
+          )
+        // An empty track still reads as a level. Withdraw the meter entirely
+        // and let the last known number carry the row.
+        : const SizedBox.shrink();
     final valueText = _WindowBarText(
       text: value,
       maxLines: showsReset
