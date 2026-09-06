@@ -3,6 +3,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/main.dart';
+import 'package:quotabot/prefs.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
 
@@ -56,6 +57,8 @@ double _contrastRatio(Color foreground, Color background) {
 }
 
 void main() {
+  group('orderProvidersForDisplay', _orderingTests);
+
   for (final value in ['denied', 'future-admission']) {
     testWidgets('$value stays visible on a collapsed measured provider tile', (
       tester,
@@ -1940,5 +1943,121 @@ void main() {
     );
     expect(find.textContaining('this machine'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+}
+
+void _orderingTests() {
+  const now = 1788700000;
+
+  ProviderQuota row(
+    String provider,
+    String name, {
+    double? used,
+    bool blocked = false,
+    bool local = false,
+    String account = 'default',
+  }) => ProviderQuota(
+    provider: provider,
+    displayName: name,
+    account: account,
+    asOf: now,
+    kind: local ? ProviderQuotaKind.local : ProviderQuotaKind.subscription,
+    perMachine: local,
+    requestAdmission: blocked
+        ? RequestAdmission.denied
+        : RequestAdmission.allowed,
+    windows: used == null
+        ? const []
+        : [
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: used,
+              resetsAt: now + 86400,
+            ),
+          ],
+  );
+
+  List<String> namesOf(List<ProviderQuota> ordered) =>
+      ordered.map((q) => q.displayName).toList();
+
+  test('most available ranks a blocked pool below every admitted one', () {
+    // A denied pool cannot be spent, so its measured headroom must not lead a
+    // list whose whole promise is "most available".
+    final ordered = orderProvidersForDisplay(
+      [
+        row('codex', 'Codex', used: 10, blocked: true), // 90% free but denied
+        row('claude', 'Claude', used: 60), // 40% free and usable
+      ],
+      ProviderSort.mostAvailable,
+      now,
+    );
+    expect(namesOf(ordered), ['Claude', 'Codex']);
+  });
+
+  test('ties keep a stable order across repeated sorts', () {
+    // Dart's List.sort is not stable, so equal headroom needs an explicit
+    // tie-break or the fleet reshuffles between repaints.
+    final fleet = [
+      row('grok', 'Grok', used: 50),
+      row('codex', 'Codex', used: 50),
+      row('claude', 'Claude', used: 50),
+    ];
+    final first = namesOf(
+      orderProvidersForDisplay(fleet, ProviderSort.mostAvailable, now),
+    );
+    for (var i = 0; i < 5; i++) {
+      expect(
+        namesOf(
+          orderProvidersForDisplay(
+            fleet.reversed.toList(),
+            ProviderSort.mostAvailable,
+            now,
+          ),
+        ),
+        first,
+        reason: 'ordering must not depend on input order or run count',
+      );
+    }
+  });
+
+  test('most used sinks unreadable rows below every real reading', () {
+    final ordered = orderProvidersForDisplay(
+      [
+        row('kiro', 'Kiro'), // no windows, unrankable
+        row('claude', 'Claude', used: 90), // most consumed
+        row('codex', 'Codex', used: 20),
+      ],
+      ProviderSort.mostUsed,
+      now,
+    );
+    expect(namesOf(ordered), ['Claude', 'Codex', 'Kiro']);
+  });
+
+  test('alphabetical ignores case and still sinks local runtimes', () {
+    final ordered = orderProvidersForDisplay(
+      [
+        row('ollama', 'ollama', local: true),
+        row('codex', 'Codex', used: 10),
+        row('antigravity', 'antigravity', used: 20),
+      ],
+      ProviderSort.alphabetical,
+      now,
+    );
+    expect(namesOf(ordered), ['antigravity', 'Codex', 'ollama']);
+  });
+
+  test('multiple accounts of one provider keep a deterministic order', () {
+    final ordered = orderProvidersForDisplay(
+      [
+        row('antigravity', 'Antigravity', used: 50, account: 'b@example.com'),
+        row('antigravity', 'Antigravity', used: 50, account: 'a@example.com'),
+      ],
+      ProviderSort.mostAvailable,
+      now,
+    );
+    expect(ordered.map((q) => q.account).toList(), [
+      'a@example.com',
+      'b@example.com',
+    ]);
   });
 }

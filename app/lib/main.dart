@@ -828,43 +828,11 @@ class _DashboardState extends State<Dashboard>
 
   /// Display order, respecting user sort preference. Used for both compact
   /// icons and expanded cards. Computed fresh so headroom sorts stay current.
-  List<ProviderQuota> get _displayed {
-    final list = List<ProviderQuota>.from(_visible);
-    if (list.length <= 1) return list;
-    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    switch (_sort) {
-      case ProviderSort.alphabetical:
-        list.sort((a, b) => a.displayName.compareTo(b.displayName));
-        break;
-      case ProviderSort.mostAvailable:
-        list.sort((a, b) {
-          final ha = isTrustedQuotaEvidenceAt(a, now)
-              ? providerHeadroom(a, now) ?? -1.0
-              : -1.0;
-          final hb = isTrustedQuotaEvidenceAt(b, now)
-              ? providerHeadroom(b, now) ?? -1.0
-              : -1.0;
-          return hb.compareTo(ha); // highest headroom first
-        });
-        break;
-      case ProviderSort.mostUsed:
-        list.sort((a, b) {
-          final ha = isTrustedQuotaEvidenceAt(a, now)
-              ? providerHeadroom(a, now) ?? 101.0
-              : 101.0;
-          final hb = isTrustedQuotaEvidenceAt(b, now)
-              ? providerHeadroom(b, now) ?? 101.0
-              : 101.0;
-          return ha.compareTo(hb); // lowest headroom (most used) first
-        });
-        break;
-      case ProviderSort.defaultOrder:
-        break;
-    }
-    // Local runtimes always sit below the cloud quota services, keeping their
-    // relative order from the sort above. Local has no quota to rank against.
-    return [...list.where((q) => !q.isLocal), ...list.where((q) => q.isLocal)];
-  }
+  List<ProviderQuota> get _displayed => orderProvidersForDisplay(
+    _visible,
+    _sort,
+    DateTime.now().millisecondsSinceEpoch ~/ 1000,
+  );
 
   List<String> get _activeProfileLegacyCredentialFilterProviders {
     final providers = <String>{};
@@ -4843,6 +4811,73 @@ class _DashboardState extends State<Dashboard>
     tooltip: tooltip,
     focusNode: focusNode,
   );
+}
+
+/// Display order for the desktop fleet under [sort].
+///
+/// Pure and clock-free so the ordering rules are testable directly: the caller
+/// supplies [now]. Local runtimes always sit below the cloud quota services -
+/// they carry no quota to rank against, so they are a separate group rather
+/// than a row competing on a percentage they do not have.
+List<ProviderQuota> orderProvidersForDisplay(
+  List<ProviderQuota> visible,
+  ProviderSort sort,
+  int now,
+) {
+  final list = List<ProviderQuota>.from(visible);
+  if (list.length <= 1) return list;
+
+  // Dart's List.sort is not stable, and the caller recomputes this on every
+  // build, so rows a sort cannot separate - two providers at the same headroom,
+  // or the whole unrankable group - could swap places between repaints. Every
+  // comparator below falls through to one total tie-break.
+  int tieBreak(ProviderQuota a, ProviderQuota b) {
+    final byName = a.displayName.toLowerCase().compareTo(
+      b.displayName.toLowerCase(),
+    );
+    return byName != 0 ? byName : a.account.compareTo(b.account);
+  }
+
+  switch (sort) {
+    case ProviderSort.alphabetical:
+      list.sort(tieBreak);
+      break;
+    case ProviderSort.mostAvailable:
+      list.sort((a, b) {
+        // A pool that denies requests is not available whatever it measures,
+        // so it ranks below every admitted row rather than leading the list on
+        // headroom the caller cannot spend.
+        final blockedA = a.requestAdmission.blocksRequests;
+        final blockedB = b.requestAdmission.blocksRequests;
+        if (blockedA != blockedB) return blockedA ? 1 : -1;
+        final ha = isTrustedQuotaEvidenceAt(a, now)
+            ? providerHeadroom(a, now) ?? -1.0
+            : -1.0;
+        final hb = isTrustedQuotaEvidenceAt(b, now)
+            ? providerHeadroom(b, now) ?? -1.0
+            : -1.0;
+        final byHeadroom = hb.compareTo(ha); // highest headroom first
+        return byHeadroom != 0 ? byHeadroom : tieBreak(a, b);
+      });
+      break;
+    case ProviderSort.mostUsed:
+      list.sort((a, b) {
+        // Untrusted and unmeasured rows keep the 101 sentinel so they sink
+        // below every real reading rather than posing as fully consumed.
+        final ha = isTrustedQuotaEvidenceAt(a, now)
+            ? providerHeadroom(a, now) ?? 101.0
+            : 101.0;
+        final hb = isTrustedQuotaEvidenceAt(b, now)
+            ? providerHeadroom(b, now) ?? 101.0
+            : 101.0;
+        final byHeadroom = ha.compareTo(hb); // lowest headroom (most used)
+        return byHeadroom != 0 ? byHeadroom : tieBreak(a, b);
+      });
+      break;
+    case ProviderSort.defaultOrder:
+      break;
+  }
+  return [...list.where((q) => !q.isLocal), ...list.where((q) => q.isLocal)];
 }
 
 typedef _WebhookSettings = ({String url, bool allowExternal});

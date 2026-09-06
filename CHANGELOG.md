@@ -36,6 +36,24 @@ Notable changes to quotabot. Newest first.
   local runtime section was cut off mid-figure on both surfaces. Local card
   details also wrap now; cloud details already did.
 
+- A quota window whose reset boundary advances with the clock while nothing has
+  been consumed is rejected as evidence. A fixed reset holds its timestamp until
+  it passes and a genuine rolling window only moves as recorded usage ages out,
+  so a boundary that keeps pace with the clock over zero usage never arrives and
+  cannot expire the reading. Antigravity reported exactly that shape, which
+  pinned it at a permanent full balance that won every route. It is now shown as
+  drifted and last-trusted, and routing falls to a provider with a real number.
+  Two guards keep the rule tight: a boundary that had already passed may still
+  move, because naming the next window is what a healthy idle provider does; and
+  the check applies to a provider's own windows, never to a model-scoped pool,
+  so one degenerate scoped boundary cannot quarantine a healthy shared window.
+- Desktop provider ordering is stable and admission-aware. Dart's list sort is
+  not stable and the display order recomputes every build, so providers at equal
+  headroom could swap places between repaints; every mode now falls through to a
+  name-then-account tie-break. "Most available" also ranks a pool that denies
+  requests below every admitted one instead of leading on headroom the caller
+  cannot spend, and alphabetical ordering ignores case. The ordering is a pure
+  function so these rules are tested directly.
 ### Changed
 
 - The middle `top` band is named for what its rows share. It holds stale

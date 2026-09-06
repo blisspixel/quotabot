@@ -1016,6 +1016,93 @@ void main() {
     expect(back.suspect, isNull);
   });
 
+  group('a reset that never approaches', () {
+    const t0 = 1788700000;
+    const fiveHours = 5 * 3600;
+
+    ProviderQuota modelSnap(
+      int observedAt,
+      double usedPercent,
+      int resetsAt,
+    ) =>
+        ProviderQuota(
+          provider: antigravityProviderId,
+          displayName: 'Antigravity',
+          account: 'a',
+          asOf: observedAt,
+          windows: [
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: usedPercent,
+              resetsAt: resetsAt,
+            ),
+          ],
+        );
+
+    test('a boundary tracking the clock with no usage is drift', () {
+      // The observed Antigravity shape: every read reports zero usage and a
+      // reset that is always five hours out, so the window never expires and a
+      // permanent full balance keeps winning routing.
+      final prev = modelSnap(t0, 0, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 300, 0, t0 + 300 + fiveHours);
+      expect(
+        detectQuotaDrift(fresh, prev, observedAt: t0 + 300),
+        contains('reset never approaches'),
+      );
+    });
+
+    test('a fixed boundary with no usage is healthy', () {
+      final prev = modelSnap(t0, 0, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 300, 0, t0 + fiveHours);
+      expect(detectQuotaDrift(fresh, prev, observedAt: t0 + 300), isNull);
+    });
+
+    test('a rolling window with real usage is not flagged', () {
+      // A genuine rolling window advances precisely because recorded usage ages
+      // out of it. That is the healthy case this rule must never touch.
+      final prev = modelSnap(t0, 40, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 300, 38, t0 + 300 + fiveHours);
+      expect(detectQuotaDrift(fresh, prev, observedAt: t0 + 300), isNull);
+    });
+
+    test('two reads too close together cannot decide', () {
+      final prev = modelSnap(t0, 0, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 10, 0, t0 + 10 + fiveHours);
+      expect(detectQuotaDrift(fresh, prev, observedAt: t0 + 10), isNull);
+    });
+
+    test('a reset that outruns the clock entirely is still flagged', () {
+      // A boundary pushed further out than the time that passed is even less
+      // able to arrive.
+      final prev = modelSnap(t0, 0, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 120, 0, t0 + fiveHours + 3600);
+      expect(
+        detectQuotaDrift(fresh, prev, observedAt: t0 + 120),
+        contains('reset never approaches'),
+      );
+    });
+
+    test('an idle provider rolling over to its next window is healthy', () {
+      // The old boundary genuinely passed and the provider named the next one.
+      // An idle account legitimately shows zero usage across that rollover, so
+      // flagging it would quarantine a perfectly good provider.
+      final prev = modelSnap(t0, 0, t0 + 60);
+      final fresh = modelSnap(t0 + 120, 0, t0 + 60 + fiveHours);
+      expect(detectQuotaDrift(fresh, prev, observedAt: t0 + 120), isNull);
+    });
+
+    test('a boundary still ahead of the read must not move', () {
+      // The discriminator: the previous boundary had not passed yet, so there
+      // was nothing to renew and it should have held its position.
+      final prev = modelSnap(t0, 0, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 600, 0, t0 + 600 + fiveHours);
+      expect(
+        detectQuotaDrift(fresh, prev, observedAt: t0 + 600),
+        contains('reset never approaches'),
+      );
+    });
+  });
+
   group('hasDisplayableStaleMeterAt', () {
     const day = 86400;
     const capturedAt = 1000000;
