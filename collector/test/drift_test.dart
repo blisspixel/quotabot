@@ -1154,6 +1154,32 @@ void main() {
       );
     });
 
+    test('a long-passed reset no longer bounds the reading', () {
+      // The reported case: a credit pool whose reset expired weeks ago still
+      // drew a full-width bar, because the rule only asked whether a boundary
+      // existed, not whether it could still arrive.
+      final quota = ProviderQuota(
+        provider: 'kiro',
+        displayName: 'Kiro',
+        account: 'a',
+        asOf: capturedAt,
+        stale: true,
+        perMachine: true,
+        windows: [
+          QuotaWindow(
+            label: 'credit',
+            usedPercent: 0,
+            resetsAt: capturedAt + day,
+          ),
+        ],
+      );
+      expect(
+        hasDisplayableStaleMeterAt(quota, capturedAt + 50 * day),
+        isFalse,
+        reason: 'the boundary passed 49 days before this observation',
+      );
+    });
+
     test('a window reset boundary keeps the existing rule in charge', () {
       final quota = ProviderQuota(
         provider: 'claude',
@@ -1165,15 +1191,15 @@ void main() {
           QuotaWindow(
             label: 'weekly',
             usedPercent: 40,
-            resetsAt: capturedAt + day,
+            resetsAt: capturedAt + 60 * day,
           ),
         ],
       );
       expect(
         hasDisplayableStaleMeterAt(quota, capturedAt + 49 * day),
         isTrue,
-        reason: 'hasExpiredQuotaWindowAt already withdraws trust here, so the '
-            'age ceiling must not double-withdraw a bounded row',
+        reason: 'a boundary still ahead of the observation will arrive and '
+            'expire the value on its own, so the age ceiling stays out of it',
       );
     });
 
@@ -1188,7 +1214,7 @@ void main() {
           ModelQuota(
             model: 'fable',
             usedPercent: 50,
-            resetsAt: capturedAt + day,
+            resetsAt: capturedAt + 60 * day,
           ),
         ],
       );

@@ -39,7 +39,7 @@ import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.11.2';
+const quotabotMcpVersion = '0.11.3';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
