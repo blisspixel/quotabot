@@ -10,7 +10,7 @@ and recommends where to send the next request. It also shows supported local
 models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
-> **Current stable:** 0.11.3. quotabot remains under active 0.x development.
+> **Current stable:** 0.11.4. quotabot remains under active 0.x development.
 > **Next:** finish credential-refresh lifecycle recovery, polish the desktop's
 > shared controls and native identity, and verify more named harness workflows.
 > Product development continues while release signing is
@@ -197,7 +197,7 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Stable 0.11.3 rejects a quota reset boundary that advances with the clock
+Stable 0.11.4 rejects a quota reset boundary that advances with the clock
 while nothing has been consumed, so a pool that can never expire no longer wins
 routing on an unverifiable full balance. Stale meters are withdrawn past an age
 ceiling, local host evidence renders whole, and the desktop no longer offers an
