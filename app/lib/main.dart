@@ -828,43 +828,11 @@ class _DashboardState extends State<Dashboard>
 
   /// Display order, respecting user sort preference. Used for both compact
   /// icons and expanded cards. Computed fresh so headroom sorts stay current.
-  List<ProviderQuota> get _displayed {
-    final list = List<ProviderQuota>.from(_visible);
-    if (list.length <= 1) return list;
-    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    switch (_sort) {
-      case ProviderSort.alphabetical:
-        list.sort((a, b) => a.displayName.compareTo(b.displayName));
-        break;
-      case ProviderSort.mostAvailable:
-        list.sort((a, b) {
-          final ha = isTrustedQuotaEvidenceAt(a, now)
-              ? providerHeadroom(a, now) ?? -1.0
-              : -1.0;
-          final hb = isTrustedQuotaEvidenceAt(b, now)
-              ? providerHeadroom(b, now) ?? -1.0
-              : -1.0;
-          return hb.compareTo(ha); // highest headroom first
-        });
-        break;
-      case ProviderSort.mostUsed:
-        list.sort((a, b) {
-          final ha = isTrustedQuotaEvidenceAt(a, now)
-              ? providerHeadroom(a, now) ?? 101.0
-              : 101.0;
-          final hb = isTrustedQuotaEvidenceAt(b, now)
-              ? providerHeadroom(b, now) ?? 101.0
-              : 101.0;
-          return ha.compareTo(hb); // lowest headroom (most used) first
-        });
-        break;
-      case ProviderSort.defaultOrder:
-        break;
-    }
-    // Local runtimes always sit below the cloud quota services, keeping their
-    // relative order from the sort above. Local has no quota to rank against.
-    return [...list.where((q) => !q.isLocal), ...list.where((q) => q.isLocal)];
-  }
+  List<ProviderQuota> get _displayed => orderProvidersForDisplay(
+    _visible,
+    _sort,
+    DateTime.now().millisecondsSinceEpoch ~/ 1000,
+  );
 
   List<String> get _activeProfileLegacyCredentialFilterProviders {
     final providers = <String>{};
@@ -1887,7 +1855,11 @@ class _DashboardState extends State<Dashboard>
             card += 28;
           }
           if (q.isLocal || isExpanded) {
-            card += q.details.length * 14; // detail lines
+            // Local detail lines wrap to as many as three rows, and the host
+            // memory line usually needs two. Budget two so the first frame,
+            // which is drawn before the rendered height can be measured, does
+            // not open too short and clip the runtime section.
+            card += q.details.length * (q.isLocal ? 28 : 14);
           }
           if (q.isLocal) card += 34; // model inventory detail control
           if (isExpanded && (_history[key] ?? const []).isNotEmpty) {
@@ -3640,10 +3612,28 @@ class _DashboardState extends State<Dashboard>
                   if (status.stable != null && status.stable!.tag != newest.tag)
                     Text('Latest stable: ${status.stable!.version}'),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Open the release to review signing status, checksums, '
-                    'assets, and update instructions.',
+                  // The desktop app cannot replace itself yet, so the dialog
+                  // says what the person is about to do rather than only what
+                  // the release page contains. Leaving that implicit sent
+                  // people to a manual download expecting an installer.
+                  Text(
+                    status.updateAvailable
+                        ? 'quotabot cannot update the desktop app for you yet. '
+                              'The release page has the download, its checksum, '
+                              'and the steps to replace this build by hand.'
+                        : 'Open the release to review signing status, '
+                              'checksums, assets, and update instructions.',
                   ),
+                  if (status.updateAvailable && Platform.isMacOS) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'On macOS this build is not yet signed or notarized, so '
+                      'Gatekeeper blocks it after a browser download. Approve '
+                      'it under System Settings, Privacy & Security. Do not '
+                      'remove the quarantine attribute to bypass the warning.',
+                      style: Theme.of(resultContext).textTheme.bodySmall,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -3676,9 +3666,12 @@ class _DashboardState extends State<Dashboard>
                     Navigator.of(resultContext).pop();
                     unawaited(_openRelease(recommended.url));
                   },
+                  // Every action here opens a web page. Naming one of them an
+                  // "update" promised an install the app cannot perform, so
+                  // the primary action matches the others and says "release".
                   child: Text(
                     '${recommended.prerelease ? 'Open preview' : 'Open stable'} '
-                    '${status.updateAvailable ? 'update' : 'release'}',
+                    'release',
                   ),
                 ),
             ],
@@ -4820,6 +4813,73 @@ class _DashboardState extends State<Dashboard>
   );
 }
 
+/// Display order for the desktop fleet under [sort].
+///
+/// Pure and clock-free so the ordering rules are testable directly: the caller
+/// supplies [now]. Local runtimes always sit below the cloud quota services -
+/// they carry no quota to rank against, so they are a separate group rather
+/// than a row competing on a percentage they do not have.
+List<ProviderQuota> orderProvidersForDisplay(
+  List<ProviderQuota> visible,
+  ProviderSort sort,
+  int now,
+) {
+  final list = List<ProviderQuota>.from(visible);
+  if (list.length <= 1) return list;
+
+  // Dart's List.sort is not stable, and the caller recomputes this on every
+  // build, so rows a sort cannot separate - two providers at the same headroom,
+  // or the whole unrankable group - could swap places between repaints. Every
+  // comparator below falls through to one total tie-break.
+  int tieBreak(ProviderQuota a, ProviderQuota b) {
+    final byName = a.displayName.toLowerCase().compareTo(
+      b.displayName.toLowerCase(),
+    );
+    return byName != 0 ? byName : a.account.compareTo(b.account);
+  }
+
+  switch (sort) {
+    case ProviderSort.alphabetical:
+      list.sort(tieBreak);
+      break;
+    case ProviderSort.mostAvailable:
+      list.sort((a, b) {
+        // A pool that denies requests is not available whatever it measures,
+        // so it ranks below every admitted row rather than leading the list on
+        // headroom the caller cannot spend.
+        final blockedA = a.requestAdmission.blocksRequests;
+        final blockedB = b.requestAdmission.blocksRequests;
+        if (blockedA != blockedB) return blockedA ? 1 : -1;
+        final ha = isTrustedQuotaEvidenceAt(a, now)
+            ? providerHeadroom(a, now) ?? -1.0
+            : -1.0;
+        final hb = isTrustedQuotaEvidenceAt(b, now)
+            ? providerHeadroom(b, now) ?? -1.0
+            : -1.0;
+        final byHeadroom = hb.compareTo(ha); // highest headroom first
+        return byHeadroom != 0 ? byHeadroom : tieBreak(a, b);
+      });
+      break;
+    case ProviderSort.mostUsed:
+      list.sort((a, b) {
+        // Untrusted and unmeasured rows keep the 101 sentinel so they sink
+        // below every real reading rather than posing as fully consumed.
+        final ha = isTrustedQuotaEvidenceAt(a, now)
+            ? providerHeadroom(a, now) ?? 101.0
+            : 101.0;
+        final hb = isTrustedQuotaEvidenceAt(b, now)
+            ? providerHeadroom(b, now) ?? 101.0
+            : 101.0;
+        final byHeadroom = ha.compareTo(hb); // lowest headroom (most used)
+        return byHeadroom != 0 ? byHeadroom : tieBreak(a, b);
+      });
+      break;
+    case ProviderSort.defaultOrder:
+      break;
+  }
+  return [...list.where((q) => !q.isLocal), ...list.where((q) => q.isLocal)];
+}
+
 typedef _WebhookSettings = ({String url, bool allowExternal});
 
 class _WebhookDialog extends StatefulWidget {
@@ -5481,6 +5541,7 @@ class ProviderTile extends StatelessWidget {
                       fg: fg,
                       evidenceLabel: evidenceLabel,
                       requestsBlocked: quota.requestAdmission.blocksRequests,
+                      showMeter: hasDisplayableStaleMeterAt(quota, now),
                     ),
                   ),
               ] else
@@ -5493,6 +5554,7 @@ class ProviderTile extends StatelessWidget {
                       fg: fg,
                       evidenceLabel: evidenceLabel,
                       requestsBlocked: quota.requestAdmission.blocksRequests,
+                      showMeter: hasDisplayableStaleMeterAt(quota, now),
                     ),
                   ),
                 ),
@@ -5547,6 +5609,7 @@ class ProviderTile extends StatelessWidget {
                         modelQuota,
                         now,
                       ),
+                      showMeter: hasDisplayableStaleMeterAt(quota, now),
                     ),
                   );
                 }),
@@ -5632,6 +5695,7 @@ class ProviderTile extends StatelessWidget {
     required Color fg,
     required ScopedModelSpendEvidence? spendEvidence,
     required String? evidenceLabel,
+    required bool showMeter,
   }) {
     final model = modelQuota.model.trim();
     final modelLabel = model.isEmpty ? 'Unnamed model' : model;
@@ -5694,6 +5758,7 @@ class ProviderTile extends StatelessWidget {
           muted: muted,
           fg: fg,
           evidenceLabel: evidenceLabel,
+          showMeter: showMeter,
         ),
       ],
     );
@@ -6043,7 +6108,11 @@ class ProviderTile extends StatelessWidget {
             padding: const EdgeInsets.only(top: 3, left: 19),
             child: Text(
               detail,
-              maxLines: 1,
+              // Local runtimes carry the longest detail strings in the product
+              // - the host memory line names RAM, VRAM, the adapter, and
+              // utilization in one sentence - so a single line cut them off
+              // mid-figure. Cloud details already had two.
+              maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: AppType.small, color: muted),
             ),
@@ -6112,7 +6181,9 @@ class ProviderTile extends StatelessWidget {
             padding: const EdgeInsets.only(top: 3, left: 19),
             child: Text(
               d,
-              maxLines: 1,
+              // Matches the other local detail list: the host memory line does
+              // not fit on one line at ordinary card widths.
+              maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: AppType.small, color: muted),
             ),
@@ -6257,6 +6328,12 @@ class WindowBar extends StatelessWidget {
   final Color fg;
   final String? evidenceLabel;
   final bool requestsBlocked;
+
+  /// Whether the proportional meter may still be drawn. Cached evidence with no
+  /// reset boundary keeps its last known number past the age ceiling, but a
+  /// filled track would assert a currency it cannot support. See
+  /// [hasDisplayableStaleMeterAt]; `top` withdraws the same bar.
+  final bool showMeter;
   const WindowBar({
     super.key,
     required this.view,
@@ -6264,6 +6341,7 @@ class WindowBar extends StatelessWidget {
     required this.fg,
     this.evidenceLabel,
     this.requestsBlocked = false,
+    this.showMeter = true,
   });
 
   @override
@@ -6285,8 +6363,8 @@ class WindowBar extends StatelessWidget {
         ? 'ready'
         : showsReset
         ? largeText
-              ? '${remaining.round()}% free\n${resetLabel(view.resetsAt, now)}'
-              : '${remaining.round()}% free  ${resetLabel(view.resetsAt, now)}'
+              ? '${remaining.round()}% free\n${resetsLabel(view.resetsAt, now)}'
+              : '${remaining.round()}% free  ${resetsLabel(view.resetsAt, now)}'
         : '${remaining.round()}% free';
 
     final label = _WindowBarText(
@@ -6299,17 +6377,21 @@ class WindowBar extends StatelessWidget {
         color: muted,
       ),
     );
-    final meter = TweenAnimationBuilder<double>(
-      // Ease the fill to its new level on refresh so a jump reads as motion,
-      // not a flicker.
-      tween: Tween(begin: 0, end: (remaining / 100.0).clamp(0.0, 1.0)),
-      duration: MediaQuery.maybeOf(context)?.disableAnimations ?? false
-          ? Duration.zero
-          : const Duration(milliseconds: 320),
-      curve: Curves.easeOutCubic,
-      builder: (context, v, _) =>
-          QuotaMeter(value: v, color: color, track: chrome.gaugeTrack),
-    );
+    final meter = showMeter
+        ? TweenAnimationBuilder<double>(
+            // Ease the fill to its new level on refresh so a jump reads as
+            // motion, not a flicker.
+            tween: Tween(begin: 0, end: (remaining / 100.0).clamp(0.0, 1.0)),
+            duration: MediaQuery.maybeOf(context)?.disableAnimations ?? false
+                ? Duration.zero
+                : const Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic,
+            builder: (context, v, _) =>
+                QuotaMeter(value: v, color: color, track: chrome.gaugeTrack),
+          )
+        // An empty track still reads as a level. Withdraw the meter entirely
+        // and let the last known number carry the row.
+        : const SizedBox.shrink();
     final valueText = _WindowBarText(
       text: value,
       maxLines: showsReset

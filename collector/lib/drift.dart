@@ -184,6 +184,37 @@ bool hasExpiredQuotaWindowAt(ProviderQuota quota, int observedAt) =>
       return reset != null && reset <= observedAt;
     });
 
+/// The longest a cached percentage with no reset boundary may still be drawn as
+/// a meter. Seven days is one full weekly window, the longest shared window
+/// quotabot models, so evidence older than this cannot be asserted to describe
+/// whatever pool is current now.
+const int kUnboundedStaleMeterCeilingSeconds = 7 * 86400;
+
+/// Whether a stale row's last known percentage may still be drawn as a meter.
+///
+/// A window that carries a reset boundary is already withdrawn by
+/// [hasExpiredQuotaWindowAt] the moment that boundary passes. Evidence with no
+/// reset boundary anywhere - a credit balance, a metered pool, a window a
+/// provider reports without a reset - has no such trigger, so nothing bounds how
+/// long a seven-week-old reading keeps rendering as a confident bar.
+///
+/// Past [kUnboundedStaleMeterCeilingSeconds] the value is still reported as last
+/// known, with its age: the number is the most useful thing left. Only the meter
+/// is withdrawn, because a filled or empty bar asserts a currency this evidence
+/// cannot support. Fresh evidence and evidence still inside a live window are
+/// unaffected.
+bool hasDisplayableStaleMeterAt(ProviderQuota quota, int observedAt) {
+  if (!quota.stale) return true;
+  final boundedByReset =
+      quota.windows.any((window) => window.resetsAt != null) ||
+          quota.modelQuotas.any((model) => model.resetsAt != null);
+  if (boundedByReset) return true;
+  final capturedAt = quota.asOf;
+  if (capturedAt <= 0) return false;
+  final age = observedAt - capturedAt;
+  return age <= kUnboundedStaleMeterCeilingSeconds;
+}
+
 /// Whether a shared quota reset is too far from its observation to be credible.
 /// This mirrors the model-scoped reset boundary so cache-only and live routing
 /// cannot trust a malformed year-9999 timestamp indefinitely.
@@ -564,6 +595,32 @@ String? detectQuotaDrift(
   int? observedAt,
 }) {
   final observation = observedAt ?? fresh.asOf;
+  // A boundary that never approaches invalidates the provider's own window,
+  // so it runs for every provider - including the synthetic-window ones the
+  // monotonicity checks below skip. Their window is derived from the same
+  // models, so a boundary that cannot arrive makes the derived window
+  // meaningless too.
+  //
+  // Deliberately not applied to model-scoped pools. A scoped allowance gates
+  // its own model; letting one degenerate scoped boundary quarantine the whole
+  // provider would discard a healthy shared subscription window, which is
+  // exactly what "scoped limits stay scoped" forbids.
+  final prevWindows = {for (final w in previous.windows) w.label: w};
+  for (final w in fresh.windows) {
+    final p = prevWindows[w.label];
+    if (p == null) continue;
+    final never = _resetNeverApproaches(
+      freshUsed: w.percent,
+      freshReset: w.resetsAt,
+      prevUsed: p.percent,
+      prevReset: p.resetsAt,
+      observedAt: observation,
+      previousObservedAt: previous.asOf,
+    );
+    if (never != null) {
+      return boundedQuotaDriftReason('${w.label} $never');
+    }
+  }
   // Windows: skipped for providers whose single window is a synthetic
   // max-over-models artifact (Antigravity); their real signal is per-model.
   if (!_syntheticWindowProviders.contains(fresh.provider)) {
@@ -687,4 +744,56 @@ String? _pairDrift(
         'the prior reset';
   }
   return null;
+}
+
+/// The smallest gap between two observations that can distinguish a boundary
+/// holding still from one advancing with the clock.
+const int _neverApproachesMinElapsedSeconds = 60;
+
+/// How much of the elapsed time a reset must consume before it counts as
+/// tracking the clock rather than holding a fixed position.
+const double _neverApproachesAdvanceRatio = 0.5;
+
+/// Usage at or below this is treated as nothing consumed, so nothing can age
+/// out of a rolling pool.
+const double _neverApproachesIdleUsedPercent = 0.5;
+
+/// A reset that advances with the clock while nothing has been consumed.
+///
+/// A window boundary is only meaningful because it approaches: a fixed reset
+/// holds its timestamp until it passes, and a genuine rolling window only moves
+/// as recorded usage ages out of it. A provider that reports zero usage and a
+/// reset that keeps pace with the clock is describing neither. The boundary
+/// never arrives, so it can never expire the reading, and a permanent full
+/// balance keeps winning routing on evidence that cannot be checked.
+///
+/// Zero usage is what makes this decidable. With consumption present, a moving
+/// reset is exactly what a healthy rolling window looks like, so this only
+/// fires when there is nothing that could be aging out.
+String? _resetNeverApproaches({
+  required double? freshUsed,
+  required int? freshReset,
+  required double? prevUsed,
+  required int? prevReset,
+  required int observedAt,
+  required int? previousObservedAt,
+}) {
+  if (freshReset == null || prevReset == null) return null;
+  if (previousObservedAt == null || previousObservedAt <= 0) return null;
+  if (freshUsed == null || prevUsed == null) return null;
+  // A boundary that had already passed is allowed to move: naming the next
+  // window after a rollover is exactly what a healthy idle provider does. Only
+  // a boundary that moves while it is still ahead of the observation is failing
+  // to approach.
+  if (prevReset <= observedAt + _resetRegressToleranceSeconds) return null;
+  if (freshUsed > _neverApproachesIdleUsedPercent ||
+      prevUsed > _neverApproachesIdleUsedPercent) {
+    return null;
+  }
+  final elapsed = observedAt - previousObservedAt;
+  if (elapsed < _neverApproachesMinElapsedSeconds) return null;
+  final advanced = freshReset - prevReset;
+  if (advanced < elapsed * _neverApproachesAdvanceRatio) return null;
+  return 'reset never approaches: it advanced ${advanced}s across ${elapsed}s '
+      'with no usage recorded';
 }

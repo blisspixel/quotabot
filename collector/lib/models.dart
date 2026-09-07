@@ -1054,9 +1054,15 @@ class ProviderQuota {
 
   /// Returns a local-runtime copy carrying a fresh passive hardware snapshot.
   /// [detail] is an optional already-formatted display line for human surfaces.
+  /// Attaches host hardware evidence plus its rendered lines.
+  ///
+  /// [detailLines] is a list rather than one joined string: the host memory,
+  /// adapter, and utilization facts are separate observations, and joining them
+  /// produced the longest string in the product, which no card or terminal row
+  /// could render whole.
   ProviderQuota withLocalHardware(
     LocalHardwareInfo hardware, {
-    String? detail,
+    List<String> detailLines = const [],
   }) =>
       ProviderQuota(
         provider: provider,
@@ -1076,7 +1082,7 @@ class ProviderQuota {
         kind: kind,
         status: status,
         active: active,
-        details: detail == null ? details : [...details, detail],
+        details: detailLines.isEmpty ? details : [...details, ...detailLines],
         models: models,
         localHardware: hardware,
         modelQuotas: modelQuotas,

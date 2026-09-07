@@ -1015,4 +1015,189 @@ void main() {
     expect(back.driftObservedAt, 1234);
     expect(back.suspect, isNull);
   });
+
+  group('a reset that never approaches', () {
+    const t0 = 1788700000;
+    const fiveHours = 5 * 3600;
+
+    ProviderQuota modelSnap(
+      int observedAt,
+      double usedPercent,
+      int resetsAt,
+    ) =>
+        ProviderQuota(
+          provider: antigravityProviderId,
+          displayName: 'Antigravity',
+          account: 'a',
+          asOf: observedAt,
+          windows: [
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: usedPercent,
+              resetsAt: resetsAt,
+            ),
+          ],
+        );
+
+    test('a boundary tracking the clock with no usage is drift', () {
+      // The observed Antigravity shape: every read reports zero usage and a
+      // reset that is always five hours out, so the window never expires and a
+      // permanent full balance keeps winning routing.
+      final prev = modelSnap(t0, 0, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 300, 0, t0 + 300 + fiveHours);
+      expect(
+        detectQuotaDrift(fresh, prev, observedAt: t0 + 300),
+        contains('reset never approaches'),
+      );
+    });
+
+    test('a fixed boundary with no usage is healthy', () {
+      final prev = modelSnap(t0, 0, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 300, 0, t0 + fiveHours);
+      expect(detectQuotaDrift(fresh, prev, observedAt: t0 + 300), isNull);
+    });
+
+    test('a rolling window with real usage is not flagged', () {
+      // A genuine rolling window advances precisely because recorded usage ages
+      // out of it. That is the healthy case this rule must never touch.
+      final prev = modelSnap(t0, 40, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 300, 38, t0 + 300 + fiveHours);
+      expect(detectQuotaDrift(fresh, prev, observedAt: t0 + 300), isNull);
+    });
+
+    test('two reads too close together cannot decide', () {
+      final prev = modelSnap(t0, 0, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 10, 0, t0 + 10 + fiveHours);
+      expect(detectQuotaDrift(fresh, prev, observedAt: t0 + 10), isNull);
+    });
+
+    test('a reset that outruns the clock entirely is still flagged', () {
+      // A boundary pushed further out than the time that passed is even less
+      // able to arrive.
+      final prev = modelSnap(t0, 0, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 120, 0, t0 + fiveHours + 3600);
+      expect(
+        detectQuotaDrift(fresh, prev, observedAt: t0 + 120),
+        contains('reset never approaches'),
+      );
+    });
+
+    test('an idle provider rolling over to its next window is healthy', () {
+      // The old boundary genuinely passed and the provider named the next one.
+      // An idle account legitimately shows zero usage across that rollover, so
+      // flagging it would quarantine a perfectly good provider.
+      final prev = modelSnap(t0, 0, t0 + 60);
+      final fresh = modelSnap(t0 + 120, 0, t0 + 60 + fiveHours);
+      expect(detectQuotaDrift(fresh, prev, observedAt: t0 + 120), isNull);
+    });
+
+    test('a boundary still ahead of the read must not move', () {
+      // The discriminator: the previous boundary had not passed yet, so there
+      // was nothing to renew and it should have held its position.
+      final prev = modelSnap(t0, 0, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 600, 0, t0 + 600 + fiveHours);
+      expect(
+        detectQuotaDrift(fresh, prev, observedAt: t0 + 600),
+        contains('reset never approaches'),
+      );
+    });
+  });
+
+  group('hasDisplayableStaleMeterAt', () {
+    const day = 86400;
+    const capturedAt = 1000000;
+
+    ProviderQuota unbounded({required bool stale, int asOf = capturedAt}) =>
+        ProviderQuota(
+          provider: 'kiro',
+          displayName: 'Kiro',
+          account: 'a',
+          asOf: asOf,
+          stale: stale,
+          windows: [QuotaWindow(label: 'credit', usedPercent: 0)],
+        );
+
+    test('fresh evidence always keeps its meter', () {
+      final quota = unbounded(stale: false);
+      expect(
+        hasDisplayableStaleMeterAt(quota, capturedAt + 400 * day),
+        isTrue,
+        reason: 'the ceiling only ever applies to stale evidence',
+      );
+    });
+
+    test('recent unbounded stale evidence keeps its meter', () {
+      final quota = unbounded(stale: true);
+      expect(hasDisplayableStaleMeterAt(quota, capturedAt + 2 * day), isTrue);
+    });
+
+    test('unbounded stale evidence loses its meter past the ceiling', () {
+      final quota = unbounded(stale: true);
+      expect(hasDisplayableStaleMeterAt(quota, capturedAt + 49 * day), isFalse);
+    });
+
+    test('the ceiling boundary itself still renders', () {
+      final quota = unbounded(stale: true);
+      expect(
+        hasDisplayableStaleMeterAt(
+          quota,
+          capturedAt + kUnboundedStaleMeterCeilingSeconds,
+        ),
+        isTrue,
+      );
+      expect(
+        hasDisplayableStaleMeterAt(
+          quota,
+          capturedAt + kUnboundedStaleMeterCeilingSeconds + 1,
+        ),
+        isFalse,
+      );
+    });
+
+    test('a window reset boundary keeps the existing rule in charge', () {
+      final quota = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'a',
+        asOf: capturedAt,
+        stale: true,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 40,
+            resetsAt: capturedAt + day,
+          ),
+        ],
+      );
+      expect(
+        hasDisplayableStaleMeterAt(quota, capturedAt + 49 * day),
+        isTrue,
+        reason: 'hasExpiredQuotaWindowAt already withdraws trust here, so the '
+            'age ceiling must not double-withdraw a bounded row',
+      );
+    });
+
+    test('a model-scoped reset boundary also defers to the existing rule', () {
+      final quota = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'a',
+        asOf: capturedAt,
+        stale: true,
+        modelQuotas: [
+          ModelQuota(
+            model: 'fable',
+            usedPercent: 50,
+            resetsAt: capturedAt + day,
+          ),
+        ],
+      );
+      expect(hasDisplayableStaleMeterAt(quota, capturedAt + 49 * day), isTrue);
+    });
+
+    test('missing capture provenance cannot prove an age', () {
+      final quota = unbounded(stale: true, asOf: 0);
+      expect(hasDisplayableStaleMeterAt(quota, capturedAt), isFalse);
+    });
+  });
 }

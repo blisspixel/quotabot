@@ -639,6 +639,10 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
   final headroom = providerHeadroom(q, now);
   final evidenceLabel = _topEvidenceLabel(q, now);
   final trusted = evidenceLabel == null && isTrustedQuotaEvidenceAt(q, now);
+  // Unbounded stale evidence keeps its last known number but loses the meter:
+  // a bar drawn from a reading no reset boundary can invalidate asserts a
+  // currency the evidence does not have. See [hasDisplayableStaleMeterAt].
+  final showMeter = hasDisplayableStaleMeterAt(q, now);
   if (headroom == null) {
     const text = 'quota balance unavailable';
     final visibleTags = _visibleInlineTags(
@@ -730,7 +734,12 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     lines.add(_line([
       ..._rowHead(first ? q.displayName : '', w.label,
           selected: first && selected, palette: p),
-      ..._bar(used, remaining, barW, s, p, trusted: trusted),
+      if (showMeter)
+        ..._bar(used, remaining, barW, s, p, trusted: trusted)
+      else
+        // Hold the meter's exact width so every column right of it stays
+        // aligned with the rows that still draw one.
+        _Cell(' ' * (barW + 2)),
       _Cell(' '),
       _Cell(headroomText,
           (s, t) => trusted ? _healthPaint(s, p, remaining, t) : s.dim(t)),
@@ -830,14 +839,17 @@ List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) {
       q.driftReason == null &&
       q.error?.isNotEmpty == true) {
     final retry = providerRetrySummary(q, showingLastKnown: true);
-    rows.add(_line([
-      const _Cell('  '),
-      _Cell(' ' * (_nameW + _labelW)),
-      if (retry != null)
-        _Cell(fit('$retry: ${q.error}'), (s, t) => s.yellow(t))
-      else
-        _Cell(fit('live read failed: ${q.error}'), (s, t) => s.red(t)),
-    ], width, s));
+    final text =
+        retry != null ? '$retry: ${q.error}' : 'live read failed: ${q.error}';
+    // The repair step is the payload of this row, so it wraps rather than
+    // losing its second half to an ellipsis.
+    for (final line in _wrapReason(text, detailRoom)) {
+      rows.add(_line([
+        const _Cell('  '),
+        _Cell(' ' * (_nameW + _labelW)),
+        _Cell(line, (s, t) => retry != null ? s.yellow(t) : s.red(t)),
+      ], width, s));
+    }
   }
   for (final d in q.details) {
     rows.add(_line([
@@ -885,6 +897,44 @@ String _fitReason(String reason, int available) {
   final space = cut.lastIndexOf(' ');
   if (space > available ~/ 2) cut = cut.substring(0, space);
   return '${cut.trimRight()}...';
+}
+
+/// Wraps [text] across at most [maxLines] rows of [available] columns, breaking
+/// at word boundaries.
+///
+/// A recovery instruction is the most actionable string in the frame, and
+/// ellipsizing it at the first line delivers the diagnosis without the fix
+/// ("open Kiro and refresh its usage view before..."). Wrapping spends one more
+/// row to finish the sentence. The line budget stays small so a long provider
+/// error still cannot dominate the frame; only the last line can be ellipsized.
+List<String> _wrapReason(String text, int available, {int maxLines = 2}) {
+  if (available <= 3) return const [];
+  if (text.length <= available) return [text];
+  final words = text.split(' ').where((word) => word.isNotEmpty).toList();
+  final lines = <String>[];
+  var index = 0;
+  while (index < words.length && lines.length < maxLines) {
+    // The last line carries whatever is left, trimmed with an ellipsis if the
+    // budget still cannot hold it.
+    if (lines.length == maxLines - 1) {
+      lines.add(_fitReason(words.sublist(index).join(' '), available));
+      break;
+    }
+    var line = '';
+    while (index < words.length) {
+      final candidate = line.isEmpty ? words[index] : '$line ${words[index]}';
+      if (candidate.length > available) break;
+      line = candidate;
+      index++;
+    }
+    if (line.isEmpty) {
+      // A single word wider than the column cannot be wrapped at a boundary.
+      lines.add(_fitReason(words.sublist(index).join(' '), available));
+      break;
+    }
+    lines.add(line);
+  }
+  return lines.where((line) => line.isNotEmpty).toList();
 }
 
 /// Average remaining headroom across cloud providers that have live numbers, for
@@ -1094,7 +1144,11 @@ List<String> renderTopFrame({
   }
   if (groups.cached.isNotEmpty) {
     if (showSections) {
-      lines.add(_sectionHeader('CACHED', groups.cached.length, w, s, p));
+      // The band holds stale evidence and hard failures alike, so it is named
+      // for what they share - nothing here was confirmed on this pass - rather
+      // than for a cache a signed-out or errored provider never had.
+      lines.add(
+          _sectionHeader('NEEDS ATTENTION', groups.cached.length, w, s, p));
     }
     groups.cached.forEach(renderRow);
   }
