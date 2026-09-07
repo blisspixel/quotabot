@@ -4,7 +4,10 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.11.2. It adds reset confirmation,
+The current verified stable release is 0.11.3. It rejects a reset boundary that
+advances with the clock over zero usage, withdraws stale meters past an age
+ceiling, and stops the desktop promising an update it cannot install. The
+preceding 0.11.2 added reset confirmation,
 provider-specific usage retry coordination, explicit admission evidence, and
 current Grok CLI billing support. Fresh quota remains independent of advisory
 analytics. Inspectable local models, conservative hardware evidence, and
