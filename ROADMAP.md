@@ -94,7 +94,7 @@ same evidence in the app and their agent harnesses.** Useful product work
 continues while publisher identities are unavailable. Signing remains a native
 distribution gate before 1.0; store admission is not a product-development gate.
 
-The 0.11.3 release rejects a quota reset boundary that advances with the clock
+The 0.11.4 release rejects a quota reset boundary that advances with the clock
 while nothing has been consumed, withdraws stale meters past an age ceiling, and
 stops the desktop offering an update it cannot install. The 0.11.2 release
 adds reset confirmation, provider-scoped metadata retry coordination, explicit
@@ -461,7 +461,7 @@ plan semantics remain uneven.
 
 ## Current state
 
-The current line, **0.11.3**, is the stable release version and carries
+The current line, **0.11.4**, is the stable release version and carries
 the latest hardening inventory described in [Next](#next). The stable line
 contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
@@ -486,7 +486,7 @@ upstream and embedding-only admission gaps. Its native
 [release](https://github.com/blisspixel/quotabot/actions/runs/33977671639) and
 [install lifecycle](https://github.com/blisspixel/quotabot/actions/runs/33980712404)
 passed, with matching CLI and desktop payloads installed and verified on Windows.
-The 0.11.3 increment rejects unverifiable reset boundaries, bounds how long a
+The 0.11.4 increment rejects unverifiable reset boundaries, bounds how long a
 cached percentage may still be drawn as a meter, and makes local host evidence
 and the desktop update path state only what they can support. The 0.11.2
 increment adds bounded reset recovery, provider-specific usage

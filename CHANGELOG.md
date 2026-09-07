@@ -4,7 +4,13 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-## 0.11.3 - 2026-09-07
+## 0.11.4 - 2026-09-07
+
+This is the published form of the work tagged as 0.11.3. That tag built and
+audited its complete asset set, but publication failed closed: the release
+workflow requires the tagged commit to be the protected `main` tip, and a
+documentation commit landed on `main` while the build was running. The tag
+ruleset forbids moving or deleting a `v*` tag, so the same changes ship here.
 
 ### Fixed
 
