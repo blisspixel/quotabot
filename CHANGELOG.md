@@ -14,8 +14,11 @@ Notable changes to quotabot. Newest first.
   confident bar that read, at a glance, as fully free. Past one weekly window the
   last known percentage and its age are still reported, because that number
   remains the most useful evidence available, but the meter is withdrawn rather
-  than asserting a currency the reading cannot support. `top` and the desktop
-  share one rule, so neither surface draws a level the other withholds.
+  than asserting a currency the reading cannot support. Only a boundary still
+  ahead of the observation counts as bounding the reading: one that already
+  passed constrains nothing going forward, which is how a months-old credit
+  balance kept drawing a full-width bar. `top` and the desktop share one rule,
+  so neither surface draws a level the other withholds.
   Evidence inside a live window and every row with a reset boundary are
   unchanged.
 - Terminal recovery instructions wrap instead of losing their second half to an

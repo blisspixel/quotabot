@@ -205,10 +205,18 @@ const int kUnboundedStaleMeterCeilingSeconds = 7 * 86400;
 /// unaffected.
 bool hasDisplayableStaleMeterAt(ProviderQuota quota, int observedAt) {
   if (!quota.stale) return true;
-  final boundedByReset =
-      quota.windows.any((window) => window.resetsAt != null) ||
-          quota.modelQuotas.any((model) => model.resetsAt != null);
-  if (boundedByReset) return true;
+  // Only a boundary still ahead of the observation bounds the reading: it will
+  // arrive and expire the value on its own. A boundary that already passed
+  // constrains nothing going forward - [hasExpiredQuotaWindowAt] withdraws
+  // trust at that point, but trust is not the meter, and a long-passed reset
+  // otherwise left a months-old percentage drawing a full-width bar.
+  final boundedByLiveReset = quota.windows.any(
+        (window) => window.resetsAt != null && window.resetsAt! > observedAt,
+      ) ||
+      quota.modelQuotas.any(
+        (model) => model.resetsAt != null && model.resetsAt! > observedAt,
+      );
+  if (boundedByLiveReset) return true;
   final capturedAt = quota.asOf;
   if (capturedAt <= 0) return false;
   final age = observedAt - capturedAt;
