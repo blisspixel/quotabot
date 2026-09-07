@@ -41,7 +41,9 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 
 ## Project status and execution order
 
-The current verified stable release is 0.11.2. Automatic refresh confirms reset
+The current verified stable release is 0.11.3. A quota window whose reset
+advances with the clock over zero usage is rejected rather than routed on.
+Automatic refresh confirms reset
 boundaries without inventing quota. Claude, Codex and Grok coordinate supported
 metadata reads and retry deadlines per identity and purpose. Codex admission
 denial preserves measured balance while vetoing advice and leases; scoped model

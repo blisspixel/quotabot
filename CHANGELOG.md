@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.3 - 2026-09-07
+
 ### Fixed
 
 - Cached quota with no reset boundary anywhere no longer keeps drawing a meter
