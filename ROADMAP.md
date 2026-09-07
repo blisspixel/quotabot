@@ -96,22 +96,39 @@ distribution gate before 1.0; store admission is not a product-development gate.
 
 The 0.11.3 release rejects a quota reset boundary that advances with the clock
 while nothing has been consumed, withdraws stale meters past an age ceiling, and
-stops the desktop offering an update it cannot install. The 0.11.2 release adds reset confirmation, provider-scoped metadata retry
-coordination, explicit admission evidence and current Grok billing support.
+stops the desktop offering an update it cannot install. The 0.11.2 release
+adds reset confirmation, provider-scoped metadata retry coordination, explicit
+admission evidence and current Grok billing support.
 The previous increments provide inspectable desktop models, conservative
 hardware evidence, and tested advisory harness and Agent Plugins setup. Further
 work closes the independent credential and shutdown lifecycle gaps and improves
 native use before expanding local-only promises.
 The September research records the current code baseline, primary sources,
-uncertainties, and concrete tests for [local models](docs/research/2026-09-local-models.md),
+uncertainties, and concrete tests for
+[local models](docs/research/2026-09-local-models.md),
 [native platforms](docs/research/2026-09-platform-quality.md),
-[provider reliability](docs/research/2026-09-provider-reliability.md), and
-[agent harnesses](docs/research/2026-09-harnesses.md). Those reports are dated
-evidence; this section owns the execution order.
+[provider reliability](docs/research/2026-09-provider-reliability.md),
+[agent harnesses](docs/research/2026-09-harnesses.md), and
+[provider truth gaps](docs/research/2026-09-provider-truth-gaps.md). Those
+reports are dated evidence; this section owns the execution order.
 
 **Build in this order**
 
-1. **Finish credential and shutdown recovery.** Reset confirmation, coalesced
+1. **Close the two live provider-truth gaps.** Both were found against real
+   signed-in accounts, and both are invisible to hosted CI, which is why they
+   lead. Antigravity reads the Cloud Code allowance while usage lands in the
+   `agy` shared pool, so it reported a permanently full balance behind a reset
+   boundary that advanced with the clock. 0.11.3 rejects that reading rather
+   than routing on it, so a drifted Antigravity card is now the expected state
+   rather than a regression; closing the gap needs a source that reports the
+   pool actually spent, validated against an account whose consumption is
+   known. Separately, Claude stores its macOS credentials in the login Keychain
+   rather than `~/.claude/.credentials.json`, so every normally signed-in macOS
+   user sees Claude as an error; `os_secret_store.dart` already implements the
+   Keychain read but is wired only to Antigravity. Prove the credential path on
+   a native signed-in host, with fixtures for both storage shapes, and without
+   writing any host credential file.
+2. **Finish credential and shutdown recovery.** Reset confirmation, coalesced
    return/pause recovery, usage-read ownership, admission and accurate recovery
    labels are implemented. Next, retain Claude/Codex credential-transaction
    ownership through original OAuth request settlement while keeping callers'
@@ -122,7 +139,7 @@ evidence; this section owns the execution order.
    independence and repeat synthetic late-success, failure, replacement and
    restart cases. Real idle-machine and original display-disagreement evidence
    remain distinct from these reproducible regressions.
-2. **Establish execution scope before expanding local-only advice.** The
+3. **Establish execution scope before expanding local-only advice.** The
    explicit upstream veto, declared reasoning support, and conservative Windows
    GPU correction are in place. Next, require a bounded positive producer and
    endpoint-scope contract for stronger on-device claims. Preserve unknown
@@ -131,7 +148,7 @@ evidence; this section owns the execution order.
    on-device execution, active generation, or per-model utilization. Account for
    LM Studio LM Link, WSL and tunnel forwarding, and Lemonade composites before
    admitting those cases to a stronger local-only policy.
-3. **Polish one consistent desktop language.** Build on the existing typography,
+4. **Polish one consistent desktop language.** Build on the existing typography,
    theme and controls. Make the recommendation prominent, distinguish remaining
    included quota from price, and make focus, disabled, busy and warning states
    consistent. Inspect small text contrast, keyboard-visible compact status,
@@ -140,7 +157,7 @@ evidence; this section owns the execution order.
    tray form. Keep provider marks separate. The README now has four static
    views and a wide mini strip; captures follow the product instead of driving
    one-off layouts.
-4. **Extend inspectable choices across desktop and `top`.** The desktop model
+5. **Extend inspectable choices across desktop and `top`.** The desktop model
    detail is shipped. Add keyboard-accessible model detail to `top` and a bounded
    comparison of reported capabilities and fit, reusing the same registry and
    displayed snapshot. Answer: what is eligible, what is loaded, which
@@ -148,7 +165,7 @@ evidence; this section owns the execution order.
    what to do when evidence is missing. Show loaded models first, installed
    inventory second, and host pressure separately. Keep useful detail readable
    at narrow widths and larger text sizes.
-5. **Make everyday native use dependable.** Prioritize honest GPU evidence and
+6. **Make everyday native use dependable.** Prioritize honest GPU evidence and
    runtime reachability, Linux behavior when a tray host is absent, coalesced
    freshness recovery after sleep or foregrounding, and Windows/WSL/host scope.
    Quota refresh now completes independently of advisory analytics; the next
@@ -158,7 +175,7 @@ evidence; this section owns the execution order.
    monitor changes, keyboard, screen reader, startup, quit, and offline recovery
    on the platforms being claimed. Hosted builds and simulated states do not
    establish every hardware or desktop-environment claim.
-6. **Make named harness support real.** Start with versioned, tested advisory
+7. **Make named harness support real.** Start with versioned, tested advisory
    recipes for OpenClaw, OpenCode, Hermes, pi, and NemoClaw. Each recipe must name
    the actual transport or CLI entry point, supported version, OS/runtime
    boundary, model identifier mapping, spend class, and failure behavior. Pin
@@ -178,7 +195,7 @@ evidence; this section owns the execution order.
    status from primary sources before claiming support; model API compatibility
    alone is insufficient. Add only patterns that improve an explicit quotabot
    workflow and preserve the zero-inference collection contract.
-7. **Broaden insights from demonstrated decisions.** Add shared local model
+8. **Broaden insights from demonstrated decisions.** Add shared local model
    comparisons, supported hardware evidence, and a bounded llama.cpp metadata
    adapter when the preceding steps show a real need. Passive availability and
    readiness histories need a declared user question, bounded retention, and
