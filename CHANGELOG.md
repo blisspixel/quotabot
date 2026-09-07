@@ -4,6 +4,74 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+
+- Cached quota with no reset boundary anywhere no longer keeps drawing a meter
+  indefinitely. A credit or metered pool carries no reset for the existing
+  boundary rule to act on, so a seven-week-old reading still rendered as a
+  confident bar that read, at a glance, as fully free. Past one weekly window the
+  last known percentage and its age are still reported, because that number
+  remains the most useful evidence available, but the meter is withdrawn rather
+  than asserting a currency the reading cannot support. `top` and the desktop
+  share one rule, so neither surface draws a level the other withholds.
+  Evidence inside a live window and every row with a reset boundary are
+  unchanged.
+- Terminal recovery instructions wrap instead of losing their second half to an
+  ellipsis, so a row states both the diagnosis and the repair step at ordinary
+  widths. The line budget stays bounded, and only the last line can still be
+  trimmed.
+- Antigravity fails closed on a malformed model fraction whether or not a reset
+  accompanies it. The fraction parser returns null for an absent value and an
+  out-of-range one alike, so an unparseable fraction was fatal when a reset was
+  present but silently skipped when it was not, dropping a possibly-binding pool
+  and reporting the survivors as the whole account. A genuinely absent fraction
+  still identifies the non-metered helper rows.
+- Kiro reports a spent pool from any usage breakdown, not only the first. Its
+  breakdowns arrive in producer order rather than severity order, so a healthy
+  leading row hid a fully spent sibling. It now uses the same scan Cursor and
+  Windsurf already shared, promoted to one function instead of three copies.
+- Local host memory, adapter, and utilization are separate detail lines rather
+  than one joined sentence. Joined they formed the longest string in the
+  product, which no provider card or terminal row could render whole, so the
+  local runtime section was cut off mid-figure on both surfaces. Local card
+  details also wrap now; cloud details already did.
+
+- A quota window whose reset boundary advances with the clock while nothing has
+  been consumed is rejected as evidence. A fixed reset holds its timestamp until
+  it passes and a genuine rolling window only moves as recorded usage ages out,
+  so a boundary that keeps pace with the clock over zero usage never arrives and
+  cannot expire the reading. Antigravity reported exactly that shape, which
+  pinned it at a permanent full balance that won every route. It is now shown as
+  drifted and last-trusted, and routing falls to a provider with a real number.
+  Two guards keep the rule tight: a boundary that had already passed may still
+  move, because naming the next window is what a healthy idle provider does; and
+  the check applies to a provider's own windows, never to a model-scoped pool,
+  so one degenerate scoped boundary cannot quarantine a healthy shared window.
+- Desktop provider ordering is stable and admission-aware. Dart's list sort is
+  not stable and the display order recomputes every build, so providers at equal
+  headroom could swap places between repaints; every mode now falls through to a
+  name-then-account tie-break. "Most available" also ranks a pool that denies
+  requests below every admitted one instead of leading on headroom the caller
+  cannot spend, and alphabetical ordering ignores case. The ordering is a pure
+  function so these rules are tested directly.
+### Changed
+
+- The middle `top` band is named for what its rows share. It holds stale
+  evidence and hard failures alike, and a signed-out or errored provider has no
+  cached value, so `CACHED` became `NEEDS ATTENTION`. Grouping is unchanged: a
+  failure is still never idle.
+- A healthy desktop window names its reset event instead of showing a bare time.
+  "23% free   Fri 1:59 AM" read equally as "expires then" or "refills then",
+  while a spent card already said "available Sat 7:03 AM" and `top` already said
+  "resets". Healthy cards now say "resets Fri 1:59 AM", so both states and both
+  surfaces name the event rather than only its time.
+- The desktop update dialog states that quotabot cannot install its own update
+  and that the next steps are manual, and its actions all say `release` rather
+  than promising an `update` that opens a web page. On macOS an available update
+  also names Gatekeeper's block on the current unsigned builds and points at
+  System Settings, Privacy and Security, without suggesting anyone weaken a
+  platform protection.
+
 ## 0.11.2 - 2026-09-05
 
 ### Fixed

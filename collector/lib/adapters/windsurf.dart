@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:sqlite3/sqlite3.dart';
 
+import '../analysis.dart';
 import '../labels.dart';
 import '../models.dart';
 import '../parsing.dart';
@@ -94,7 +95,7 @@ class WindsurfAdapter {
       if (windows.isEmpty) {
         err = 'no quota data found in local state';
       } else {
-        final spent = _bindingCurrentSpentWindow(windows, asOf);
+        final spent = bindingCurrentSpentWindow(windows, asOf);
         if (spent != null) {
           err =
               'out of quota (resets ${resetCountdownLabel(spent.resetsAt, asOf)})';
@@ -643,21 +644,4 @@ List<QuotaWindow> _tightestWindsurfWindows(Iterable<QuotaWindow> windows) {
     }
   }
   return byLabel.values.toList();
-}
-
-QuotaWindow? _bindingCurrentSpentWindow(List<QuotaWindow> windows, int asOf) {
-  QuotaWindow? binding;
-  for (final window in windows) {
-    if (!window.exhausted ||
-        (window.resetsAt != null && window.resetsAt! <= asOf)) {
-      continue;
-    }
-    if (binding == null ||
-        (binding.resetsAt != null &&
-            (window.resetsAt == null ||
-                window.resetsAt! > binding.resetsAt!))) {
-      binding = window;
-    }
-  }
-  return binding;
 }

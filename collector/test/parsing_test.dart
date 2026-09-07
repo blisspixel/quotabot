@@ -1611,6 +1611,52 @@ void main() {
       }
     });
 
+    test('a malformed fraction is fatal with or without a reset', () {
+      // The same unparseable value was fatal when a reset accompanied it but
+      // silently skipped when one did not, because the fraction parser returns
+      // null for absent and out-of-range alike. Skipping it dropped a
+      // possibly-binding pool and reported the survivors as the whole account.
+      for (final broken in <Map<String, dynamic>>[
+        {'remainingFraction': 1.02},
+        {'remainingFraction': -0.5},
+        {'remainingFraction': 'not-a-number'},
+      ]) {
+        final response = {
+          'models': {
+            'Gemini 3.5 Flash (Medium)': {
+              'quotaInfo': {'remainingFraction': 0.9, 'resetTime': now + 3600},
+            },
+            'Gemini 3.5 Flash (High)': {'quotaInfo': broken},
+          },
+        };
+        expect(
+          antigravityWindows(response, now),
+          isEmpty,
+          reason: 'a malformed no-reset row could be the binding pool: $broken',
+        );
+        expect(antigravityModelQuotasFromLive(response), isEmpty);
+      }
+    });
+
+    test('an absent fraction with no reset is still a non-metered helper', () {
+      // The guard above must not swallow the rows it exists to allow: a
+      // tab-completion or chat helper carries no reset and no consumption.
+      final response = {
+        'models': {
+          'Gemini 3.5 Flash (Medium)': {
+            'quotaInfo': {'remainingFraction': 0.75, 'resetTime': now + 3600},
+          },
+          'Tab Completion': {'quotaInfo': <String, dynamic>{}},
+          'Chat': {
+            'quotaInfo': {'remainingFraction': 1},
+          },
+        },
+      };
+      final windows = antigravityWindows(response, now);
+      expect(windows, hasLength(1));
+      expect(windows.single.usedPercent, closeTo(25, 0.01));
+    });
+
     test('isExhausted true with a reset is spent, not full remaining', () {
       final reset = now + 3600;
       final w = antigravityWindows({

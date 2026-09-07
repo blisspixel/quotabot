@@ -140,4 +140,43 @@ void main() {
     expect(q.stale, isTrue);
     expect(q.error, contains('evidence time is unavailable'));
   });
+
+  test('a spent pool is reported even when it is not the first row', () async {
+    // Breakdowns arrive in producer order, not severity order. Reading only
+    // the first row reported a healthy account while a sibling pool was fully
+    // spent.
+    final reset = DateTime.now().toUtc().add(const Duration(hours: 2));
+    final db = writeDb({
+      'kiro.kiroAgent': jsonEncode({
+        'kiro.resourceNotifications.usageState': {
+          'timestamp': DateTime.now().toUtc().toIso8601String(),
+          'usageBreakdowns': [
+            {
+              'currentUsage': 100,
+              'usageLimit': 1000,
+              'percentageUsed': 10,
+              'resetDate': reset.toIso8601String(),
+              'displayName': 'Spec requests',
+            },
+            {
+              'currentUsage': 500,
+              'usageLimit': 500,
+              'percentageUsed': 100,
+              'resetDate': reset.toIso8601String(),
+              'displayName': 'Credits',
+            },
+          ],
+        },
+      }),
+    });
+
+    final q = await KiroAdapter(dbPath: db.path).collect();
+
+    expect(q.windows, hasLength(2));
+    expect(
+      q.error,
+      contains('out of quota'),
+      reason: 'the spent second pool must not be hidden by a healthy first row',
+    );
+  });
 }

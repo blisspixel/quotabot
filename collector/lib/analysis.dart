@@ -29,6 +29,32 @@ double windowUsedPercent(QuotaWindow w, int now) =>
 double windowHeadroom(QuotaWindow w, int now) =>
     100.0 - windowUsedPercent(w, now);
 
+/// The spent window a passive provider should name in its out-of-quota status.
+///
+/// A passive provider's windows arrive in producer order, which is not severity
+/// order, so inspecting only the first one can report a healthy pool while a
+/// sibling pool is fully spent. Scan every window, skip any whose reset has
+/// already passed (a rolled-over percentage is last-known evidence, not proof
+/// the replacement pool is spent), and prefer the latest-resetting spent window
+/// so the status names the pool the user waits longest for. Null when nothing is
+/// currently spent.
+QuotaWindow? bindingCurrentSpentWindow(List<QuotaWindow> windows, int asOf) {
+  QuotaWindow? binding;
+  for (final window in windows) {
+    if (!window.exhausted ||
+        (window.resetsAt != null && window.resetsAt! <= asOf)) {
+      continue;
+    }
+    if (binding == null ||
+        (binding.resetsAt != null &&
+            (window.resetsAt == null ||
+                window.resetsAt! > binding.resetsAt!))) {
+      binding = window;
+    }
+  }
+  return binding;
+}
+
 /// Whether [w] can be treated as reset for this exact quota observation.
 ///
 /// Reset metadata identifies the end of the observed pool, but it does not say

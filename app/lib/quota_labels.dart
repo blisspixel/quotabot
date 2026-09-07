@@ -39,6 +39,19 @@ String resetLabel(int? resetsAt, int now) {
   return s < 7 * 86400 ? '$wd $time' : '$wd ${dt.month}/${dt.day} $time';
 }
 
+/// The reset phrased for a window that still has headroom: "resets 3h58m",
+/// "resets Fri 1:59 AM".
+///
+/// A bare time beside a headroom percentage does not say what happens at it -
+/// "23% free   Fri 1:59 AM" reads equally as "expires then" or "refills then".
+/// A spent card already answers that with "available Sat 7:03 AM", and `top`
+/// already says "resets"; this gives a healthy card the same verb so both
+/// states, and both surfaces, name the event rather than only its time.
+String resetsLabel(int? resetsAt, int now) {
+  final label = resetLabel(resetsAt, now);
+  return label.isEmpty ? '' : 'resets $label';
+}
+
 /// When a spent window becomes usable again, phrased for a spent card: a
 /// near-term countdown reads "in 59m", a far-out reset reads as its absolute day
 /// and time ("Mon 5:00 PM").
