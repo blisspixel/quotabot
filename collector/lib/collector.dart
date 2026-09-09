@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'adapters/claude.dart';
 import 'analysis.dart';
+import 'auth/tokens.dart';
 import 'cache.dart';
 import 'credential_pool_store.dart';
 import 'demo.dart';
@@ -13,6 +14,7 @@ import 'models.dart';
 import 'profiles.dart';
 import 'provider_adapters.dart';
 import 'provider_id_migration.dart';
+import 'provider_read_gate.dart';
 import 'runtime_audit.dart';
 import 'util.dart';
 import 'verification.dart';
@@ -84,12 +86,23 @@ Future<List<ProviderQuota>> _collectAdapter(
 
 /// Waits for original adapter futures in this isolate, including reads whose
 /// caller already received a deadline result. Owners must stop new dispatch and
-/// await their outer fleet before this barrier, then drain provider read gates.
-/// Payloads and errors remain with the original caller; this tracks settlement.
+/// await their outer fleet before this barrier, then drain grant refreshes and
+/// provider read gates. Payloads and errors remain with the original caller;
+/// this tracks settlement.
 Future<void> drainActiveAdapterCollections() async {
   while (_activeAdapterCollections.isNotEmpty) {
     await Future.wait(_activeAdapterCollections.toList());
   }
+}
+
+/// Waits for original adapters, grant-refresh transactions, and metadata read
+/// gates in this isolate. Callers must stop new dispatch first. A late grant
+/// rotation can still persist after its publication deadline; this barrier
+/// keeps that work before the pooled HTTP client is closed or retired.
+Future<void> settleOwnedCollectionWork() async {
+  await drainActiveAdapterCollections();
+  await TokenStore.drainActiveRefreshTransactions();
+  await ProviderReadGate.drainActive();
 }
 
 class CollectedQuotaSnapshot {

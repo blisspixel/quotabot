@@ -105,6 +105,33 @@ void main() {
       expect(detectQuotaDrift(fresh, prev), isNull);
     });
 
+    test('Claude 5h may omit a reset without quarantining live weekly', () {
+      final prev = snap(claudeProviderId, [
+        win('5h', 9, 1000),
+        win('weekly', 95, 200000),
+      ]);
+      final fresh = snap(claudeProviderId, [
+        QuotaWindow(label: '5h', usedPercent: 0),
+        win('weekly', 100, 200000),
+      ]);
+      expect(detectQuotaDrift(fresh, prev, observedAt: 1500), isNull);
+    });
+
+    test('Claude weekly reset disappearing is still flagged', () {
+      final prev = snap(claudeProviderId, [
+        win('5h', 9, 1000),
+        win('weekly', 95, 200000),
+      ]);
+      final fresh = snap(claudeProviderId, [
+        QuotaWindow(label: '5h', usedPercent: 0),
+        QuotaWindow(label: 'weekly', usedPercent: 100),
+      ]);
+      expect(
+        detectQuotaDrift(fresh, prev, observedAt: 1500),
+        contains('weekly reset disappeared'),
+      );
+    });
+
     test('the disappeared-window exemption is scoped to Codex', () {
       // A non-variable provider losing a window is still genuine drift, so the
       // Codex restructure carve-out cannot mask a parser regression elsewhere.
@@ -147,11 +174,10 @@ void main() {
       );
     });
 
-    test('Antigravity is exempt: its window is a max over a changing set', () {
+    test('Antigravity named windows follow consume-then-reset rules', () {
       final prev = snap(antigravityProviderId, [win('5h', 80, 2000)]);
-      // Both a headroom gain and a reset regression, yet not flagged.
       final fresh = snap(antigravityProviderId, [win('5h', 5, 1000)]);
-      expect(detectQuotaDrift(fresh, prev), isNull);
+      expect(detectQuotaDrift(fresh, prev), contains('reset moved earlier'));
     });
 
     test('small reset jitter and rounding stay within tolerance', () {
@@ -182,8 +208,7 @@ void main() {
       expect(detectQuotaDrift(fresh, prev), startsWith('weekly '));
     });
 
-    test('Antigravity per-model drift is caught though its window is exempt',
-        () {
+    test('Antigravity per-model drift is caught independently of windows', () {
       final prev = snapModels(antigravityProviderId, [
         const ModelQuota(
             model: 'Gemini 3.5 Flash', usedPercent: 60, resetsAt: 1000),
@@ -1100,6 +1125,25 @@ void main() {
         detectQuotaDrift(fresh, prev, observedAt: t0 + 600),
         contains('reset never approaches'),
       );
+    });
+
+    test('an idle five-hour rolling burst may stay five hours out', () {
+      ProviderQuota fiveHour(int observedAt, int resetsAt) => ProviderQuota(
+            provider: antigravityProviderId,
+            displayName: 'Antigravity',
+            account: 'a',
+            asOf: observedAt,
+            windows: [
+              QuotaWindow(
+                label: '5h',
+                usedPercent: 0,
+                resetsAt: resetsAt,
+              ),
+            ],
+          );
+      final prev = fiveHour(t0, t0 + fiveHours);
+      final fresh = fiveHour(t0 + 300, t0 + 300 + fiveHours);
+      expect(detectQuotaDrift(fresh, prev, observedAt: t0 + 300), isNull);
     });
   });
 

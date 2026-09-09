@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import 'oauth_http.dart';
 import 'oauth_util.dart';
 import 'provider_disconnect.dart';
 import 'tokens.dart';
@@ -66,9 +67,14 @@ class AnthropicAuth {
   // use a short-lived client, so the fresh auth object created for each collect
   // never leaves an owned connection pool behind.
   final http.Client? _client;
+  final Duration requestTimeout;
 
-  AnthropicAuth({String? clientId, http.Client? client})
-      : clientId = _firstNonEmpty(
+  AnthropicAuth({
+    String? clientId,
+    http.Client? client,
+    this.requestTimeout = const Duration(seconds: 30),
+  })  : assert(requestTimeout.inMicroseconds > 0),
+        clientId = _firstNonEmpty(
           clientId,
           Platform.environment['QUOTABOT_ANTHROPIC_CLIENT_ID'],
           const String.fromEnvironment('QUOTABOT_ANTHROPIC_CLIENT_ID'),
@@ -287,16 +293,15 @@ class AnthropicAuth {
   }
 
   Future<Map<String, dynamic>?> _post(Map<String, String> fields) async {
-    final url = Uri.parse(_tokenEndpoint);
-    const headers = {
-      'Content-Type': 'application/json',
-    };
-    final body = jsonEncode(fields);
-    final client = _client;
-    final request = client == null
-        ? http.post(url, headers: headers, body: body)
-        : client.post(url, headers: headers, body: body);
-    final resp = await request.timeout(const Duration(seconds: 30));
+    final resp = await postOAuthTokenRequest(
+      uri: Uri.parse(_tokenEndpoint),
+      headers: const {
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(fields),
+      timeout: requestTimeout,
+      client: _client,
+    );
     if (resp.statusCode != 200) {
       throw StateError(_tokenExchangeFailure(resp));
     }

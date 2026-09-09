@@ -132,8 +132,10 @@ account id enters quota output.
   3.5 Flash, and 3.1 Pro share the Gemini pool. Claude Sonnet 4.6, Claude Opus
   4.6, and GPT-OSS-120B use the separate non-Gemini pool. Provider model rows
   are gates onto those groups, not balances that can be added together.
-- quotabot reads: the Cloud Code API (`loadCodeAssist`, `onboardUser`,
-  `fetchAvailableModels`). It can reuse refresh material from a signed-in
+- quotabot reads: the daily Cloud Code API that `agy` uses (`loadCodeAssist`,
+  `onboardUser`, `retrieveUserQuotaSummary`, `fetchAvailableModels`). The
+  grouped summary is the remaining weekly and five-hour balances for the Gemini
+  and Claude/GPT pools. It can reuse refresh material from a signed-in
   Antigravity IDE or from `agy` (OS keyring target `gemini:antigravity`);
   `quotabot login antigravity` is optional when a discovered account needs a
   separate refreshable grant or should be pinned. A signed-in `agy` CLI is

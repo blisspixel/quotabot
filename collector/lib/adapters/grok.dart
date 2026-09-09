@@ -472,15 +472,24 @@ class GrokAdapter {
   static _Principal? _principal(Map<dynamic, dynamic> raw,
       {required bool camelCase}) {
     final user = _identifier(raw[camelCase ? 'userId' : 'user_id']);
+    if (user == null) return null;
     final type = raw[camelCase ? 'principalType' : 'principal_type'];
     final principal = raw[camelCase ? 'principalId' : 'principal_id'];
     final team = raw[camelCase ? 'teamId' : 'team_id'];
-    if (user == null) return null;
-    if (type == null && principal == null && team == null) {
+    if (type == 'Team') {
+      if (_identifier(principal) != null && principal == team) {
+        return _Principal(user, principal as String, true);
+      }
+      return null;
+    }
+    // Personal principals are typed `User` or omit the type. The current Grok
+    // CLI still writes principal_id and team_id on that personal row; those
+    // fields are not the Team quota pool.
+    if (type == 'User') {
       return _Principal(user, user, false);
     }
-    if (type == 'Team' && _identifier(principal) != null && principal == team) {
-      return _Principal(user, principal as String, true);
+    if (type == null && principal == null && team == null) {
+      return _Principal(user, user, false);
     }
     return null;
   }

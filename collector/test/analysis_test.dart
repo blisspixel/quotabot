@@ -57,6 +57,154 @@ ProviderQuota _local(
     );
 
 void main() {
+  group('sparseScopedModelQuotas', () {
+    test('glance keeps Fable and hides Codex Spark', () {
+      final claude = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'a',
+        asOf: _now,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+        modelQuotas: [
+          ModelQuota(model: 'Fable', usedPercent: 40),
+        ],
+      );
+      final codex = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'a',
+        asOf: _now,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+        modelQuotas: [
+          ModelQuota(model: 'GPT-5.3-Codex-Spark', usedPercent: 0),
+        ],
+      );
+
+      expect(sparseScopedModelQuotas(claude).single.model, 'Fable');
+      expect(sparseScopedModelQuotas(codex), isEmpty);
+      expect(
+        sparseScopedModelQuotas(codex, glance: false).single.model,
+        'GPT-5.3-Codex-Spark',
+      );
+      expect(doctorVisibleModelQuotas(claude).single.model, 'Fable');
+      expect(doctorVisibleModelQuotas(codex), isEmpty);
+      final antigravity = ProviderQuota(
+        provider: 'antigravity',
+        displayName: 'Antigravity',
+        account: 'a',
+        asOf: _now,
+        windows: [QuotaWindow(label: '5h', usedPercent: 100)],
+        modelQuotas: [
+          ModelQuota(model: 'Gemini Models', usedPercent: 100),
+        ],
+      );
+      expect(doctorVisibleModelQuotas(antigravity), isEmpty);
+    });
+
+    test('glance and doctor hide Fable when the shared weekly is spent', () {
+      final claude = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'a',
+        asOf: _now,
+        windows: [
+          QuotaWindow(label: '5h', usedPercent: 0),
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 100,
+            resetsAt: _now + 2 * 86400,
+          ),
+        ],
+        modelQuotas: [
+          ModelQuota(
+            model: 'Fable',
+            usedPercent: 100,
+            resetsAt: _now + 2 * 86400,
+            windowLabel: 'weekly',
+          ),
+        ],
+      );
+      expect(sparseScopedModelQuotas(claude, now: _now), isEmpty);
+      expect(doctorVisibleModelQuotas(claude, now: _now), isEmpty);
+      expect(
+        sparseScopedModelQuotas(claude, glance: false, now: _now),
+        isEmpty,
+      );
+    });
+
+    test('spent 5h still shows Fable while weekly has room', () {
+      final claude = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'a',
+        asOf: _now,
+        windows: [
+          QuotaWindow(
+            label: '5h',
+            usedPercent: 100,
+            resetsAt: _now + 3600,
+          ),
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 42,
+            resetsAt: _now + 2 * 86400,
+          ),
+        ],
+        modelQuotas: [
+          ModelQuota(
+            model: 'Fable',
+            usedPercent: 26,
+            resetsAt: _now + 2 * 86400,
+            windowLabel: 'weekly',
+          ),
+        ],
+      );
+      expect(
+        sparseScopedModelQuotas(claude, now: _now).single.model,
+        'Fable',
+      );
+    });
+
+    test('doctor skips hidden and already-shown detected tools', () {
+      final antigravity = _q('antigravity', [
+        QuotaWindow(label: 'weekly', usedPercent: 50),
+      ]);
+      expect(
+        doctorPassiveDetectedTools(
+          detected: {'kiro', 'windsurf', 'antigravity'},
+          shown: [antigravity],
+          hidden: {'kiro', 'windsurf'},
+        ),
+        isEmpty,
+      );
+      expect(
+        doctorPassiveDetectedTools(
+          detected: {'kiro', 'cursor'},
+          shown: [antigravity],
+          hidden: {'kiro'},
+        ),
+        {'cursor'},
+      );
+    });
+
+    test('human status puts ready locals above idle cloud', () {
+      final claude = _q('claude', [
+        QuotaWindow(label: 'weekly', usedPercent: 20),
+      ]);
+      final cursor = _q('cursor', const []);
+      final ollama = _q(
+        'ollama',
+        const [],
+        kind: ProviderQuotaKind.local,
+      );
+      expect(
+        orderProvidersForHumanStatus([cursor, ollama, claude])
+            .map((quota) => quota.provider),
+        ['claude', 'ollama', 'cursor'],
+      );
+    });
+  });
+
   test('providerHeadroom is governed by the most constrained window', () {
     final q = _q('codex', [
       QuotaWindow(label: '5h', usedPercent: 10),
@@ -390,6 +538,16 @@ void main() {
       expect(secondaryVisibleWindow(q, _now)?.label, 'weekly');
     });
 
+    test('surfaces weekly after spent 5h even when weekly resets sooner', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now + 4 * 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 42, resetsAt: _now + 2 * 3600),
+      ]);
+      expect(bindingWindow(q, _now)?.label, '5h');
+      expect(secondaryVisibleWindow(q, _now)?.label, 'weekly');
+    });
+
     test('hides a healthy short window under a spent long window', () {
       final q = _q('codex', [
         QuotaWindow(label: '5h', usedPercent: 20, resetsAt: _now + 3600),
@@ -397,6 +555,16 @@ void main() {
             label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 86400),
       ]);
       // A green 5h under a spent weekly is unusable; do not resurface it.
+      expect(bindingWindow(q, _now)?.label, 'weekly');
+      expect(secondaryVisibleWindow(q, _now), isNull);
+    });
+
+    test('hides leftover 5h even when it resets after a spent weekly', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 9, resetsAt: _now + 4 * 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 3600),
+      ]);
       expect(bindingWindow(q, _now)?.label, 'weekly');
       expect(secondaryVisibleWindow(q, _now), isNull);
     });
@@ -415,6 +583,67 @@ void main() {
         QuotaWindow(label: 'weekly', usedPercent: 42, resetsAt: _now + 86400),
       ]);
       expect(secondaryVisibleWindow(q, _now), isNull);
+    });
+  });
+
+  group('doctorVisibleWindows', () {
+    test('hides leftover 5h under a spent weekly', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 9, resetsAt: _now + 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 86400),
+      ]);
+      expect(
+        doctorVisibleWindows(q, _now).map((window) => window.label),
+        ['weekly'],
+      );
+    });
+
+    test('hides leftover 5h that resets after a spent weekly', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 9, resetsAt: _now + 4 * 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 3600),
+      ]);
+      expect(
+        doctorVisibleWindows(q, _now).map((window) => window.label),
+        ['weekly'],
+      );
+    });
+
+    test('hides an unused 5h with no reset under a spent weekly', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 0),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 86400),
+      ]);
+      expect(
+        doctorVisibleWindows(q, _now).map((window) => window.label),
+        ['weekly'],
+      );
+    });
+
+    test('keeps weekly next to a spent 5h that still has room later', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now + 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 42, resetsAt: _now + 5 * 86400),
+      ]);
+      expect(
+        doctorVisibleWindows(q, _now).map((window) => window.label),
+        ['5h', 'weekly'],
+      );
+    });
+
+    test('hides an unused 5h when weekly is in use', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 0),
+        QuotaWindow(label: 'weekly', usedPercent: 30, resetsAt: _now + 86400),
+      ]);
+      expect(
+        doctorVisibleWindows(q, _now).map((window) => window.label),
+        ['weekly'],
+      );
     });
   });
 

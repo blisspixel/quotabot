@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/profiles.dart';
+import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -333,5 +335,84 @@ void main() {
     final file = profileFile('work', dir: temp);
     expect(file.statSync().mode & 0x3f, 0, reason: 'no group/other bits');
     expect(temp.statSync().mode & 0x3f, 0, reason: 'directory owner-only');
+  });
+
+  test('listProfiles loads hidden providers from default.json', () {
+    saveProfile(
+      const QuotaProfile(
+        name: defaultProfileName,
+        hiddenProviders: {'kiro'},
+        preferenceOrder: ['claude', 'codex'],
+      ),
+      dir: temp,
+    );
+
+    final listed = listProfiles(dir: temp)
+        .firstWhere((profile) => profile.name == defaultProfileName);
+    expect(listed.hiddenProviders, {'kiro'});
+    expect(listed.preferenceOrder, ['claude', 'codex']);
+  });
+
+  test('durable hide target matches desktop for one vs many accounts', () {
+    final one = q('ollama', account: '14 models');
+    final work = q('antigravity', account: 'work@example.com');
+    final home = q('antigravity', account: 'home@example.com');
+    expect(durableHideTargetIn(one, [one]), 'ollama');
+    expect(durableHideTargetIn(work, [work, home]),
+        'antigravity|work@example.com');
+    expect(
+      applyDurableHide(
+        hidden: {
+          'antigravity|work@example.com',
+          'antigravity|home@example.com'
+        },
+        target: 'antigravity',
+        hide: true,
+      ),
+      {'antigravity'},
+    );
+  });
+
+  test('durable hide unions default profile and leftover desktop prefs', () {
+    final root = Directory.systemTemp.createTempSync('quotabot_hide_union_');
+    addTearDown(() {
+      setQuotabotDirOverrideForTesting(null);
+      if (root.existsSync()) root.deleteSync(recursive: true);
+    });
+    setQuotabotDirOverrideForTesting(root);
+
+    saveProfile(
+      const QuotaProfile(
+        name: defaultProfileName,
+        hiddenProviders: {'kiro'},
+      ),
+    );
+    final prefsDir = Directory('${root.path}/quotabot/app')
+      ..createSync(recursive: true);
+    File('${prefsDir.path}/prefs.json').writeAsStringSync(
+      jsonEncode({
+        'hidden': ['lemonade', 'windsurf'],
+        'compact': false,
+      }),
+    );
+
+    expect(loadDurableHiddenTargets(), {'kiro', 'lemonade', 'windsurf'});
+
+    persistHiddenTarget('nvidia', hide: true);
+    expect(
+      loadProfile(defaultProfileName)!.hiddenProviders,
+      {'kiro', 'lemonade', 'windsurf', 'nvidia'},
+    );
+    final prefs = jsonDecode(
+      File('${prefsDir.path}/prefs.json').readAsStringSync(),
+    ) as Map<String, dynamic>;
+    expect(
+      prefs['hidden'],
+      containsAll(['kiro', 'lemonade', 'windsurf', 'nvidia']),
+    );
+    expect(prefs['compact'], isFalse);
+
+    persistHiddenTarget('lemonade', hide: false);
+    expect(loadDurableHiddenTargets(), isNot(contains('lemonade')));
   });
 }

@@ -10,9 +10,9 @@ and recommends where to send the next request. It also shows supported local
 models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
-> **Current stable:** 0.11.4. quotabot remains under active 0.x development.
-> **Next:** finish credential-refresh lifecycle recovery, polish the desktop's
-> shared controls and native identity, and verify more named harness workflows.
+> **Current stable:** 0.11.5. quotabot remains under active 0.x development.
+> **Next:** close remaining live Claude macOS Keychain discovery, idle-machine
+> grant evidence, and native identity; then stronger local-only claims.
 > Product development continues while release signing is
 > provisioned. See [roadmap Next](ROADMAP.md#next) and the
 > [documentation index](docs/README.md).
@@ -104,6 +104,7 @@ rollback, and uninstall, use the [setup guide](docs/SETUP.md).
 | Pick a model for a task | `quotabot suggest --task=hard` |
 | Inspect model availability and budget | `quotabot models` |
 | Watch quota and routing changes | `quotabot top` or `quotabot watch` |
+| Hide a cancelled subscription | `quotabot hide kiro` |
 | Require selected reads to be live | `quotabot verify --require-live` |
 | Install the latest release for this channel | `quotabot update` |
 | Connect an agent to quota advice | `quotabot mcp` |
@@ -140,13 +141,13 @@ inventory with loaded state, reported capabilities, context, and advisory
 memory fit. See the [local-model view](docs/USAGE.md#the-desktop-widget).
 Windows signing and macOS signing, notarization, and stapling remain pre-1.0
 trust gates; each release states its artifacts' signing status.
-The grouped Settings dialog includes the installed build and an explicit
-**Check for updates** action. It contacts GitHub only after that action, shows
-the latest candidate and latest stable release separately, and opens the chosen
-release so signing status, checksums, assets, and update instructions stay
-visible. Stable builds recommend stable updates without hiding newer previews;
-release candidates follow the preview channel. The app never checks
-automatically or prompts on launch.
+The grouped Settings dialog includes the installed build, **Check for
+updates**, and **Install latest update**. GitHub is contacted only after those
+actions. Check shows the latest candidate and latest stable separately.
+Install runs the checksum-verified CLI updater. The open tray window is not
+replaced by that command. Stable builds recommend stable updates without
+hiding newer previews; release candidates follow the preview channel. The app
+never checks automatically or prompts on launch.
 Verification, launch, update, rollback, and uninstall belong in [Desktop
 release bundles](docs/DESKTOP-DISTRIBUTION.md). Source setup and packaging are
 in [Building from source](docs/BUILDING.md).
@@ -197,15 +198,17 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Stable 0.11.4 rejects a quota reset boundary that advances with the clock
-while nothing has been consumed, so a pool that can never expire no longer wins
-routing on an unverifiable full balance. Stale meters are withdrawn past an age
-ceiling, local host evidence renders whole, and the desktop no longer offers an
-update it cannot install. The preceding 0.11.2 added automatic reset confirmation, provider-specific retry
-coordination, explicit blocked-account evidence, and current Grok CLI billing
-support. Fresh quota remains independent of advisory analytics. The desktop
-retains inspectable local models and hardware evidence; agent harnesses and
-Agent Plugins use the same quota advice through `quotabot mcp`.
+Stable 0.11.5 reads the live Claude weekly pool when the current session row
+omits a reset, so a spent weekly cap is no longer hidden behind last-known 5h
+leftover. Glance and doctor hide hashed account labels, keep Fable on the
+default view, and hide Codex Spark until detail. MCP shutdown stops late
+snapshots from recreating a closed HTTP client, and Claude, Codex, Grok, and
+Antigravity token POSTs keep ownership through original settlement. The
+preceding 0.11.4 rejects a quota reset boundary that advances with the clock
+while nothing has been consumed. Fresh quota remains independent of advisory
+analytics. The desktop retains inspectable local models and hardware evidence;
+agent harnesses and Agent Plugins use the same quota advice through
+`quotabot mcp`.
 The preceding 0.11.1
 [release run](https://github.com/blisspixel/quotabot/actions/runs/33977671639)
 published an immutable 14-asset set, and its unpinned GitHub Latest

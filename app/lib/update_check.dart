@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-const String quotabotAppVersion = '0.11.4';
-const String quotabotAppBuild = '0.11.4+59';
+const String quotabotAppVersion = '0.11.5';
+const String quotabotAppBuild = '0.11.5+60';
 const String quotabotReleasesUrl =
     'https://github.com/blisspixel/quotabot/releases';
 const String quotabotReleasesApi =
@@ -405,4 +405,140 @@ Future<QuotabotUpdateStatus> checkQuotabotUpdates({
   } finally {
     if (ownsClient) http.close(force: true);
   }
+}
+
+class QuotabotCliInstallResult {
+  final bool ok;
+  final String message;
+
+  const QuotabotCliInstallResult({required this.ok, required this.message});
+}
+
+typedef CliProcessRunner =
+    Future<ProcessResult> Function(String executable, List<String> arguments);
+
+/// The checksum-verified CLI updater, when this machine has one installed.
+String? defaultQuotabotCliPath({
+  Map<String, String>? environment,
+  bool Function(String path)? exists,
+}) {
+  final env = environment ?? Platform.environment;
+  final existsSync = exists ?? (path) => File(path).existsSync();
+  final sep = Platform.pathSeparator;
+  if (Platform.isWindows) {
+    final local = env['LOCALAPPDATA']?.trim();
+    if (local != null && local.isNotEmpty) {
+      final path = '$local${sep}quotabot${sep}bin${sep}quotabot.exe';
+      if (existsSync(path)) return path;
+    }
+    return null;
+  }
+  final home = env['HOME']?.trim();
+  if (home == null || home.isEmpty) return null;
+  final share =
+      '$home$sep.local${sep}share${sep}quotabot${sep}bin${sep}quotabot';
+  if (existsSync(share)) return share;
+  final localBin = '$home$sep.local${sep}bin${sep}quotabot';
+  if (existsSync(localBin)) return localBin;
+  return null;
+}
+
+/// Runs `quotabot update --json`. That command updates the CLI, not this tray
+/// binary. Missing CLI paths fail closed with a hand-install message.
+Future<QuotabotCliInstallResult> installQuotabotCliUpdate({
+  String? executable,
+  CliProcessRunner? runner,
+  Duration timeout = const Duration(minutes: 10),
+}) async {
+  final cli = executable ?? defaultQuotabotCliPath();
+  if (cli == null || cli.trim().isEmpty) {
+    return const QuotabotCliInstallResult(
+      ok: false,
+      message:
+          'The quotabot CLI updater was not found. Open the GitHub release '
+          'to install by hand.',
+    );
+  }
+  final run =
+      runner ?? (exe, args) => _runTimedProcess(exe, args, timeout: timeout);
+  try {
+    final result = await run(cli, const ['update', '--json']);
+    final parsed = _cliUpdateMessage(result.stdout);
+    if (result.exitCode == 0) {
+      return QuotabotCliInstallResult(
+        ok: true,
+        message: parsed ?? 'CLI update finished.',
+      );
+    }
+    return QuotabotCliInstallResult(
+      ok: false,
+      message: parsed ?? 'CLI update failed (exit ${result.exitCode}).',
+    );
+  } on TimeoutException {
+    return const QuotabotCliInstallResult(
+      ok: false,
+      message: 'CLI update timed out.',
+    );
+  } on ProcessException {
+    return const QuotabotCliInstallResult(
+      ok: false,
+      message: 'The CLI updater could not be started.',
+    );
+  }
+}
+
+Future<ProcessResult> _runTimedProcess(
+  String executable,
+  List<String> arguments, {
+  required Duration timeout,
+}) async {
+  final process = await Process.start(executable, arguments);
+  final stdoutBytes = <int>[];
+  final stderrBytes = <int>[];
+  final stdoutSub = process.stdout.listen(stdoutBytes.addAll);
+  final stderrSub = process.stderr.listen(stderrBytes.addAll);
+  try {
+    final code = await process.exitCode.timeout(timeout);
+    await Future.wait([stdoutSub.asFuture<void>(), stderrSub.asFuture<void>()]);
+    return ProcessResult(
+      process.pid,
+      code,
+      utf8.decode(stdoutBytes, allowMalformed: true),
+      utf8.decode(stderrBytes, allowMalformed: true),
+    );
+  } on TimeoutException {
+    process.kill();
+    await stdoutSub.cancel();
+    await stderrSub.cancel();
+    try {
+      await process.exitCode.timeout(const Duration(seconds: 2));
+    } on TimeoutException {
+      // Best-effort stop after the wait.
+    }
+    rethrow;
+  }
+}
+
+String? _cliUpdateMessage(Object? stdout) {
+  final raw = stdout is String ? stdout.trim() : stdout?.toString().trim();
+  if (raw == null || raw.isEmpty) return null;
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) return null;
+    final error = decoded['error'];
+    if (error is String && error.trim().isNotEmpty) return error.trim();
+    final version = decoded['target_version'];
+    if (decoded['installed'] == true && version is String) {
+      return 'Installed CLI $version.';
+    }
+    if (decoded['update_available'] == false) {
+      final current = decoded['current_version'];
+      return current is String
+          ? 'The CLI is already current ($current).'
+          : 'The CLI is already current.';
+    }
+  } on FormatException {
+    return null;
+  }
+  return null;
 }

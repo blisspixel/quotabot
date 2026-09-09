@@ -46,8 +46,9 @@ collector/ (Dart package)
   top.dart           pure renderer for the `quotabot top` live dashboard:
                      gradient meters, palettes, local detail lines, the
                      forward-looking forecast (strand probability/time-to-empty),
-                     the interactive sort (TopSort + sortProvidersForTop), and the
-                     keyboard helpers (moveSelection, osc52Copy clipboard)
+                     the interactive sort (TopSort + sortProvidersForTop),
+                     keyboard helpers (moveSelection, osc52Copy clipboard), and
+                     `m` model inspect for a selected local runtime
   demo.dart          synthetic fleet + burn stats for QUOTABOT_DEMO previews
   simulation.dart    exact one-provider snapshots for deterministic CLI tests
   verification.dart  pure provider honesty and contract checks
@@ -141,7 +142,11 @@ connection per call. A fleet poll runs every adapter concurrently, so without
 pooling it would open many cold DNS/TLS connections at once and the heavier
 front ends could miss their deadline; a shared client reuses warm connections
 and lets a multi-call adapter reuse one. Adapters still accept an injected client
-for tests.
+for tests. One-shot CLI commands close that pool after the last read and allow
+the next in-process call to create a fresh client. MCP shutdown stops new
+snapshot admissions, waits a bounded time for the current snapshot plus original
+adapters, grant-refresh transactions, and metadata read gates, then retires the
+pool so a late continuation cannot open another.
 
 ## Concurrency
 
@@ -158,10 +163,13 @@ useful parallelism is overlapping those waits, not occupying every CPU core.
   timeout. Calls coalesce into the pending generation; a late result cannot
   complete a different generation. A failed worker gives a bounded refresh
   error and never falls back to collection on the UI isolate. Cooperative close
-  stops dispatch, waits for the outer fleet and original adapters, drains their
-  read gates, then closes the pooled HTTP client. Only whole-application Quit
-  may end the process after a five-second grace period; widget disposal never
-  kills a worker that could still own a native credential or request guard.
+  stops dispatch, waits for the outer fleet and original adapters, drains grant
+  refresh transactions and their read gates, then closes the pooled HTTP client.
+  Only whole-application Quit may end the process after a five-second grace
+  period; widget disposal never kills a worker that could still own a native
+  credential or request guard. Claude, Codex, Grok, and Antigravity token POSTs
+  keep the refresh guard until the original OAuth request settles; a 200
+  rotation that arrives after the publication deadline is still persisted.
 - One-shot CLI collection stays on the process isolate. Spawning a second
   isolate for a command that exits immediately would cost more than it saves.
 - Advisory analytics has its own worker and newest-pending request. It cannot
@@ -195,7 +203,8 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
   profile databases, attempts live reads for each discovered account, refreshes
   the Gemini CLI token from disk when it is the active token source, and runs the
   Cloud Code onboarding step only when `loadCodeAssist` has not already returned
-  an onboarded project before reading per-model quota.
+  an onboarded project, then reads the grouped weekly and five-hour summary
+  `agy` spends before the per-model catalog.
 - Claude's current usage response separates shared session and weekly windows
   from optional model-scoped weekly limits. Shared windows govern provider
   routing; a scoped row is a sparse model-budget overlay, so spending it cannot
@@ -828,12 +837,19 @@ leaves JSON standard output reserved for alert records.
   explains that Close will exit instead of silently changing behavior. The full
   card view also supports hide/show per provider. In the card view, per-card
   expansion
-  toggles the card's own detail - the provenance line, model-specific rows, and
-  analytics - on top of the tight default, and it also groups distinct account
-  identities when work and personal accounts coexist. Expansion state is keyed by
-  provider/account so opening one account's details does not open its sibling. Duplicate-provider cards always show their
-  account when the "Show account names" preference is enabled; single-account
-  labels remain hidden. `prefs.dart` persists hidden providers, compact state,
+  toggles the card's own detail - the account identity, provenance line,
+  local host inventory, model-specific rows, and analytics - on top of the tight
+  default. Collapsed local cards keep loaded or ready status plus free VRAM;
+  opened detail adds RAM, utilization, disk, loaded-model context, and the
+  Models control. Expansion also groups distinct email identities when work
+  and personal accounts coexist.
+  Expansion state is keyed by provider/account so opening one account's details
+  does not open its sibling. Collapsed cards omit account labels; opened detail
+  shows them, including short credential digests. Duplicate-provider group
+  headers still follow the "Show account names" preference for emails.
+  Single-account labels remain hidden. The default profile owns the durable
+  hidden-provider list shared with `quotabot hide`; `prefs.dart` mirrors that
+  list and persists compact state,
   cadence, always on top, taskbar visibility, enable notifications,
   showAccounts, window position, and a bounded 128-entry reset-reminder handled
   ledger across restarts. Ledger entries contain only the numeric notification

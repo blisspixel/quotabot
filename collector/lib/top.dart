@@ -16,17 +16,19 @@ import 'drift.dart';
 import 'labels.dart';
 import 'models.dart';
 import 'palette.dart';
+import 'profiles.dart';
 import 'provenance.dart';
+import 'registry.dart';
+import 'util.dart';
 
-/// Removes session-hidden provider/account rows before both routing and
-/// rendering. Keeping this projection explicit prevents a hidden provider from
-/// remaining the header or copied-route winner.
+/// Removes hidden provider/account rows before both routing and rendering.
+/// Keys match the durable hide list (`provider` or `provider|account`).
 List<ProviderQuota> filterHiddenProvidersForTop(
   Iterable<ProviderQuota> providers,
   Set<String> hiddenQuotaKeys,
 ) =>
     providers
-        .where((quota) => !hiddenQuotaKeys.contains(quotaIdentityKeyFor(quota)))
+        .where((quota) => !hiddenTargetsQuota(hiddenQuotaKeys, quota))
         .toList(growable: false);
 
 /// Builds the OSC 52 terminal escape that asks the terminal to copy [text] to
@@ -290,10 +292,10 @@ String _accent(AnsiStyle s, Palette p, String t) {
 /// falls back to a single headroom-colored fill. htop-style, btop-grade gradient.
 List<_Cell> _bar(
     double usedPct, double remaining, int barW, AnsiStyle s, Palette p,
-    {required bool trusted}) {
+    {required bool paintHealth}) {
   final filled = ((usedPct.clamp(0, 100) / 100) * barW).round().clamp(0, barW);
   final cells = <_Cell>[_Cell('[', (s, t) => s.dim(t))];
-  if (!trusted) {
+  if (!paintHealth) {
     cells.add(_Cell('█' * filled, (s, t) => s.dim(t)));
   } else if (s.truecolor) {
     for (var i = 0; i < filled; i++) {
@@ -438,8 +440,18 @@ TopSection topSectionFor(ProviderQuota q, int now) {
       !q.stale &&
       q.driftReason == null &&
       isTrustedQuotaEvidenceAt(q, now);
-  if (!liveUsable) return TopSection.cached;
-  return TopSection.active;
+  if (liveUsable) return TopSection.active;
+  // Ancient last-known with its meter already withdrawn is unused inventory,
+  // not a live failure. Keep signed-out, drifted, and recent cached rows in
+  // the attention band.
+  final withdrawnIdle = q.ok &&
+      q.stale &&
+      q.driftReason == null &&
+      q.httpStatus == null &&
+      (q.retryAfterSeconds ?? 0) <= 0 &&
+      (q.error == null || q.error!.isEmpty) &&
+      !hasDisplayableStaleMeterAt(q, now);
+  return withdrawnIdle ? TopSection.idle : TopSection.cached;
 }
 
 /// A snapshot partitioned into the three [TopSection] bands, order preserved
@@ -531,7 +543,8 @@ String _routeAccountTag(
   RouteCandidate c,
   Map<String, int> providerCounts,
 ) =>
-    (providerCounts[c.provider] ?? 0) > 1 && hasSpecificQuotaAccount(c.account)
+    (providerCounts[c.provider] ?? 0) > 1 &&
+            quotaAccountBelongsOnGlance(c.account)
         ? ' @${quotaAccountDisplayLabel(c.account)}'
         : '';
 
@@ -639,6 +652,10 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
   final headroom = providerHeadroom(q, now);
   final evidenceLabel = _topEvidenceLabel(q, now);
   final trusted = evidenceLabel == null && isTrustedQuotaEvidenceAt(q, now);
+  // Last-known numbers still use the headroom scale: a weekly pool at 6% free
+  // is red even when the live read is deferred. Drift (last trusted) stays dim
+  // because those values were rejected.
+  final paintHealth = q.driftReason == null;
   // Unbounded stale evidence keeps its last known number but loses the meter:
   // a bar drawn from a reading no reset boundary can invalidate asserts a
   // currency the evidence does not have. See [hasDisplayableStaleMeterAt].
@@ -658,7 +675,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
         _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
         _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
       ], width, s),
-      ..._detailRows(q, width, s),
+      ..._detailRows(q, width, s, selected: selected),
     ];
   }
   if (binding != null && headroom <= kSpentHeadroomFloor) {
@@ -681,7 +698,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
       _line([
         ..._rowHead(q.displayName, binding.label,
             selected: selected, palette: p),
-        _Cell(state, (s, t) => trusted ? s.red(t) : s.dim(t)),
+        _Cell(state, (s, t) => q.driftReason != null ? s.dim(t) : s.red(t)),
         if (reset.isNotEmpty) _Cell('   $reset', (s, t) => s.dim(t)),
         _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
         _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
@@ -706,10 +723,26 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
         _Cell(
             '${remaining.round().toString().padLeft(3)}% '
             '${evidenceLabel ?? 'free'}$secReset',
-            (s, t) => s.dim(t)),
+            (s, t) =>
+                paintHealth ? _healthPaint(s, p, remaining, t) : s.dim(t)),
       ], width, s));
     }
-    rows.addAll(_detailRows(q, width, s));
+    _addScopedQuotaRows(
+      rows,
+      q,
+      now: now,
+      width: width,
+      s: s,
+      p: p,
+      barW: barW,
+      columns: columns,
+      evidenceLabel: evidenceLabel,
+      paintHealth: paintHealth,
+      showMeter: showMeter,
+      first: false,
+      selected: selected,
+    );
+    rows.addAll(_detailRows(q, width, s, selected: selected));
     return rows;
   }
 
@@ -735,14 +768,14 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
       ..._rowHead(first ? q.displayName : '', w.label,
           selected: first && selected, palette: p),
       if (showMeter)
-        ..._bar(used, remaining, barW, s, p, trusted: trusted)
+        ..._bar(used, remaining, barW, s, p, paintHealth: paintHealth)
       else
         // Hold the meter's exact width so every column right of it stays
         // aligned with the rows that still draw one.
         _Cell(' ' * (barW + 2)),
       _Cell(' '),
       _Cell(headroomText,
-          (s, t) => trusted ? _healthPaint(s, p, remaining, t) : s.dim(t)),
+          (s, t) => paintHealth ? _healthPaint(s, p, remaining, t) : s.dim(t)),
       // The reset column is padded to its reserved width so the forecast and
       // Trust/account tags line up vertically across every row.
       if (columns.reset) ...[
@@ -762,15 +795,93 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     ], width, s));
     first = false;
   }
-  lines.addAll(_detailRows(q, width, s));
+  _addScopedQuotaRows(
+    lines,
+    q,
+    now: now,
+    width: width,
+    s: s,
+    p: p,
+    barW: barW,
+    columns: columns,
+    evidenceLabel: evidenceLabel,
+    paintHealth: paintHealth,
+    showMeter: showMeter,
+    first: first,
+    selected: selected,
+  );
+  lines.addAll(_detailRows(q, width, s, selected: selected));
   return lines;
 }
 
-/// The rows for one local runtime: a headline (what is loaded, always-on) and any
-/// detail lines (GPU residency, running context, disk) the adapter provides,
-/// indented under it -
-/// the same detail the desktop app shows. The trust tag yields on
-/// narrow terminals so the status itself never clips.
+String _scopedTopLabel(ModelQuota quota) {
+  final name = quota.model.trim();
+  if (name.isEmpty) return 'scoped';
+  final compact = name.toLowerCase().startsWith('fable') ? 'fable' : name;
+  return compact.length <= _labelW ? compact : compact.substring(0, _labelW);
+}
+
+void _addScopedQuotaRows(
+  List<String> lines,
+  ProviderQuota q, {
+  required int now,
+  required int width,
+  required AnsiStyle s,
+  required Palette p,
+  required int barW,
+  required ({bool reset, bool forecast}) columns,
+  required String? evidenceLabel,
+  required bool paintHealth,
+  required bool showMeter,
+  required bool first,
+  required bool selected,
+}) {
+  var leading = first;
+  for (final modelQuota
+      in sparseScopedModelQuotas(q, glance: !selected, now: now)) {
+    final remaining = modelQuota.remainingPercent!;
+    final used = 100 - remaining;
+    final reset = modelQuota.resetsAt == null
+        ? ''
+        : evidenceLabel == null && modelQuota.resetsAt! > now
+            ? 'resets ${countdown(modelQuota.resetsAt!, now)}'
+            : modelQuota.resetsAt! <= now
+                ? 'refresh to confirm'
+                : 'reset ${countdown(modelQuota.resetsAt!, now)}';
+    final scopedLabel = evidenceLabel == null &&
+            modelQuota.resetsAt != null &&
+            modelQuota.resetsAt! <= now
+        ? 'last observed'
+        : evidenceLabel;
+    final headroomText =
+        '${remaining.round().toString().padLeft(3)}% ${scopedLabel ?? 'free'}';
+    lines.add(_line([
+      ..._rowHead(leading ? q.displayName : '', _scopedTopLabel(modelQuota),
+          palette: p),
+      if (showMeter)
+        ..._bar(used, remaining, barW, s, p, paintHealth: paintHealth)
+      else
+        _Cell(' ' * (barW + 2)),
+      _Cell(' '),
+      _Cell(headroomText,
+          (s, t) => paintHealth ? _healthPaint(s, p, remaining, t) : s.dim(t)),
+      if (columns.reset) ...[
+        const _Cell('  '),
+        _Cell(reset.padRight(_resetCost - 2), (s, t) => s.dim(t)),
+      ],
+      if (columns.forecast) ...[
+        const _Cell('  '),
+        _Cell(' ' * (_forecastCost - 2)),
+      ],
+    ], width, s));
+    leading = false;
+  }
+}
+
+/// The rows for one local runtime: a headline (what is loaded) plus free VRAM
+/// on the glance. Selected rows add host RAM, utilization, disk, and
+/// loaded-model context, matching an opened desktop card. The trust tag yields
+/// on narrow terminals so the status itself never clips.
 List<String> _localRows(
   ProviderQuota q,
   int now,
@@ -805,7 +916,7 @@ List<String> _localRows(
       ],
     ], width, s),
   ];
-  lines.addAll(_detailRows(q, width, s));
+  lines.addAll(_detailRows(q, width, s, selected: selected));
   return lines;
 }
 
@@ -816,7 +927,12 @@ List<String> _localRows(
 /// runtime - surfaces the same detail instead of dropping it. A spent card in
 /// particular must still show an available reset so the glance answers "is there
 /// a way to keep working now?" and not only "when does it come back?".
-List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) {
+List<String> _detailRows(
+  ProviderQuota q,
+  int width,
+  AnsiStyle s, {
+  bool selected = false,
+}) {
   final rows = <String>[];
   // Detail text is indented past the name and label columns, so it must be
   // trimmed against the space that actually remains. Yielding at a word boundary
@@ -851,7 +967,15 @@ List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) {
       ], width, s));
     }
   }
-  for (final d in q.details) {
+  final details = q.isLocal
+      ? [
+          ...localRuntimeGlanceDetails(q),
+          if (selected) ...localRuntimeExpandedDetails(q),
+        ]
+      : selected
+          ? q.details
+          : const <String>[];
+  for (final d in details) {
     rows.add(_line([
       const _Cell('  '),
       _Cell(' ' * (_nameW + _labelW)),
@@ -953,9 +1077,120 @@ double? _poolHeadroom(List<ProviderQuota> providers, int now) {
   return n == 0 ? null : sum / n;
 }
 
-/// Builds the content lines of one `top` frame. [clock] is supplied by the
-/// caller (the only time-of-day text), [width] is the terminal width, and
-/// [color] turns ANSI styling on or off.
+/// Upper bound so a large local inventory cannot push the route line and
+/// footer off a typical terminal. Registry order already puts loaded models
+/// first; the remainder count points at the rest.
+const _maxInspectModels = 8;
+
+List<String> _modelInspectSection(
+  ProviderQuota? selected,
+  int now,
+  int width,
+  AnsiStyle s,
+  Palette p,
+) {
+  final lines = <String>[];
+  if (selected == null || !selected.isLocal) {
+    lines.add(_sectionHeader('MODELS', 0, width, s, p));
+    for (final line in _wrapReason(
+      'Select a local runtime, then m. Cloud rows keep shared windows on the card.',
+      width - 2,
+    )) {
+      lines.add(_line([
+        const _Cell('  '),
+        _Cell(line, (style, text) => style.dim(text)),
+      ], width, s));
+    }
+    return lines;
+  }
+  final entries = buildModelRegistry([selected], now);
+  final shown = entries.take(_maxInspectModels).toList(growable: false);
+  final remainder = entries.length - shown.length;
+  lines.add(_sectionHeader('MODELS', entries.length, width, s, p));
+  final inventoryCurrent = isLocalRuntimeReachableAt(selected, now) &&
+      selected.error == null &&
+      selected.driftReason == null;
+  final intro = remainder > 0
+      ? 'Loaded first, then installed. Showing ${shown.length} of ${entries.length}. Host RAM and GPU stay on the selected row.'
+      : 'Loaded first, then installed. Host RAM and GPU stay on the selected row.';
+  for (final line in _wrapReason(intro, width - 2)) {
+    lines.add(_line([
+      const _Cell('  '),
+      _Cell(line, (style, text) => style.dim(text)),
+    ], width, s));
+  }
+  if (shown.isEmpty) {
+    lines.add(_line([
+      const _Cell('  '),
+      _Cell('no models reported', (style, text) => style.dim(text)),
+    ], width, s));
+    return lines;
+  }
+  for (final entry in shown) {
+    lines.add(_line([
+      const _Cell('  '),
+      _Cell(
+        _fitReason(_modelInspectSummary(entry, inventoryCurrent), width - 2),
+        (style, text) =>
+            entry.model.loaded ? style.cyan(text) : style.dim(text),
+      ),
+    ], width, s));
+  }
+  if (remainder > 0) {
+    lines.add(_line([
+      const _Cell('  '),
+      _Cell(
+        '+$remainder more in quotabot models',
+        (style, text) => style.dim(text),
+      ),
+    ], width, s));
+  }
+  return lines;
+}
+
+String _modelInspectSummary(ModelEntry entry, bool inventoryCurrent) {
+  final model = entry.model;
+  final residency = model.upstreamRouting != UpstreamRouting.notReported
+      ? (model.loaded ? 'reported-loaded' : 'no-residency')
+      : (model.loaded ? 'loaded' : 'cold');
+  final observed = inventoryCurrent ? residency : '$residency last-observed';
+  final context = model.contextTokens == null
+      ? 'ctx?'
+      : formatContextTokens(model.contextTokens!);
+  final caps = <String>[
+    if (model.tools == true) 'tools',
+    if (model.vision == true) 'vision',
+    if ((model.reasoning ?? '').trim().isNotEmpty) 'reason',
+    if (model.embedding == true) 'embed',
+  ];
+  final why = _modelInspectWhy(entry, inventoryCurrent);
+  return '${model.id}  $observed  $context  '
+      '${caps.isEmpty ? '-' : caps.join(' ')}  $why';
+}
+
+String _modelInspectWhy(ModelEntry entry, bool inventoryCurrent) {
+  final model = entry.model;
+  if (model.cloudOffloaded) return 'cloud-offloaded; not local budget';
+  if (model.upstreamRouting == UpstreamRouting.declared) {
+    return 'upstream; location unverified';
+  }
+  if (model.upstreamRouting == UpstreamRouting.unresolved) {
+    return 'upstream unresolved; excluded';
+  }
+  if (model.embedding == true) return 'embedding; excluded from generation';
+  if (entry.stale) return 'stale inventory; excluded';
+  if (entry.driftReason != null) return 'untrusted inventory; excluded';
+  if (!inventoryCurrent) return 'runtime unavailable; excluded';
+  final admission = requestAdmissionDetail(entry.requestAdmission);
+  if (admission != null) return admission;
+  if (!entry.available) return 'excluded';
+  final fit = entry.hardwareFit;
+  if (fit == null || fit.status == LocalHardwareFitStatus.unknown) {
+    return 'fit unknown';
+  }
+  return 'fit ${fit.status.wireName}';
+}
+
 /// A labeled band divider, e.g. "  ACTIVE 3 ─────────────". The rule runs to the
 /// frame edge so the eye tracks one horizontal group at a time, the way htop
 /// separates its meters from its process list.
@@ -976,6 +1211,11 @@ String _sectionHeader(
   ], width, s);
 }
 
+/// Builds the content lines of one `top` frame. [clock] is supplied by the
+/// caller (the only time-of-day text), [width] is the terminal width, and
+/// [color] turns ANSI styling on or off. [inspectModels] adds a bounded local
+/// model inventory for the selected runtime, using the same registry order as
+/// the desktop dialog.
 List<String> renderTopFrame({
   required List<ProviderQuota> providers,
   required RouteSuggestion suggestion,
@@ -991,6 +1231,7 @@ List<String> renderTopFrame({
   String? selectedAccount,
   int hidden = 0,
   String copied = '',
+  bool inspectModels = false,
 }) {
   final w = width < 1 ? 1 : width;
   final s = AnsiStyle(color, depth: depth);
@@ -1038,15 +1279,15 @@ List<String> renderTopFrame({
     hasForecast: forecasts.values.any((f) => f != null),
     hasReset: hasReset,
   );
-  // Multi-account fleets label each duplicate provider's row with its account,
-  // so two Grok rows are never ambiguous; single-account fleets stay unlabeled.
+  // Multi-account fleets label duplicate rows with glance-friendly accounts
+  // (emails, manual names). Opaque credential digests stay off this view.
   final providerCounts = <String, int>{};
   for (final q in cloud) {
     providerCounts[q.provider] = (providerCounts[q.provider] ?? 0) + 1;
   }
   String accountTagFor(ProviderQuota q) =>
       (providerCounts[q.provider] ?? 0) > 1 &&
-              hasSpecificQuotaAccount(q.account)
+              quotaAccountBelongsOnGlance(q.account)
           ? ' @${quotaAccountDisplayLabel(q.account)}'
           : '';
   // Reserve room for the widest trailing annotation so tags never clip.
@@ -1165,6 +1406,17 @@ List<String> renderTopFrame({
     }
   }
 
+  if (inspectModels) {
+    ProviderQuota? selectedQuota;
+    for (final q in [...cloud, ...local]) {
+      if (isSelected(q)) {
+        selectedQuota = q;
+        break;
+      }
+    }
+    lines.addAll(_modelInspectSection(selectedQuota, now, w, s, p));
+  }
+
   lines.add(_line([_Cell('─' * w, (s, t) => s.dim(t))], w, s));
   final r = suggestion.recommended;
   // The route line already names the pick, so a reason that repeats it as
@@ -1231,6 +1483,10 @@ List<String> renderTopFrame({
         _Cell('c', (s, t) => s.bold(t)),
         _Cell(' copy  ', (s, t) => s.dim(t)),
       ], 5),
+      _Seg([
+        _Cell('m', (s, t) => s.bold(t)),
+        _Cell(inspectModels ? ' models:on  ' : ' models  ', (s, t) => s.dim(t)),
+      ], 2),
       if (copied.isNotEmpty)
         _Seg([
           _Cell('copy requested $copied  ', (s, t) => _accent(s, p, t)),

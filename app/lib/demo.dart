@@ -45,6 +45,7 @@ ProviderQuota _local(
   List<String> details, {
   bool active = false,
   required List<ModelInfo> models,
+  LocalHardwareInfo? hardware,
 }) => ProviderQuota(
   provider: id,
   displayName: name,
@@ -56,6 +57,7 @@ ProviderQuota _local(
   active: active,
   details: details,
   models: models,
+  localHardware: hardware,
 );
 
 int _now() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -102,11 +104,21 @@ List<ProviderQuota> demoData() => [
     const [
       '4.4 GB GPU resident . 32K running context',
       '3 installed . 18.6 GB on disk',
-      'Local host RAM 16.0 GB of 64.0 GB used (25%) . '
-          'Local host VRAM 4.0 GB of 12.0 GB used (33%) . '
-          'GeForce RTX 4070 . Local host GPU utilization 27%',
+      'Local host RAM 16.0 GB of 64.0 GB used (25%)',
+      'Local host VRAM 4.0 GB of 12.0 GB used (33%) . GeForce RTX 4070',
+      'Local host GPU utilization 27%',
     ],
     active: true,
+    hardware: const LocalHardwareInfo(
+      asOf: 1,
+      systemMemoryTotalBytes: 64 * 1024 * 1024 * 1024,
+      systemMemoryAvailableBytes: 48 * 1024 * 1024 * 1024,
+      gpuMemoryTotalBytes: 12 * 1024 * 1024 * 1024,
+      gpuMemoryAvailableBytes: 8 * 1024 * 1024 * 1024,
+      gpuUtilizationPercent: 27,
+      gpuCount: 1,
+      gpuName: 'GeForce RTX 4070',
+    ),
     models: const [
       ModelInfo(
         id: 'qwen2.5-coder:7b',

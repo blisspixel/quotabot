@@ -38,12 +38,6 @@ const double _headroomGainTolerancePoints = 2.0;
 const int kMaxQuotaDriftReasonCharacters = 512;
 const int _maxQuotaDriftDimensionCharacters = 96;
 
-/// Providers whose single window is not a plain consume-then-reset pool, so the
-/// monotonicity checks do not apply. Antigravity's lone window is a max over a
-/// changing per-model set, so its headroom and reset can both move
-/// non-monotonically; its real signal is per-model quota, checked elsewhere.
-const _syntheticWindowProviders = {antigravityProviderId};
-
 /// Providers whose model-quota response can legitimately add or remove rows.
 /// Claude and Codex expose optional scoped overlays, while Antigravity's live
 /// model catalog varies with provider rollout and account availability. A
@@ -110,6 +104,21 @@ bool _isKnownCodexWindowCollapse(
     gone.label == '5h' &&
     previous.windows.any((window) => window.label == 'weekly') &&
     fresh.windows.any((window) => window.label == 'weekly');
+
+/// Claude's current session row can omit `resets_at` even though older
+/// snapshots stored a 5h reset. The 5h window remains and weekly keeps its
+/// reset. Treating that as "reset disappeared" froze last-known leftover,
+/// including a green 5h bar, while the live weekly pool was already spent.
+bool _isKnownClaudeSessionResetOmission({
+  required String provider,
+  required String? windowLabel,
+  required int? freshReset,
+  required int? previousReset,
+}) =>
+    provider == claudeProviderId &&
+    windowLabel == '5h' &&
+    freshReset == null &&
+    previousReset != null;
 
 /// Whether a used-percent drop in [label] for [provider] is expected re-rating
 /// rather than drift.
@@ -603,12 +612,7 @@ String? detectQuotaDrift(
   int? observedAt,
 }) {
   final observation = observedAt ?? fresh.asOf;
-  // A boundary that never approaches invalidates the provider's own window,
-  // so it runs for every provider - including the synthetic-window ones the
-  // monotonicity checks below skip. Their window is derived from the same
-  // models, so a boundary that cannot arrive makes the derived window
-  // meaningless too.
-  //
+  // A boundary that never approaches invalidates the provider's own window.
   // Deliberately not applied to model-scoped pools. A scoped allowance gates
   // its own model; letting one degenerate scoped boundary quarantine the whole
   // provider would discard a healthy shared subscription window, which is
@@ -624,45 +628,41 @@ String? detectQuotaDrift(
       prevReset: p.resetsAt,
       observedAt: observation,
       previousObservedAt: previous.asOf,
+      windowLabel: w.label,
     );
     if (never != null) {
       return boundedQuotaDriftReason('${w.label} $never');
     }
   }
-  // Windows: skipped for providers whose single window is a synthetic
-  // max-over-models artifact (Antigravity); their real signal is per-model.
-  if (!_syntheticWindowProviders.contains(fresh.provider)) {
-    final prev = {for (final w in previous.windows) w.label: w};
-    final freshLabels = {for (final w in fresh.windows) w.label};
-    for (final prior in previous.windows) {
-      if (freshLabels.contains(prior.label)) continue;
-      if (_isLegacyClaudeScopedWindow(previous, prior)) continue;
-      // The one admitted Codex shape change is the observed 5h plus weekly to
-      // weekly-only collapse. Losing weekly is always drift, even when its reset
-      // is sooner than a surviving 5h reset.
-      if (fresh.provider == codexProviderId &&
-          _isKnownCodexWindowCollapse(prior, previous, fresh)) {
-        continue;
-      }
-      return boundedQuotaDriftReason(
-        '${prior.label} quota window disappeared',
-      );
+  final freshLabels = {for (final w in fresh.windows) w.label};
+  for (final prior in previous.windows) {
+    if (freshLabels.contains(prior.label)) continue;
+    if (_isLegacyClaudeScopedWindow(previous, prior)) continue;
+    // The one admitted Codex shape change is the observed 5h plus weekly to
+    // weekly-only collapse. Losing weekly is always drift, even when its reset
+    // is sooner than a surviving 5h reset.
+    if (fresh.provider == codexProviderId &&
+        _isKnownCodexWindowCollapse(prior, previous, fresh)) {
+      continue;
     }
-    for (final w in fresh.windows) {
-      final p = prev[w.label];
-      if (p == null) continue;
-      final reason = _pairDrift(
-        fresh.provider,
-        w.percent,
-        w.resetsAt,
-        p.percent,
-        p.resetsAt,
-        observation,
-        windowLabel: w.label,
-      );
-      if (reason != null) {
-        return boundedQuotaDriftReason('${w.label} $reason');
-      }
+    return boundedQuotaDriftReason(
+      '${prior.label} quota window disappeared',
+    );
+  }
+  for (final w in fresh.windows) {
+    final p = prevWindows[w.label];
+    if (p == null) continue;
+    final reason = _pairDrift(
+      fresh.provider,
+      w.percent,
+      w.resetsAt,
+      p.percent,
+      p.resetsAt,
+      observation,
+      windowLabel: w.label,
+    );
+    if (reason != null) {
+      return boundedQuotaDriftReason('${w.label} $reason');
     }
   }
   // Per-model pools keep the same monotonicity checks when a model survives in
@@ -723,7 +723,16 @@ String? _pairDrift(
   if (fr != null && pr != null && fr < pr - _resetRegressToleranceSeconds) {
     return 'reset moved earlier';
   }
-  if (fr == null && pr != null) return 'reset disappeared';
+  if (fr == null &&
+      pr != null &&
+      !_isKnownClaudeSessionResetOmission(
+        provider: provider,
+        windowLabel: windowLabel,
+        freshReset: fr,
+        previousReset: pr,
+      )) {
+    return 'reset disappeared';
+  }
   // (2) Within one window instance (same reset, none passed) usage can only
   // rise: you consume, you do not regain - unless the provider re-rates its
   // pool, which is accepted, not drift.
@@ -785,7 +794,11 @@ String? _resetNeverApproaches({
   required int? prevReset,
   required int observedAt,
   required int? previousObservedAt,
+  String? windowLabel,
 }) {
+  // An unused five-hour rolling burst stays about five hours out until first
+  // use. That is a real idle 5h pool, not a weekly labeled as a sliding reset.
+  if (windowLabel == '5h') return null;
   if (freshReset == null || prevReset == null) return null;
   if (previousObservedAt == null || previousObservedAt <= 0) return null;
   if (freshUsed == null || prevUsed == null) return null;

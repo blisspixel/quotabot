@@ -59,6 +59,8 @@ List<String> _frame(
   List<ProviderQuota> providers, {
   int width = 80,
   bool color = false,
+  String? selected,
+  bool inspectModels = false,
 }) {
   final suggestion = suggestRoute(providers, _now);
   return renderTopFrame(
@@ -68,6 +70,8 @@ List<String> _frame(
     width: width,
     color: color,
     clock: '12:00:00',
+    selected: selected,
+    inspectModels: inspectModels,
   );
 }
 
@@ -131,12 +135,30 @@ void main() {
     );
     final visible = filterHiddenProvidersForTop(
       [claude, codex],
-      {quotaIdentityKeyFor(claude)},
+      {'claude'},
     );
     final suggestion = suggestRoute(visible, _now);
 
     expect(visible.map((quota) => quota.provider), ['codex']);
     expect(suggestion.recommended?.provider, 'codex');
+  });
+
+  test('account-specific hide leaves the sibling visible', () {
+    final work = _q(
+      'antigravity',
+      [QuotaWindow(label: 'weekly', usedPercent: 10)],
+      account: 'work@example.com',
+    );
+    final home = _q(
+      'antigravity',
+      [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      account: 'home@example.com',
+    );
+    final visible = filterHiddenProvidersForTop(
+      [work, home],
+      {'antigravity|work@example.com'},
+    );
+    expect(visible.map((quota) => quota.account), ['home@example.com']);
   });
 
   test('header carries the wordmark, pool gauge, and clock', () {
@@ -185,6 +207,37 @@ void main() {
     expect(_plain(rows.first), contains('resets'));
     // The healthy 5h window must not be shown once the week is spent.
     expect(lines.any((l) => _plain(l).contains('5h')), isFalse);
+  });
+
+  test('an unused 5h with no reset stays hidden under spent weekly', () {
+    final lines = _frame([
+      _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 0),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 86400),
+      ]),
+    ]);
+    final rows = lines.where((l) => _plain(l).contains('weekly')).toList();
+    expect(rows, hasLength(1));
+    expect(_plain(rows.first), contains('claude'));
+    expect(_plain(rows.first), contains('spent'));
+    expect(lines.any((l) => _plain(l).contains('5h')), isFalse);
+  });
+
+  test('spent weekly hides leftover 5h even when 5h resets later', () {
+    final lines = _frame([
+      _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 9, resetsAt: _now + 4 * 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 3600),
+      ]),
+    ]);
+    expect(lines.any((l) => _plain(l).contains('5h')), isFalse);
+    expect(
+      lines.any(
+          (l) => _plain(l).contains('weekly') && _plain(l).contains('spent')),
+      isTrue,
+    );
   });
 
   test('a spent short window still shows the healthy longer window', () {
@@ -681,7 +734,143 @@ void main() {
     expect(_plain(out), contains('updated 5s ago'));
   });
 
-  test('local runtime detail lines render under the headline', () {
+  test('Claude glance includes a Fable bar under shared windows', () {
+    final q = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'a',
+      asOf: _now,
+      windows: [
+        QuotaWindow(label: '5h', usedPercent: 3, resetsAt: _now + 3600),
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 94,
+          resetsAt: _now + 2 * 86400,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'Fable',
+          usedPercent: 100,
+          resetsAt: _now + 2 * 86400,
+          windowLabel: 'weekly',
+        ),
+      ],
+    );
+    final text = _frame([q], width: 110).map(_plain).join('\n');
+    expect(text, contains('5h'));
+    expect(text, contains('weekly'));
+    expect(text, contains('fable'));
+    expect(text, contains('  6% free'));
+    expect(text, contains('  0% free'));
+  });
+
+  test('spent weekly glance is spent plus reset, without leftover 5h or Fable',
+      () {
+    final q = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'a',
+      asOf: _now,
+      windows: [
+        QuotaWindow(label: '5h', usedPercent: 0),
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 100,
+          resetsAt: _now + 2 * 86400,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'Fable',
+          usedPercent: 100,
+          resetsAt: _now + 2 * 86400,
+          windowLabel: 'weekly',
+        ),
+      ],
+    );
+    final text = _frame([q], width: 110).map(_plain).join('\n');
+    expect(text, contains('spent'));
+    expect(text, contains('resets'));
+    expect(text, isNot(contains('5h')));
+    expect(text, isNot(contains('fable')));
+    final selected =
+        _frame([q], width: 110, selected: 'claude').map(_plain).join('\n');
+    expect(selected, isNot(contains('fable')));
+  });
+
+  test('Codex Spark waits for the selected top row', () {
+    final q = ProviderQuota(
+      provider: 'codex',
+      displayName: 'Codex',
+      account: 'a',
+      asOf: _now,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 63,
+          resetsAt: _now + 5 * 86400,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'GPT-5.3-Codex-Spark',
+          usedPercent: 0,
+          resetsAt: _now + 6 * 86400,
+        ),
+      ],
+    );
+    expect(
+      _frame([q], width: 110).map(_plain).join('\n'),
+      isNot(contains('GPT-5.3')),
+    );
+    expect(
+      _frame([q], width: 110, selected: 'codex').map(_plain).join('\n'),
+      contains('GPT-5.3'),
+    );
+  });
+
+  test('cloud notes wait for the selected top row', () {
+    final q = _q(
+      'grok',
+      [QuotaWindow(label: 'weekly', usedPercent: 33, resetsAt: _now + 86400)],
+      details: const [
+        'Personal account',
+        'Prepaid and on-demand balances do not increase included quota.',
+      ],
+    );
+    expect(
+      _frame([q], width: 110).map(_plain).join('\n'),
+      isNot(contains('Personal account')),
+    );
+    expect(
+      _frame([q], width: 110, selected: 'grok').map(_plain).join('\n'),
+      contains('Personal account'),
+    );
+  });
+
+  test('last-known low weekly still paints as last known, not a blank row', () {
+    final q = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'a',
+      asOf: _now - 21 * 3600,
+      stale: true,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 94,
+          resetsAt: _now + 2 * 86400,
+        ),
+      ],
+    );
+    final text = _frame([q], width: 110).map(_plain).join('\n');
+    expect(text, contains('6% last known'));
+    expect(text, contains('█'));
+  });
+
+  test('local runtime glance keeps free VRAM; inventory waits for selection',
+      () {
     final q = ProviderQuota(
       provider: 'ollama',
       displayName: 'Ollama',
@@ -693,11 +882,26 @@ void main() {
       details: const [
         '4 GB GPU resident . 32K running context',
         '3 installed . 18 GB on disk',
+        'Local host RAM 16.0 GB of 64.0 GB used (25%)',
+        'Local host VRAM 4.0 GB of 12.0 GB used (33%) . GeForce RTX 4070',
       ],
+      localHardware: const LocalHardwareInfo(
+        asOf: _now,
+        gpuMemoryTotalBytes: 12 * 1024 * 1024 * 1024,
+        gpuMemoryAvailableBytes: 8 * 1024 * 1024 * 1024,
+      ),
     );
-    final lines = _frame([q]);
-    expect(lines.any((l) => _plain(l).contains('GPU resident')), isTrue);
-    expect(lines.any((l) => _plain(l).contains('on disk')), isTrue);
+    final glance = _frame([q]).map(_plain).join('\n');
+    expect(glance, contains('qwen loaded'));
+    expect(glance, contains('VRAM 8.0 GB free of 12.0 GB'));
+    expect(glance, isNot(contains('GPU resident')));
+    expect(glance, isNot(contains('on disk')));
+    expect(glance, isNot(contains('Local host RAM')));
+
+    final selected = _frame([q], selected: 'ollama').map(_plain).join('\n');
+    expect(selected, contains('GPU resident'));
+    expect(selected, contains('on disk'));
+    expect(selected, contains('Local host RAM'));
   });
 
   group('forward-looking forecast', () {
@@ -1011,11 +1215,13 @@ void main() {
         source: providerQuotaManualSource,
       ),
     ]);
-    final text = _frame(providers, width: 110).map(_plain).join('\n');
+    final text = _frame(providers, width: 110, selected: 'claude')
+        .map(_plain)
+        .join('\n');
 
     expect(providers, hasLength(1));
-    expect(
-        RegExp(r'^  claude', multiLine: true).allMatches(text), hasLength(1));
+    expect(RegExp(r'^[> ] claude', multiLine: true).allMatches(text),
+        hasLength(1));
     expect(text, contains('weekly'));
     expect(
       text,
@@ -1068,7 +1274,8 @@ void main() {
     );
   });
 
-  test('duplicate opaque accounts render short labels, never full digests', () {
+  test('duplicate opaque accounts stay off the glance and never show digests',
+      () {
     final first = opaqueCredentialIdentity('claude', 'top-grant-a');
     final second = opaqueCredentialIdentity('claude', 'top-grant-b');
     ProviderQuota claude(String account, double used) => ProviderQuota(
@@ -1083,8 +1290,10 @@ void main() {
       width: 110,
     ).map(_plain).join('\n');
 
-    expect(text, contains('@${quotaAccountDisplayLabel(first)}'));
-    expect(text, contains('@${quotaAccountDisplayLabel(second)}'));
+    expect(text, isNot(contains('@${quotaAccountDisplayLabel(first)}')));
+    expect(text, isNot(contains('@${quotaAccountDisplayLabel(second)}')));
+    expect(text, isNot(contains(quotaAccountDisplayLabel(first))));
+    expect(text, isNot(contains(quotaAccountDisplayLabel(second))));
     expect(text, isNot(contains(first)));
     expect(text, isNot(contains(second)));
   });
@@ -1155,6 +1364,90 @@ void main() {
     expect(row, isNot(contains('local runtime')));
     expect(row, isNot(contains('local run')), reason: 'no clipped tag');
     expect(row, contains('loaded'));
+  });
+
+  test('inspecting models on a selected local runtime lists loaded first', () {
+    final lines = _frame([
+      _q(
+        'ollama',
+        const [],
+        kind: ProviderQuotaKind.local,
+        status: 'ready',
+        active: true,
+        perMachine: true,
+        models: const [
+          ModelInfo(
+            id: 'cold-model',
+            local: true,
+            contextTokens: 8192,
+          ),
+          ModelInfo(
+            id: 'llama3',
+            local: true,
+            loaded: true,
+            tools: true,
+            contextTokens: 32768,
+          ),
+        ],
+      ),
+    ], width: 100, selected: 'ollama', inspectModels: true);
+    final plain = lines.map(_plain).toList();
+    expect(plain.any((line) => line.contains('MODELS 2')), isTrue);
+    expect(
+      plain.any((line) => line.contains('Loaded first, then installed')),
+      isTrue,
+    );
+    final llama = plain.firstWhere((line) => line.contains('llama3'));
+    final cold = plain.firstWhere((line) => line.contains('cold-model'));
+    expect(plain.indexOf(llama), lessThan(plain.indexOf(cold)));
+    expect(llama, contains('loaded'));
+    expect(llama, contains('32K'));
+    expect(llama, contains('tools'));
+    expect(cold, contains('cold'));
+    expect(plain.last, contains('models:on'));
+  });
+
+  test('inspecting models on a cloud row tells you to select a local runtime',
+      () {
+    final lines = _frame([
+      _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+    ], width: 80, selected: 'claude', inspectModels: true);
+    final plain = lines.map(_plain).join('\n');
+    expect(plain, contains('Select a local runtime, then m'));
+    expect(plain, isNot(contains('Loaded first')));
+  });
+
+  test(
+      'a large local inventory keeps a remainder instead of flooding the frame',
+      () {
+    final models = [
+      for (var i = 0; i < 11; i++)
+        ModelInfo(
+          id: i == 0 ? 'loaded-model' : 'cold-$i',
+          local: true,
+          loaded: i == 0,
+        ),
+    ];
+    final lines = _frame([
+      _q(
+        'ollama',
+        const [],
+        kind: ProviderQuotaKind.local,
+        status: 'ready',
+        active: true,
+        perMachine: true,
+        models: models,
+      ),
+    ], width: 90, selected: 'ollama', inspectModels: true);
+    final plain = lines.map(_plain).toList();
+    expect(plain.any((line) => line.contains('MODELS 11')), isTrue);
+    expect(plain.any((line) => line.contains('Showing 8 of 11')), isTrue);
+    expect(plain.any((line) => line.contains('+3 more in quotabot models')),
+        isTrue);
+    expect(plain.where((line) => line.contains('cold-')).length, 7);
+    for (final line in lines) {
+      expect(_plain(line).length, 90, reason: line);
+    }
   });
 
   test('an empty fleet still renders a usable frame', () {

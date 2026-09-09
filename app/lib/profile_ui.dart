@@ -7,8 +7,7 @@ import 'theme_spec.dart';
 const genericAccountLabels = {'default', 'unknown', 'installed', 'cli'};
 
 bool quotaHasSpecificAccount(ProviderQuota q) =>
-    q.account.trim().isNotEmpty &&
-    !genericAccountLabels.contains(q.account.trim().toLowerCase());
+    hasSpecificQuotaAccount(q.account) && !isLocalInventoryAccount(q.account);
 
 String quotaDisplayKey(ProviderQuota q) =>
     quotaHasSpecificAccount(q) ? '${q.provider}|${q.account}' : q.provider;
@@ -24,11 +23,19 @@ Map<String, int> distinctProviderAccountCounts(Iterable<ProviderQuota> quotas) {
 }
 
 String quotaHideTarget(ProviderQuota quota, Map<String, int> providerCounts) =>
-    (providerCounts[quota.provider] ?? 0) > 1 && quotaHasSpecificAccount(quota)
-    ? quotaHiddenTarget(quota)
-    : quota.provider;
+    durableHideTarget(quota, providerCounts);
 
 bool quotaShouldShowAccountLabel(
+  ProviderQuota quota,
+  Map<String, int> providerCounts,
+) =>
+    quotaAccountBelongsOnGlance(quota.account) &&
+    (providerCounts[quota.provider] ?? 0) > 1;
+
+/// True when an opened detail surface should name this account to tell it
+/// apart from a sibling of the same provider. Includes opaque credential
+/// digests that stay off glance rows.
+bool quotaShouldDisambiguateAccount(
   ProviderQuota quota,
   Map<String, int> providerCounts,
 ) =>

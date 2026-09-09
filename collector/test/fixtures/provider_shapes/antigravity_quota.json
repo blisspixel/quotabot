@@ -1,16 +1,44 @@
 {
-  "models": {
-    "gemini-2.5-pro": {
-      "quotaInfo": {
-        "remainingFraction": 0.42,
-        "resetTime": 1782090000
-      }
+  "groups": [
+    {
+      "displayName": "Gemini Models",
+      "description": "Models within this group: Gemini Flash, Gemini Pro",
+      "buckets": [
+        {
+          "bucketId": "gemini-weekly",
+          "displayName": "Weekly Limit Remaining",
+          "window": "weekly",
+          "remainingFraction": 0.42,
+          "resetTime": 1782432000
+        },
+        {
+          "bucketId": "gemini-5h",
+          "displayName": "Five Hour Limit Remaining",
+          "window": "5h",
+          "remainingFraction": 0.19,
+          "resetTime": 1782090000
+        }
+      ]
     },
-    "gemini-2.5-flash": {
-      "quotaInfo": {
-        "remainingFraction": 0.81,
-        "resetTime": 1782432000
-      }
+    {
+      "displayName": "Claude and GPT models",
+      "description": "Models within this group: Claude Opus, Claude Sonnet, GPT-OSS",
+      "buckets": [
+        {
+          "bucketId": "3p-weekly",
+          "displayName": "Weekly Limit Remaining",
+          "window": "weekly",
+          "remainingFraction": 1,
+          "resetTime": 1782432000
+        },
+        {
+          "bucketId": "3p-5h",
+          "displayName": "Five Hour Limit Remaining",
+          "window": "5h",
+          "remainingFraction": 1,
+          "resetTime": 1782091800
+        }
+      ]
     }
-  }
+  ]
 }

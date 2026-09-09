@@ -238,17 +238,18 @@ QuotaProfile? loadProfile(String name, {Directory? dir}) {
 List<QuotaProfile> listProfiles({Directory? dir}) {
   final out = <QuotaProfile>[];
   final seen = <String>{};
-  if (seen.add(defaultProfileName)) out.add(QuotaProfile.defaultProfile());
   // Resolving the profiles directory creates it, which throws when the config
   // location is missing or unwritable. That must not escape: the desktop loads
   // profiles while starting up, so this would take the window down before it
   // ever rendered, even though preference loading already degrades to defaults
   // for exactly the same failure. Always return at least the default profile.
-  final Directory root;
+  // Prefer on-disk default.json when it loads, so hidden providers and
+  // preference_order on the default view reach every surface.
+  Directory? root;
   try {
     root = profilesDir(root: dir);
   } catch (_) {
-    return out;
+    return [QuotaProfile.defaultProfile()];
   }
   try {
     for (final entry in root.listSync()) {
@@ -262,6 +263,9 @@ List<QuotaProfile> listProfiles({Directory? dir}) {
       } catch (_) {}
     }
   } catch (_) {}
+  if (!seen.contains(defaultProfileName)) {
+    out.add(QuotaProfile.defaultProfile());
+  }
   out.sort((a, b) => a.name.compareTo(b.name));
   return out;
 }
@@ -355,6 +359,170 @@ bool hiddenTargetsQuota(Set<String> hiddenTargets, ProviderQuota quota) {
   final hidden = _hiddenSet(hiddenTargets);
   return hidden.contains(provider) || hidden.contains(quotaHiddenTarget(quota));
 }
+
+Map<String, int> distinctQuotaAccountCounts(Iterable<ProviderQuota> quotas) {
+  final accounts = <String, Set<String>>{};
+  for (final quota in quotas) {
+    accounts
+        .putIfAbsent(quota.provider, () => <String>{})
+        .add(quota.account.trim());
+  }
+  return {for (final entry in accounts.entries) entry.key: entry.value.length};
+}
+
+/// Hide target written to the default profile and desktop prefs. One account of
+/// a provider hides the whole provider; a duplicated provider hides
+/// `provider|account` so siblings stay visible.
+String durableHideTarget(
+  ProviderQuota quota,
+  Map<String, int> providerCounts,
+) {
+  final provider = normalizeProviderId(quota.provider) ?? quota.provider;
+  if ((providerCounts[quota.provider] ?? 0) > 1 &&
+      hasSpecificQuotaAccount(quota.account)) {
+    return quotaHiddenTarget(quota);
+  }
+  return provider;
+}
+
+String durableHideTargetIn(
+  ProviderQuota quota,
+  Iterable<ProviderQuota> snapshot,
+) =>
+    durableHideTarget(quota, distinctQuotaAccountCounts(snapshot));
+
+Set<String> applyDurableHide({
+  required Set<String> hidden,
+  required String target,
+  required bool hide,
+}) {
+  final normalized = normalizeHiddenTarget(target);
+  if (normalized == null) return _hiddenSet(hidden);
+  final next = {..._hiddenSet(hidden)};
+  final isProviderOnly = !normalized.contains('|');
+  final prefix = '$normalized|';
+  if (hide) {
+    if (isProviderOnly) {
+      next.removeWhere(
+        (item) => item == normalized || item.startsWith(prefix),
+      );
+    }
+    next.add(normalized);
+  } else {
+    next.remove(normalized);
+    if (isProviderOnly) {
+      next.removeWhere((item) => item.startsWith(prefix));
+    }
+  }
+  return next;
+}
+
+/// Union of default-profile hidden targets and leftover desktop prefs. CLI
+/// quota reads and the tray share this set so a cancelled subscription stays
+/// off every default view.
+Set<String> loadDurableHiddenTargets() {
+  final stored = loadProfile(defaultProfileName)?.hiddenProviders ?? {};
+  return {...stored, ...loadDesktopPrefsHiddenTargets()};
+}
+
+void saveDurableHiddenTargets(
+  Set<String> hidden, {
+  QuotaProfile? base,
+}) {
+  final current =
+      base ?? loadProfile(defaultProfileName) ?? QuotaProfile.defaultProfile();
+  final normalized = _hiddenSet(hidden);
+  saveProfile(profileWithHiddenProviders(current, normalized));
+  if (current.name == defaultProfileName) {
+    saveDesktopPrefsHiddenTargets(normalized);
+  }
+}
+
+void persistHiddenTarget(
+  String target, {
+  required bool hide,
+  QuotaProfile? profile,
+}) {
+  if (profile != null && profile.name != defaultProfileName) {
+    final current = loadProfile(profile.name) ?? profile;
+    saveProfile(
+      profileWithHiddenProviders(
+        current,
+        applyDurableHide(
+          hidden: current.hiddenProviders,
+          target: target,
+          hide: hide,
+        ),
+      ),
+    );
+    return;
+  }
+  final stored =
+      loadProfile(defaultProfileName) ?? QuotaProfile.defaultProfile();
+  saveDurableHiddenTargets(
+    applyDurableHide(
+      hidden: loadDurableHiddenTargets(),
+      target: target,
+      hide: hide,
+    ),
+    base: stored,
+  );
+}
+
+const _maxDesktopPrefsBytes = 64 * 1024;
+
+Set<String> loadDesktopPrefsHiddenTargets() {
+  try {
+    final file = File('${quotabotDir('app').path}/prefs.json');
+    if (!file.existsSync() || file.lengthSync() > _maxDesktopPrefsBytes) {
+      return {};
+    }
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! Map) return {};
+    return _hiddenSet(_stringSet(decoded['hidden']));
+  } catch (_) {
+    return {};
+  }
+}
+
+void saveDesktopPrefsHiddenTargets(Set<String> hidden) {
+  try {
+    final file = File('${quotabotDir('app').path}/prefs.json');
+    if (!file.existsSync() || file.lengthSync() > _maxDesktopPrefsBytes) {
+      return;
+    }
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! Map) return;
+    final map = Map<String, dynamic>.from(decoded);
+    map['hidden'] = _sorted(_hiddenSet(hidden));
+    final encoded = jsonEncode(map);
+    if (encoded.length > _maxDesktopPrefsBytes) return;
+    final tmp = File('${file.path}.$pid.tmp');
+    if (!tmp.existsSync()) tmp.createSync(recursive: true);
+    restrictOwnerOnlyFile(tmp);
+    tmp.writeAsStringSync(encoded);
+    tmp.renameSync(file.path);
+    restrictOwnerOnlyFile(file);
+  } catch (_) {}
+}
+
+/// Durable hide list stored on the default profile. CLI quota reads apply this
+/// even without `--profile`, so a cancelled subscription stays off `top` and
+/// `doctor` after `quotabot hide kiro`.
+QuotaProfile profileWithHiddenProviders(
+  QuotaProfile profile,
+  Set<String> hiddenProviders,
+) =>
+    QuotaProfile(
+      name: profile.name,
+      providers: profile.providers,
+      accounts: profile.accounts,
+      hiddenProviders: hiddenProviders,
+      routingPolicy: profile.routingPolicy.canonical,
+      preferenceOrder: profile.preferenceOrder,
+      theme: profile.theme,
+      sort: profile.sort,
+    );
 
 Set<String> _hiddenSet(Set<String> values) =>
     values.map(normalizeHiddenTarget).nonNulls.toSet();
