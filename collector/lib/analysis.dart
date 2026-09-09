@@ -27,25 +27,37 @@ List<ModelQuota> sparseScopedModelQuotas(
     return const [];
   }
   if (quota.windows.isEmpty) return const [];
-  if (glance && now != null) {
-    final headroom = providerHeadroom(quota, now);
-    if (headroom != null && headroom <= kSpentHeadroomFloor) {
-      // A spent shared weekly already answers the card. Leftover Fable or
-      // unused 5h bars are not extra capacity.
-      return const [];
-    }
-  }
   return [
     for (final modelQuota in quota.modelQuotas)
       if (modelQuota.remainingPercent != null &&
-          (!glance || isClaudeFableModelLabel(modelQuota.model)))
+          (!glance || isClaudeFableModelLabel(modelQuota.model)) &&
+          !_scopedQuotaDuplicatesSpentBinding(quota, modelQuota, now))
         modelQuota,
   ];
 }
 
+/// True when [modelQuota] is the same spent pool the shared card already
+/// named. A spent Claude weekly should not also list Fable weekly spent.
+bool _scopedQuotaDuplicatesSpentBinding(
+  ProviderQuota quota,
+  ModelQuota modelQuota,
+  int? now,
+) {
+  if (now == null) return false;
+  final binding = bindingWindow(quota, now);
+  if (binding == null) return false;
+  if (quotaWindowHeadroom(quota, binding, now) > kSpentHeadroomFloor) {
+    return false;
+  }
+  final scopedLabel = modelQuota.windowLabel;
+  if (scopedLabel == null || scopedLabel.isEmpty) return true;
+  return scopedLabel == binding.label;
+}
+
 /// Model rows the default human status/`doctor` line should name. Claude Fable
-/// stays while the shared windows still have room; Codex Spark and exhaustive
-/// Antigravity tables wait for opened detail, selected `top`, JSON, and MCP.
+/// stays while the shared weekly still has room; a spent weekly does not also
+/// list Fable weekly spent. Codex Spark and exhaustive Antigravity tables wait
+/// for opened detail, selected `top`, JSON, and MCP.
 List<ModelQuota> doctorVisibleModelQuotas(
   ProviderQuota quota, {
   int? now,

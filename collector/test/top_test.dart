@@ -794,6 +794,9 @@ void main() {
     expect(text, contains('resets'));
     expect(text, isNot(contains('5h')));
     expect(text, isNot(contains('fable')));
+    final selected =
+        _frame([q], width: 110, selected: 'claude').map(_plain).join('\n');
+    expect(selected, isNot(contains('fable')));
   });
 
   test('Codex Spark waits for the selected top row', () {

@@ -367,6 +367,51 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('spent weekly hides Fable on the opened card too', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: claudeProviderName,
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: '5h', usedPercent: 0),
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 100,
+          resetsAt: now + 2 * 86400,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'Fable',
+          usedPercent: 100,
+          resetsAt: now + 2 * 86400,
+          windowLabel: 'weekly',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota,
+          cardColor: const Color(0xFF1A1A1A),
+          expanded: true,
+          onToggle: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('weekly spent'), findsOneWidget);
+    expect(find.text('5h'), findsNothing);
+    expect(find.text('Fable'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('collapsed Claude cards still show the Fable bar', (
     tester,
   ) async {

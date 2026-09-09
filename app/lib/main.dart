@@ -1870,7 +1870,10 @@ class _DashboardState extends State<Dashboard>
           // the "usually" line; Fable stays with the shared windows. Codex
           // Spark waits for the opened card.
           final glanceScoped = desktopScopedModelQuotas(q, now: now).length;
-          final detailScoped = desktopDetailScopedModelQuotas(q).length;
+          final detailScoped = desktopDetailScopedModelQuotas(
+            q,
+            now: now,
+          ).length;
           final rows =
               providerTileQuotaRowCount(q, now) +
               (isExpanded ? detailScoped - glanceScoped : 0);
@@ -5418,7 +5421,7 @@ class ProviderTile extends StatelessWidget {
     // permanently unreachable behind an affordance that is not there.
     final showDetail = expanded || !expandable;
     final scopedModelQuotas = showDetail
-        ? desktopDetailScopedModelQuotas(quota)
+        ? desktopDetailScopedModelQuotas(quota, now: now)
         : desktopScopedModelQuotas(quota, now: now);
     final trustLine = desktopProviderTrustLine(quota, now);
     final trustDetail = desktopProviderTrustDetail(quota, now);
@@ -6398,8 +6401,10 @@ List<ModelQuota> desktopScopedModelQuotas(ProviderQuota quota, {int? now}) =>
     sparseScopedModelQuotas(quota, now: now);
 
 @visibleForTesting
-List<ModelQuota> desktopDetailScopedModelQuotas(ProviderQuota quota) =>
-    sparseScopedModelQuotas(quota, glance: false);
+List<ModelQuota> desktopDetailScopedModelQuotas(
+  ProviderQuota quota, {
+  int? now,
+}) => sparseScopedModelQuotas(quota, glance: false, now: now);
 
 /// Evidence qualifier for a sparse Claude model-family allowance. A passed
 /// scoped reset does not prove a fresh 100% pool, but it also does not make the

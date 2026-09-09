@@ -127,7 +127,40 @@ void main() {
       expect(sparseScopedModelQuotas(claude, now: _now), isEmpty);
       expect(doctorVisibleModelQuotas(claude, now: _now), isEmpty);
       expect(
-        sparseScopedModelQuotas(claude, glance: false, now: _now).single.model,
+        sparseScopedModelQuotas(claude, glance: false, now: _now),
+        isEmpty,
+      );
+    });
+
+    test('spent 5h still shows Fable while weekly has room', () {
+      final claude = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'a',
+        asOf: _now,
+        windows: [
+          QuotaWindow(
+            label: '5h',
+            usedPercent: 100,
+            resetsAt: _now + 3600,
+          ),
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 42,
+            resetsAt: _now + 2 * 86400,
+          ),
+        ],
+        modelQuotas: [
+          ModelQuota(
+            model: 'Fable',
+            usedPercent: 26,
+            resetsAt: _now + 2 * 86400,
+            windowLabel: 'weekly',
+          ),
+        ],
+      );
+      expect(
+        sparseScopedModelQuotas(claude, now: _now).single.model,
         'Fable',
       );
     });
