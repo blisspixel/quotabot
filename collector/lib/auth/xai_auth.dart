@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
 import '../file_guard.dart';
+import 'oauth_http.dart';
 import 'provider_disconnect.dart';
 import 'tokens.dart';
 
@@ -204,60 +204,14 @@ class XaiAuth {
   Future<http.Response> _postRaw(
     String url,
     Map<String, String> form,
-  ) async {
-    final uri = Uri.parse(url);
-    const headers = {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    };
-    final client = _client ?? http.Client();
-    final abort = Completer<void>();
-    var expired = false;
-    final timer = Timer(requestTimeout, () {
-      expired = true;
-      if (!abort.isCompleted) abort.complete();
-    });
-    void cancel() {
-      if (!abort.isCompleted) abort.complete();
-    }
-
-    try {
-      final request = http.AbortableRequest(
-        'POST',
-        uri,
-        abortTrigger: abort.future,
-      )
-        ..followRedirects = false
-        ..headers.addAll(headers)
-        ..bodyFields = form;
-      // Await the original request and body, including cancellation. The
-      // refresh transaction keeps its native guard until this work settles.
-      final response = await client.send(request);
-      const maxBytes = 128 * 1024;
-      if ((response.contentLength ?? 0) > maxBytes) {
-        cancel();
-        await response.stream.listen(null).cancel();
-        throw const FormatException('token response exceeds size limit');
-      }
-      final bytes = BytesBuilder(copy: false);
-      await for (final chunk in response.stream) {
-        if (bytes.length + chunk.length > maxBytes) {
-          cancel();
-          throw const FormatException('token response exceeds size limit');
-        }
-        bytes.add(chunk);
-      }
-      if (expired) throw TimeoutException('token metadata deadline');
-      return http.Response.bytes(
-        bytes.takeBytes(),
-        response.statusCode,
-        headers: response.headers,
+  ) =>
+      postOAuthTokenRequest(
+        uri: Uri.parse(url),
+        headers: const {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        bodyFields: form,
+        timeout: requestTimeout,
+        client: _client,
       );
-    } on http.RequestAbortedException {
-      if (expired) throw TimeoutException('token metadata deadline');
-      rethrow;
-    } finally {
-      timer.cancel();
-      if (_client == null) client.close();
-    }
-  }
 }

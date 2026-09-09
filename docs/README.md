@@ -4,7 +4,10 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.11.4. It rejects a reset boundary that
+The current verified stable release is 0.11.5. It reads the live Claude weekly
+pool when the session row omits a reset, keeps Fable on glance while hiding
+Codex Spark until detail, and stops MCP snapshots from recreating a closed HTTP
+client. The preceding 0.11.4 rejects a reset boundary that
 advances with the clock over zero usage, withdraws stale meters past an age
 ceiling, and stops the desktop promising an update it cannot install. The
 preceding 0.11.2 added reset confirmation,

@@ -87,19 +87,15 @@ exclude credentials, account labels, provider bodies and arbitrary exceptions.
 
 ## Remaining lifecycle work
 
-Usage-read coordination does not cover OAuth token exchange. The current Claude
-and Codex token helpers bound their POST result with a timeout that does not
-establish original request settlement. Their optional grant-resolution deadline
-can also let an adapter finish while that resolver continues. The next bounded
-auth change must retain credential-transaction ownership through settlement,
-preserve a successful late token rotation, and keep publication deadlines
-independent. Test concurrent callers, timeout, late success and failure, and
-whole-process restart using isolated synthetic grants.
+Synthetic OAuth settlement and MCP shutdown are implemented in unreleased
+source. Claude, Codex, Grok, and Antigravity token POSTs keep the refresh
+guard until the original request settles, persist a late 200 rotation, and
+leave publication deadlines with the adapter. Desktop close and MCP shutdown
+drain those grant transactions with original adapters and metadata read gates.
+MCP also stops new snapshot admissions and retires the shared HTTP client so a
+late continuation cannot open a new pool; a bounded drain timeout does not skip
+that retirement.
 
-An isolated MCP shutdown probe also confirmed that an already-started snapshot
-can continue after the server entrypoint returns and recreate the shared HTTP
-client. Whole-process exit releases native ownership, so this differs from
-destroying only a worker isolate. A follow-up should stop new snapshot admissions,
-track the outer snapshot before draining adapters, and provide bounded shutdown
-without allowing late continuations to restart a closed client. Merely timing out
-an unbounded drain does not establish that property.
+Real idle-machine and original display-disagreement evidence remain distinct
+from these reproducible regressions. Whole-process exit still releases native
+ownership; that is not a substitute for the isolate-local retirement path.

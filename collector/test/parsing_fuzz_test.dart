@@ -28,6 +28,8 @@ void main() {
         expect(model.usedPercent, inInclusiveRange(0, 100));
       }
       _expectWindowsSafe(antigravityWindows(input, now));
+      final summary = antigravityQuotaSummaryWindows(input);
+      if (summary != null) _expectWindowsSafe(summary);
       _expectWindowsSafe(cursorWindows(input, now));
       _expectWindowsSafe(windsurfWindows(input, now));
       _expectWindowsSafe(kiroWindows(input, now));

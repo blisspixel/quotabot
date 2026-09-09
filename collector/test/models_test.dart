@@ -126,6 +126,21 @@ void main() {
       expect(hasSpecificQuotaAccount('work@example.com'), isTrue);
     });
 
+    test('glance rows omit irreversible credential digests', () {
+      const opaque =
+          'credential:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      expect(quotaAccountBelongsOnGlance('work@example.com'), isTrue);
+      expect(quotaAccountBelongsOnGlance('work'), isTrue);
+      expect(quotaAccountBelongsOnGlance('default'), isFalse);
+      expect(isOpaqueCredentialIdentity(opaque), isTrue);
+      expect(quotaAccountBelongsOnGlance(opaque), isFalse);
+      expect(quotaAccountDisplayLabel(opaque), 'account aaaaaaaa');
+      expect(isLocalInventoryAccount('14 models'), isTrue);
+      expect(isLocalInventoryAccount('1 model'), isTrue);
+      expect(quotaAccountBelongsOnGlance('14 models'), isFalse);
+      expect(quotaAccountBelongsOnGlance('work-models'), isTrue);
+    });
+
     test('plan evidence provenance round-trips and survives safe copies', () {
       final q = ProviderQuota(
         provider: 'claude',

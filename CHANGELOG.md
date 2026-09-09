@@ -4,6 +4,124 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.5 - 2026-09-09
+
+Live Claude weekly truth, glance and doctor polish, MCP shutdown ownership,
+and OAuth token settlement.
+
+### Changed
+
+- Glance views no longer print irreversible `account` digest labels. Collapsed
+  quota cards keep the provider name; open a card to see the account, including
+  those short digests. Duplicate emails can still disambiguate compact route,
+  notifications, and group headers when "Show account names" is on. `doctor`,
+  `top`, and `suggest` follow the same glance rule. JSON and `verify` still
+  carry the exact identity.
+
+- Collapsed local runtime cards keep the loaded or ready line plus free VRAM.
+  Host RAM, GPU utilization, disk inventory, loaded-model context, and the
+  Models control wait for the opened card. Unselected `top` rows follow the
+  same glance; selecting a local row restores the rest. `doctor` still prints
+  the full local facts.
+
+- Claude Fable keeps its glance bar on `top` and on collapsed desktop cards,
+  next to the shared 5h and weekly windows. Codex Spark is an extra named
+  limit on the shared weekly, so it waits for the opened card, a selected
+  `top` row, JSON, and MCP. The default `doctor` line no longer headlines
+  unused Spark as "most used". Spend classification stays in opened detail.
+  A spent Fable pool no longer hides behind "model-specific" text in
+  doctor-only output.
+
+- Last-known remaining still uses the green-to-red headroom scale. A cached
+  weekly pool at 6% free is red, not grey. Grey is reserved for drifted last-
+  trusted values that were rejected. The "last known" label still marks age.
+
+- `quotabot hide kiro` keeps a cancelled subscription off the default `top`,
+  `doctor`, `status`, and `suggest` views. `unhide` brings it back; `hidden`
+  lists the set, including leftovers still stored in desktop prefs. Desktop
+  hide writes the same list. `top` `x` persists there too; `u` restores what
+  you hid this session.
+
+- Desktop cards and the default `doctor` view order quota-bearing cloud rows,
+  then local runtimes, then idle cloud with no windows. A ready Ollama is no
+  longer buried under Cursor with no live data. Unselected `top` rows also
+  keep Grok and Antigravity notes for the selected row.
+
+- `doctor` no longer re-lists tools you already hid, or tools already in the
+  table. Local doctor rows lead with free VRAM, then host inventory. Collapsed
+  status-only cards keep unpublished trial notes for opened detail.
+
+- Ancient last-known rows whose meter has already been withdrawn sit in `top`
+  IDLE rather than NEEDS ATTENTION. Signed-out, drifted, and recent cached
+  rows stay in the attention band.
+
+- `top` `m` inspects models for the selected local runtime, using the same
+  registry order as the desktop Models dialog: loaded first, then installed.
+  Each line reports residency, context, capabilities, and why that model is
+  eligible or excluded. Host RAM and GPU stay on the selected row. A large
+  inventory shows eight models and points at `quotabot models` for the rest.
+
+- The expanded header recommendation uses the same accent weight as compact
+  Next, instead of a muted caption. A missing safe route stays amber. A
+  measured subscription says percent included on that line, not percent free.
+  Compact warnings share one keyboard-focusable control so they stay reachable
+  and do not crowd the Next chip.
+
+- Glance views omit local inventory labels such as `14 models`. The count
+  remains in JSON and opened detail.
+
+- Settings action buttons stay on one line instead of splitting words such as
+  Connections across two lines. The Updates section now has Install latest
+  update, which runs the checksum-verified CLI updater. The tray window is
+  still not replaced by that command; restart it after a matching desktop
+  install.
+
+- Agent editing guidance in `CLAUDE.md` now names the canonical collector
+  seams and the contributor gate. `AGENTS.md` stays the shipped MCP and CLI
+  contract and no longer duplicates the roadmap queue.
+
+### Fixed
+
+- A live Claude `/usage` session row that omits `resets_at` is no longer
+  rejected as an invalid response, and no longer quarantined as
+  "5h reset disappeared". That used to freeze last-known 5h and weekly bars,
+  including a green 5h leftover, while the Claude app already showed the
+  weekly pool spent. Weekly rows still need a parseable reset. The 5h window
+  disappearing entirely is still drift.
+
+- `doctor` no longer lists a leftover 5h bar next to a spent weekly cap. The
+  binding window is the one that matters; a green or partly-used short window
+  under a spent longer one is unusable, matching desktop and `top`.
+
+- Desktop Install latest update stops the CLI updater if it exceeds the wait,
+  instead of leaving that process running after the dialog times out.
+
+- MCP shutdown stops new snapshot admissions, waits a bounded time for the
+  current snapshot, adapters, grant refreshes, and metadata gates, then
+  retires the shared HTTP client. A late continuation can no longer open a
+  new keep-alive pool after the server entrypoint returns.
+
+- Claude, Codex, Grok, and Antigravity token POSTs keep ownership until the
+  original OAuth request settles. A successful late rotation is still saved
+  after the publication deadline. Desktop close waits for those grant
+  transactions before dropping the worker's HTTP client.
+
+- Grok personal CLI logins with `principal_type` `User` are readable again.
+  Current first-party `~/.grok/auth.json` records still carry `principal_id`
+  and `team_id` on that personal row. The collector treated any extra identity
+  field as an unproven principal, so a signed-in Grok CLI showed as identity
+  unavailable and then sat behind a retry deadline with no windows.
+
+- Antigravity reports the shared pool `agy` actually spends. The previous live
+  read used `cloudcode-pa.googleapis.com`, which returns remainingFraction 1.0
+  for Gemini buckets even while the account is consuming quota; 0.11.3 then
+  correctly marked that sliding unused reset as drift, so the card stayed at a
+  last-trusted 100% free. The adapter now calls `retrieveUserQuotaSummary` on
+  `daily-cloudcode-pa.googleapis.com`, the host `agy` uses, and surfaces the
+  grouped weekly and five-hour limits. A malformed summary does not fall back
+  to the always-full Cloud Code Assist table. Validated on 2026-09-08 against a
+  Google AI Pro account whose Gemini five-hour and weekly buckets were in use.
+
 ## 0.11.4 - 2026-09-07
 
 This is the published form of the work tagged as 0.11.3. That tag built and

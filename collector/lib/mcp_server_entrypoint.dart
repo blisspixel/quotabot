@@ -12,6 +12,12 @@ import 'provider_id_migration.dart';
 import 'refresh_timer.dart';
 import 'util.dart';
 
+/// Upper bound for waiting on an already-started MCP snapshot, adapters, grant
+/// refreshes, and metadata gates. Retirement of the shared HTTP client still
+/// happens if this deadline fires, so a late continuation cannot open a new
+/// pool.
+const defaultMcpShutdownDrainTimeout = Duration(seconds: 5);
+
 /// MCP server exposing AI subscription quota as a primitive other agents can
 /// query before routing work. Communicates over stdio, speaks MCP 2025-11-25
 /// (tool annotations plus output schemas via mcp_dart), and every tool runs the
@@ -28,7 +34,16 @@ Future<void> runQuotabotMcpServer(
   Set<String>? providersWithUsageCooldowns,
   RefreshTimerFactory? subscriptionTimerFactory,
   Stream<ProcessSignal>? shutdownSignals,
+  Duration shutdownDrainTimeout = defaultMcpShutdownDrainTimeout,
 }) async {
+  if (shutdownDrainTimeout.inMicroseconds <= 0) {
+    throw ArgumentError.value(
+      shutdownDrainTimeout,
+      'shutdownDrainTimeout',
+      'must be positive',
+    );
+  }
+  ExpiringSingleFlight<List<ProviderQuota>>? liveSnapshots;
   try {
     await _runMain(
       args,
@@ -39,9 +54,49 @@ Future<void> runQuotabotMcpServer(
               ? providersWithMetadataUsageCooldowns()
               : const <String>{})),
       subscriptionTimerFactory,
+      (snapshots) => liveSnapshots = snapshots,
     );
   } finally {
+    await shutDownMcpCollection(
+      liveSnapshots,
+      drainTimeout: shutdownDrainTimeout,
+    );
+  }
+}
+
+/// Stops new MCP snapshot admissions, waits a bounded time for owned work,
+/// then retires the shared HTTP client. A null [snapshots] means the server
+/// never started, so the pool is only closed and may be recreated.
+Future<void> shutDownMcpCollection(
+  ExpiringSingleFlight<List<ProviderQuota>>? snapshots, {
+  Duration drainTimeout = defaultMcpShutdownDrainTimeout,
+}) async {
+  if (drainTimeout.inMicroseconds <= 0) {
+    throw ArgumentError.value(
+      drainTimeout,
+      'drainTimeout',
+      'must be positive',
+    );
+  }
+  if (snapshots == null) {
     closeSharedHttpClient();
+    return;
+  }
+  snapshots.stopAdmitting();
+  await _awaitBounded(snapshots.settle, drainTimeout);
+  await _awaitBounded(settleOwnedCollectionWork, drainTimeout);
+  retireSharedHttpClient();
+}
+
+Future<void> _awaitBounded(
+  Future<void> Function() work,
+  Duration timeout,
+) async {
+  try {
+    await work().timeout(timeout);
+  } catch (_) {
+    // Bounded shutdown still retires the HTTP client. Settlement errors must
+    // not skip that retirement.
   }
 }
 
@@ -50,7 +105,9 @@ Future<void> _runMain(
     SnapshotProvider snapshotSource,
     Stream<ProcessSignal>? shutdownSignals,
     Set<String> providersWithUsageCooldowns,
-    RefreshTimerFactory? subscriptionTimerFactory) async {
+    RefreshTimerFactory? subscriptionTimerFactory,
+    void Function(ExpiringSingleFlight<List<ProviderQuota>>)
+        onLiveSnapshots) async {
   late final McpServerCliOptions options;
   try {
     options = McpServerCliOptions.parse(args);
@@ -69,6 +126,7 @@ Future<void> _runMain(
     load: snapshotSource,
     now: nowEpoch,
   );
+  onLiveSnapshots(liveSnapshots);
   Future<List<ProviderQuota>> snapshot() => liveSnapshots.read();
 
   int? newestSnapshotAsOf(List<ProviderQuota> providers) {

@@ -166,6 +166,49 @@ void main() {
     }
   });
 
+  test('a personal User principal with extra team fields still bills',
+      () async {
+    // Current Grok CLI personal records set principal_type=User and still
+    // carry principal_id plus team_id. That is not a Team quota pool.
+    writeHost(_host()
+      ..addAll({
+        'principal_type': 'User',
+        'principal_id': '1',
+        'team_id': '11111111-1111-1111-1111-111111111111',
+      }));
+    var paths = <String>[];
+    final q = await adapter(MockClient((request) async {
+      paths.add(request.url.path);
+      expect(request.headers['x-userid'], 'user-a');
+      return _json(_billing(41));
+    })).collect();
+    expect(paths, ['/v1/billing']);
+    expect(q.account, _pool('user-a'));
+    expect(q.windows.single.percent, 41);
+    expect(q.error, isNull);
+  });
+
+  test('owned User profile metadata with extra team fields proves the person',
+      () async {
+    own('owner');
+    final q = await adapter(MockClient((request) async {
+      if (request.url.path == '/v1/user') {
+        return _json({
+          'userId': 'owned-user',
+          'principalType': 'User',
+          'principalId': '1',
+          'teamId': '11111111-1111-1111-1111-111111111111',
+          'subscriptionTier': 'SuperGrok',
+        });
+      }
+      expect(request.headers['x-userid'], 'owned-user');
+      return _json(_billing(12));
+    })).collect();
+    expect(q.account, _pool('owned-user'));
+    expect(q.plan, 'SuperGrok');
+    expect(q.windows.single.percent, 12);
+  });
+
   for (final mode in ['oidc', 'external']) {
     test('pinned first-party $mode record is eligible', () async {
       writeHost(_host()..['auth_mode'] = mode);

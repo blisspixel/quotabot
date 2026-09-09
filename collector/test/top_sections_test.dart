@@ -111,6 +111,28 @@ void main() {
         TopSection.idle,
       );
     });
+
+    test('ancient withdrawn last-known quota collapses to idle', () {
+      expect(
+        topSectionFor(
+          _q(
+            'kiro',
+            [QuotaWindow(label: 'credit', usedPercent: 0)],
+            stale: true,
+            asOf: _now - 49 * 86400,
+          ),
+          _now,
+        ),
+        TopSection.idle,
+      );
+    });
+
+    test('recent cached quota with a live reset stays in attention', () {
+      expect(
+        topSectionFor(_q('kiro', [_w(0)], stale: true), _now),
+        TopSection.cached,
+      );
+    });
   });
 
   group('partitionTopSections', () {

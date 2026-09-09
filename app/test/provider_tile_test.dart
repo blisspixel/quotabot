@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:quotabot/local_model_details.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot_collector/analysis.dart';
@@ -243,7 +244,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('5h'), findsOneWidget);
-    expect(find.text('weekly'), findsNWidgets(2));
+    expect(find.text('weekly'), findsOneWidget);
     expect(find.text('Fable'), findsOneWidget);
     expect(find.text('included quota not proven'), findsOneWidget);
     expect(find.text('quota'), findsNothing);
@@ -259,9 +260,85 @@ void main() {
       tester.getTopLeft(find.text('Fable')).dy,
       greaterThan(tester.getTopLeft(find.text('weekly').first).dy),
     );
-    expect(providerTileQuotaRowCount(quota, now), 4);
+    expect(providerTileQuotaRowCount(quota, now), 3);
     expect(tester.takeException(), isNull);
     semantics.dispose();
+  });
+
+  testWidgets('spent weekly hides an unused 5h bar that has no reset', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: claudeProviderName,
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: '5h', usedPercent: 0),
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 100,
+          resetsAt: now + 2 * 86400,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: quota, cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
+
+    expect(find.text('weekly spent'), findsOneWidget);
+    expect(find.text('5h'), findsNothing);
+    expect(find.textContaining('% free'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('collapsed Claude cards still show the Fable bar', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: claudeProviderName,
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: '5h', usedPercent: 45, resetsAt: now + 3600),
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 94,
+          resetsAt: now + 5 * 86400,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'Fable',
+          usedPercent: 100,
+          resetsAt: now + 5 * 86400,
+          windowLabel: 'weekly',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota,
+          cardColor: const Color(0xFF1A1A1A),
+          onToggle: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Fable'), findsOneWidget);
+    expect(find.textContaining('6%'), findsOneWidget);
+    expect(find.textContaining('0%'), findsOneWidget);
+    expect(find.text('Model-specific quota (separate)'), findsNothing);
+    expect(find.text('included quota not proven'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('labels Fable spend from plan evidence without overclaiming', (
@@ -386,17 +463,75 @@ void main() {
 
     expect(find.text('weekly'), findsOneWidget);
     expect(find.text('GPT-5.3-Codex-Spark'), findsOneWidget);
-    expect(find.text('quota'), findsOneWidget);
+    expect(find.text('quota'), findsNothing);
     expect(
       find.bySemanticsLabel(
         RegExp('Model-specific quota.*does not replace Codex.*shared'),
       ),
       findsOneWidget,
     );
-    expect(desktopScopedModelQuotas(quota), hasLength(1));
-    expect(providerTileQuotaRowCount(quota, now), 3);
+    expect(desktopScopedModelQuotas(quota), isEmpty);
+    expect(desktopDetailScopedModelQuotas(quota), hasLength(1));
+    expect(providerTileQuotaRowCount(quota, now), 1);
     expect(tester.takeException(), isNull);
     semantics.dispose();
+  });
+
+  testWidgets('collapsed Codex cards hide the Spark bar until opened', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: codexProviderId,
+      displayName: codexProviderName,
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 63,
+          resetsAt: now + 5 * 86400,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'GPT-5.3-Codex-Spark',
+          usedPercent: 0,
+          resetsAt: now + 6 * 86400,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota,
+          cardColor: const Color(0xFF1A1A1A),
+          onToggle: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('weekly'), findsOneWidget);
+    expect(find.text('GPT-5.3-Codex-Spark'), findsNothing);
+    expect(find.text('Model-specific quota (separate)'), findsNothing);
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota,
+          cardColor: const Color(0xFF1A1A1A),
+          expanded: true,
+          onToggle: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('GPT-5.3-Codex-Spark'), findsOneWidget);
+    expect(find.text('Model-specific quota (separate)'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
@@ -449,15 +584,11 @@ void main() {
       await tester.pump();
 
       expect(find.byTooltip(modelLabel), findsOneWidget);
-      expect(find.byTooltip(windowLabel), findsOneWidget);
       expect(find.bySemanticsLabel(modelLabel), findsOneWidget);
-      expect(find.bySemanticsLabel(windowLabel), findsOneWidget);
+      expect(find.text(windowLabel), findsNothing);
       final modelText = tester.widget<Text>(find.text(modelLabel));
-      final windowText = tester.widget<Text>(find.text(windowLabel));
-      expect(modelText.maxLines, 1);
+      expect(modelText.maxLines, 2);
       expect(modelText.overflow, TextOverflow.ellipsis);
-      expect(windowText.maxLines, 2);
-      expect(windowText.overflow, TextOverflow.ellipsis);
       expect(tester.takeException(), isNull);
       semantics.dispose();
     },
@@ -1396,8 +1527,95 @@ void main() {
       find.bySemanticsLabel('Claude (personal@example.com) quota card'),
       findsOneWidget,
     );
+    expect(find.textContaining('work@example.com'), findsNothing);
+    expect(find.textContaining('personal@example.com'), findsNothing);
     expect(tester.takeException(), isNull);
     semantics.dispose();
+  });
+
+  testWidgets('opened detail is the only place a card shows its account', (
+    tester,
+  ) async {
+    final quota = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: claudeProviderName,
+      account: 'work@example.com',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      windows: [QuotaWindow(label: '5h', usedPercent: 20)],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota,
+          cardColor: Colors.white,
+          onToggle: () {},
+          showAccounts: true,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Account: work@example.com'), findsNothing);
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota,
+          cardColor: Colors.white,
+          expanded: true,
+          onToggle: () {},
+          showAccounts: false,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Account: work@example.com'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('opaque credential digests stay in opened detail only', (
+    tester,
+  ) async {
+    const identity =
+        'credential:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const label = 'account aaaaaaaa';
+    final quota = ProviderQuota(
+      provider: grokProviderId,
+      displayName: grokProviderName,
+      account: identity,
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota,
+          cardColor: Colors.white,
+          onToggle: () {},
+          showAccounts: true,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.textContaining(label), findsNothing);
+    expect(find.bySemanticsLabel('Grok quota card'), findsOneWidget);
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota,
+          cardColor: Colors.white,
+          expanded: true,
+          onToggle: () {},
+          showAccounts: true,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Account: $label'), findsOneWidget);
+    expect(find.textContaining(identity), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('spent window shows a near-term countdown to when it is back', (
@@ -1735,6 +1953,57 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining('0% free'), findsNothing);
+    expect(
+      find.textContaining('trial rate limits are model-specific'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('collapsed status-only cards hide unpublished trial notes', (
+    tester,
+  ) async {
+    final q = ProviderQuota(
+      provider: 'nvidia',
+      displayName: 'NVIDIA NIM',
+      account: 'default',
+      plan: 'free trial',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      status: 'free trial available; balance unknown',
+      details: const ['trial rate limits are model-specific and unpublished'],
+      windows: const [],
+    );
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: q,
+          cardColor: const Color(0xFF1A1A1A),
+          onToggle: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('free trial available; balance unknown'), findsOneWidget);
+    expect(
+      find.textContaining('trial rate limits are model-specific'),
+      findsNothing,
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: q,
+          cardColor: const Color(0xFF1A1A1A),
+          expanded: true,
+          onToggle: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(
+      find.textContaining('trial rate limits are model-specific'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -1825,6 +2094,73 @@ void main() {
       find.textContaining('loaded | local runtime | captured'),
       findsOneWidget,
     );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('collapsed local cards keep loaded status and free VRAM', (
+    tester,
+  ) async {
+    const vramTotal = 24 * 1024 * 1024 * 1024;
+    const vramFree = 21 * 1024 * 1024 * 1024;
+    final q = ProviderQuota(
+      provider: 'ollama',
+      displayName: 'Ollama',
+      account: '14 models',
+      kind: ProviderQuotaKind.local,
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      status: 'qwen3.5 9.7B Q4_K_M loaded',
+      perMachine: true,
+      details: const [
+        '4 GB GPU resident . 32K running context',
+        '14 installed . 203.3 GB on disk',
+        'Local host RAM 32.8 GB of 63.9 GB used (51%)',
+        'Local host VRAM 3.0 GB of 24.0 GB used (12%) . NVIDIA GeForce RTX 4090',
+        'Local host GPU utilization 27%',
+      ],
+      localHardware: const LocalHardwareInfo(
+        asOf: 1,
+        gpuMemoryTotalBytes: vramTotal,
+        gpuMemoryAvailableBytes: vramFree,
+      ),
+      models: const [ModelInfo(id: 'qwen3.5:9b', local: true, loaded: true)],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: q,
+          cardColor: const Color(0xFF1A1A1A),
+          onToggle: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('qwen3.5 9.7B Q4_K_M loaded'), findsOneWidget);
+    expect(find.text('VRAM 21.0 GB free of 24.0 GB'), findsOneWidget);
+    expect(find.textContaining('GPU resident'), findsNothing);
+    expect(find.textContaining('on disk'), findsNothing);
+    expect(find.textContaining('Local host RAM'), findsNothing);
+    expect(find.textContaining('GPU utilization'), findsNothing);
+    expect(find.byType(LocalModelDetailsButton), findsNothing);
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: q,
+          cardColor: const Color(0xFF1A1A1A),
+          expanded: true,
+          onToggle: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('GPU resident'), findsOneWidget);
+    expect(find.textContaining('on disk'), findsOneWidget);
+    expect(find.textContaining('Local host RAM'), findsOneWidget);
+    expect(find.textContaining('GPU utilization'), findsOneWidget);
+    expect(find.byType(LocalModelDetailsButton), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -2031,6 +2367,19 @@ void _orderingTests() {
       now,
     );
     expect(namesOf(ordered), ['Claude', 'Codex', 'Kiro']);
+  });
+
+  test('idle cloud sits below local runtimes', () {
+    final ordered = orderProvidersForDisplay(
+      [
+        row('cursor', 'Cursor'),
+        row('ollama', 'Ollama', local: true),
+        row('claude', 'Claude', used: 40),
+      ],
+      ProviderSort.mostUsed,
+      now,
+    );
+    expect(namesOf(ordered), ['Claude', 'Ollama', 'Cursor']);
   });
 
   test('alphabetical ignores case and still sinks local runtimes', () {

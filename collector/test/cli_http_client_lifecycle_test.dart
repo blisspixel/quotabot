@@ -49,7 +49,7 @@ void main() {
   });
 
   tearDown(() async {
-    closeSharedHttpClient();
+    resetSharedHttpClientForTesting();
     await requests.cancel();
     await server.close(force: true);
     if (temp.existsSync()) temp.deleteSync(recursive: true);
@@ -86,6 +86,18 @@ void main() {
 
     expect((await sharedHttpClient.get(uri)).statusCode, HttpStatus.ok);
     closeSharedHttpClient();
+    expect((await sharedHttpClient.get(uri)).statusCode, HttpStatus.ok);
+  });
+
+  test('a retired shared client is not recreated', () async {
+    final uri = Uri.parse('http://127.0.0.1:${server.port}/api/tags');
+
+    expect((await sharedHttpClient.get(uri)).statusCode, HttpStatus.ok);
+    retireSharedHttpClient();
+    expect(isSharedHttpClientRetired, isTrue);
+    expect(() => sharedHttpClient, throwsStateError);
+    resetSharedHttpClientForTesting();
+    expect(isSharedHttpClientRetired, isFalse);
     expect((await sharedHttpClient.get(uri)).statusCode, HttpStatus.ok);
   });
 }

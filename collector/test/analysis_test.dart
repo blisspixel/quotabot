@@ -57,6 +57,90 @@ ProviderQuota _local(
     );
 
 void main() {
+  group('sparseScopedModelQuotas', () {
+    test('glance keeps Fable and hides Codex Spark', () {
+      final claude = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'a',
+        asOf: _now,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+        modelQuotas: [
+          ModelQuota(model: 'Fable', usedPercent: 40),
+        ],
+      );
+      final codex = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'a',
+        asOf: _now,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+        modelQuotas: [
+          ModelQuota(model: 'GPT-5.3-Codex-Spark', usedPercent: 0),
+        ],
+      );
+
+      expect(sparseScopedModelQuotas(claude).single.model, 'Fable');
+      expect(sparseScopedModelQuotas(codex), isEmpty);
+      expect(
+        sparseScopedModelQuotas(codex, glance: false).single.model,
+        'GPT-5.3-Codex-Spark',
+      );
+      expect(doctorVisibleModelQuotas(claude).single.model, 'Fable');
+      expect(doctorVisibleModelQuotas(codex), isEmpty);
+      final antigravity = ProviderQuota(
+        provider: 'antigravity',
+        displayName: 'Antigravity',
+        account: 'a',
+        asOf: _now,
+        windows: [QuotaWindow(label: '5h', usedPercent: 100)],
+        modelQuotas: [
+          ModelQuota(model: 'Gemini Models', usedPercent: 100),
+        ],
+      );
+      expect(doctorVisibleModelQuotas(antigravity), isEmpty);
+    });
+
+    test('doctor skips hidden and already-shown detected tools', () {
+      final antigravity = _q('antigravity', [
+        QuotaWindow(label: 'weekly', usedPercent: 50),
+      ]);
+      expect(
+        doctorPassiveDetectedTools(
+          detected: {'kiro', 'windsurf', 'antigravity'},
+          shown: [antigravity],
+          hidden: {'kiro', 'windsurf'},
+        ),
+        isEmpty,
+      );
+      expect(
+        doctorPassiveDetectedTools(
+          detected: {'kiro', 'cursor'},
+          shown: [antigravity],
+          hidden: {'kiro'},
+        ),
+        {'cursor'},
+      );
+    });
+
+    test('human status puts ready locals above idle cloud', () {
+      final claude = _q('claude', [
+        QuotaWindow(label: 'weekly', usedPercent: 20),
+      ]);
+      final cursor = _q('cursor', const []);
+      final ollama = _q(
+        'ollama',
+        const [],
+        kind: ProviderQuotaKind.local,
+      );
+      expect(
+        orderProvidersForHumanStatus([cursor, ollama, claude])
+            .map((quota) => quota.provider),
+        ['claude', 'ollama', 'cursor'],
+      );
+    });
+  });
+
   test('providerHeadroom is governed by the most constrained window', () {
     final q = _q('codex', [
       QuotaWindow(label: '5h', usedPercent: 10),
@@ -415,6 +499,55 @@ void main() {
         QuotaWindow(label: 'weekly', usedPercent: 42, resetsAt: _now + 86400),
       ]);
       expect(secondaryVisibleWindow(q, _now), isNull);
+    });
+  });
+
+  group('doctorVisibleWindows', () {
+    test('hides leftover 5h under a spent weekly', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 9, resetsAt: _now + 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 86400),
+      ]);
+      expect(
+        doctorVisibleWindows(q, _now).map((window) => window.label),
+        ['weekly'],
+      );
+    });
+
+    test('hides an unused 5h with no reset under a spent weekly', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 0),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 86400),
+      ]);
+      expect(
+        doctorVisibleWindows(q, _now).map((window) => window.label),
+        ['weekly'],
+      );
+    });
+
+    test('keeps weekly next to a spent 5h that still has room later', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now + 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 42, resetsAt: _now + 5 * 86400),
+      ]);
+      expect(
+        doctorVisibleWindows(q, _now).map((window) => window.label),
+        ['5h', 'weekly'],
+      );
+    });
+
+    test('hides an unused 5h when weekly is in use', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 0),
+        QuotaWindow(label: 'weekly', usedPercent: 30, resetsAt: _now + 86400),
+      ]);
+      expect(
+        doctorVisibleWindows(q, _now).map((window) => window.label),
+        ['weekly'],
+      );
     });
   });
 

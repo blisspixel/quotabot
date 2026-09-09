@@ -200,10 +200,12 @@ void main() {
       now,
     );
 
-    expect(summary, contains('model-specific'));
     expect(summary, contains('Fable 26%'));
     expect(summary, contains('(weekly)'));
     expect(summary, contains('separate from shared account limits'));
+    expect(summary, isNot(contains('model-specific')));
+    expect(summary, isNot(contains('models tracked')));
+    expect(summary, isNot(contains('most used')));
     expect(
       cli.doctorModelSummary(
         codexProviderId,
@@ -265,19 +267,18 @@ void main() {
         now,
         providerQuota: host,
       ),
-      contains('Fable spend: included quota not proven'),
+      contains('included quota not proven'),
     );
 
     final included = quota('max', ProviderPlanEvidenceSource.providerMetadata);
-    expect(
-      cli.doctorModelSummary(
-        claudeProviderId,
-        scoped,
-        now,
-        providerQuota: included,
-      ),
-      contains('Fable spend: included quota'),
+    final includedSummary = cli.doctorModelSummary(
+      claudeProviderId,
+      scoped,
+      now,
+      providerQuota: included,
     );
+    expect(includedSummary, contains('included quota'));
+    expect(includedSummary, isNot(contains('not proven')));
 
     final pro = quota('pro', ProviderPlanEvidenceSource.providerMetadata);
     expect(
@@ -287,7 +288,7 @@ void main() {
         now,
         providerQuota: pro,
       ),
-      contains('Fable spend: credit-backed availability'),
+      contains('credit-backed availability'),
     );
 
     final hostPro = quota('pro', ProviderPlanEvidenceSource.hostCredential);
@@ -298,7 +299,7 @@ void main() {
         now,
         providerQuota: hostPro,
       ),
-      contains('Fable spend: included quota not proven'),
+      contains('included quota not proven'),
     );
   });
 

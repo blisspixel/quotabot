@@ -4,11 +4,86 @@ import 'drift.dart';
 import 'insights.dart';
 import 'model_catalog.dart';
 import 'models.dart';
+import 'plan_evidence.dart';
+import 'provider_ids.dart';
 import 'route_receipt.dart';
 
 export 'route_receipt.dart';
 
 /// Routing helpers over a set of provider snapshots. Pure and side-effect free.
+
+/// Sparse model-family allowances next to shared account windows.
+///
+/// Claude Fable is a plan-gated family pool, so it belongs on the glance.
+/// Codex Spark is an extra named `additional_rate_limit` on the shared weekly
+/// and waits for opened detail, selected `top`, and doctor. Antigravity's
+/// exhaustive model table is never a glance bar.
+List<ModelQuota> sparseScopedModelQuotas(
+  ProviderQuota quota, {
+  bool glance = true,
+}) {
+  if (quota.provider != claudeProviderId && quota.provider != codexProviderId) {
+    return const [];
+  }
+  if (quota.windows.isEmpty) return const [];
+  return [
+    for (final modelQuota in quota.modelQuotas)
+      if (modelQuota.remainingPercent != null &&
+          (!glance || isClaudeFableModelLabel(modelQuota.model)))
+        modelQuota,
+  ];
+}
+
+/// Model rows the default human status/`doctor` line should name. Claude Fable
+/// stays; Codex Spark and exhaustive Antigravity tables wait for opened
+/// detail, selected `top`, JSON, and MCP.
+List<ModelQuota> doctorVisibleModelQuotas(ProviderQuota quota) =>
+    sparseScopedModelQuotas(quota);
+
+/// Installed-tool footnotes for doctor. Skip anything already in the table or
+/// hidden, so a cancelled Kiro does not keep advertising itself after hide.
+Set<String> doctorPassiveDetectedTools({
+  required Iterable<String> detected,
+  required Iterable<ProviderQuota> shown,
+  required Set<String> hidden,
+}) {
+  final shownIds = {for (final quota in shown) quota.provider};
+  final hiddenIds = {
+    for (final target in hidden)
+      if (!target.contains('|')) target,
+  };
+  return {
+    for (final id in detected)
+      if (!shownIds.contains(id) && !hiddenIds.contains(id)) id,
+  };
+}
+
+/// Cloud metadata with no windows and no failure. Local runtimes and quota
+/// or error rows stay out of this bucket so a ready Ollama is not buried
+/// under Cursor with no live data.
+bool isIdleCloudQuota(ProviderQuota quota) {
+  if (quota.isLocal) return false;
+  if (quota.windows.isNotEmpty || quota.modelQuotas.isNotEmpty) return false;
+  if (!quota.ok || quota.driftReason != null) return false;
+  if (quota.httpStatus != null || (quota.retryAfterSeconds ?? 0) > 0) {
+    return false;
+  }
+  return true;
+}
+
+/// Human status/`doctor` order: quota-bearing (or failing) cloud, then local
+/// runtimes, then idle cloud. Collection order is preserved inside each group.
+List<ProviderQuota> orderProvidersForHumanStatus(
+  Iterable<ProviderQuota> providers,
+) {
+  final list = providers.toList(growable: false);
+  if (list.length <= 1) return List.of(list);
+  return [
+    ...list.where((quota) => !quota.isLocal && !isIdleCloudQuota(quota)),
+    ...list.where((quota) => quota.isLocal),
+    ...list.where(isIdleCloudQuota),
+  ];
+}
 
 /// Provenance discount for measured quota derived from one machine rather than
 /// an authoritative account-wide endpoint. The value is intentionally shared
@@ -357,6 +432,41 @@ QuotaWindow? secondaryVisibleWindow(ProviderQuota q, int now) {
     if (best == null || wr > best.resetsAt!) best = w;
   }
   return best;
+}
+
+/// Windows the default `doctor` line should name.
+///
+/// Unused short windows stay hidden when something is used. A spent binding
+/// window also hides leftover shorter bars, matching desktop and `top`: a
+/// green or partly-used 5h under a spent weekly is unusable.
+List<QuotaWindow> doctorVisibleWindows(ProviderQuota quota, int now) {
+  final binding = bindingWindow(quota, now);
+  final headroom = providerHeadroom(quota, now);
+  if (binding != null && headroom != null && headroom <= kSpentHeadroomFloor) {
+    final secondary = secondaryVisibleWindow(quota, now);
+    return [
+      binding,
+      if (secondary != null) secondary,
+    ];
+  }
+  final used = [
+    for (final window in quota.windows)
+      if (_doctorWindowHasSignal(quota, window, now)) window,
+  ];
+  return used.isEmpty ? quota.windows : used;
+}
+
+bool _doctorWindowHasSignal(
+  ProviderQuota quota,
+  QuotaWindow window,
+  int now,
+) {
+  final percent = window.percent;
+  return percent == null ||
+      !percent.isFinite ||
+      percent < 0 ||
+      percent > 100 ||
+      quotaWindowUsedPercent(quota, window, now) > 0.5;
 }
 
 /// A ranked candidate in a routing suggestion.

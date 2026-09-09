@@ -1084,6 +1084,60 @@ void main() {
       expect(usage.windows.map((window) => window.usedPercent), [9, 100]);
     });
 
+    test('a session row may omit resets_at without dropping live weekly', () {
+      final data = <String, dynamic>{
+        'limits': [
+          {
+            'kind': 'session',
+            'group': 'session',
+            'percent': 0,
+            'resets_at': null,
+            'scope': null,
+            'is_active': false,
+            'severity': 'none',
+          },
+          {
+            'kind': 'weekly_all',
+            'group': 'weekly',
+            'percent': 100,
+            'resets_at': '2026-09-11T08:59:59.753997+00:00',
+            'scope': null,
+            'is_active': true,
+            'severity': 'exhausted',
+          },
+          {
+            'kind': 'weekly_scoped',
+            'group': 'weekly',
+            'percent': 100,
+            'resets_at': '2026-09-11T08:59:59.754223+00:00',
+            'scope': {
+              'model': {'id': null, 'display_name': 'Fable'},
+              'surface': null,
+            },
+            'is_active': false,
+            'severity': 'exhausted',
+          },
+        ],
+        'five_hour': {
+          'utilization': 0.0,
+          'resets_at': null,
+        },
+        'seven_day': {
+          'utilization': 100.0,
+          'resets_at': '2026-09-11T08:59:59.753997+00:00',
+        },
+        'seven_day_opus': null,
+      };
+      final usage = claudeLiveUsage(data);
+      expect(usage, isNotNull);
+      expect(usage!.windows.map((window) => window.label), ['5h', 'weekly']);
+      expect(usage.windows.map((window) => window.usedPercent), [0, 100]);
+      expect(usage.windows.first.resetsAt, isNull);
+      expect(usage.windows.last.resetsAt, isNotNull);
+      expect(usage.modelQuotas.single.model, 'Fable');
+      expect(usage.modelQuotas.single.usedPercent, 100);
+    });
+
     test('malformed known legacy blocks still fail without a limits array', () {
       expect(
         claudeLiveUsage({
@@ -1544,6 +1598,141 @@ void main() {
 
   group('antigravity', () {
     const now = 1782000000;
+
+    Map<String, dynamic> quotaSummary({
+      double geminiWeekly = 1,
+      double geminiFiveHour = 1,
+      double otherWeekly = 1,
+      double otherFiveHour = 1,
+      int? geminiWeeklyReset,
+      int? geminiFiveHourReset,
+      int? otherWeeklyReset,
+      int? otherFiveHourReset,
+    }) =>
+        {
+          'groups': [
+            {
+              'displayName': 'Gemini Models',
+              'buckets': [
+                {
+                  'bucketId': 'gemini-weekly',
+                  'displayName': 'Weekly Limit Remaining',
+                  'window': 'weekly',
+                  'remainingFraction': geminiWeekly,
+                  'resetTime': geminiWeeklyReset ?? now + 5 * 86400,
+                },
+                {
+                  'bucketId': 'gemini-5h',
+                  'displayName': 'Five Hour Limit Remaining',
+                  'window': '5h',
+                  'remainingFraction': geminiFiveHour,
+                  'resetTime': geminiFiveHourReset ?? now + 3600,
+                },
+              ],
+            },
+            {
+              'displayName': 'Claude and GPT models',
+              'buckets': [
+                {
+                  'bucketId': '3p-weekly',
+                  'displayName': 'Weekly Limit Remaining',
+                  'window': 'weekly',
+                  'remainingFraction': otherWeekly,
+                  'resetTime': otherWeeklyReset ?? now + 6 * 86400,
+                },
+                {
+                  'bucketId': '3p-5h',
+                  'displayName': 'Five Hour Limit Remaining',
+                  'window': '5h',
+                  'remainingFraction': otherFiveHour,
+                  'resetTime': otherFiveHourReset ?? now + 7200,
+                },
+              ],
+            },
+          ],
+        };
+
+    test('quota summary surfaces the tightest 5h and weekly buckets', () {
+      final windows = antigravityQuotaSummaryWindows(
+        quotaSummary(geminiWeekly: 0.72, geminiFiveHour: 0.44),
+      );
+      expect(windows, isNotNull);
+      expect(windows!.map((w) => w.label), ['5h', 'weekly']);
+      expect(windows.first.usedPercent, closeTo(56, 0.01));
+      expect(windows.first.resetsAt, now + 3600);
+      expect(windows.last.usedPercent, closeTo(28, 0.01));
+      expect(windows.last.resetsAt, now + 5 * 86400);
+    });
+
+    test('quota summary prefers the more-used sibling pool', () {
+      final windows = antigravityQuotaSummaryWindows(
+        quotaSummary(
+          geminiWeekly: 0.9,
+          geminiFiveHour: 0.8,
+          otherWeekly: 0.2,
+          otherFiveHour: 0.1,
+        ),
+      );
+      expect(windows, isNotNull);
+      expect(windows!.first.usedPercent, closeTo(90, 0.01));
+      expect(windows.last.usedPercent, closeTo(80, 0.01));
+    });
+
+    test('quota summary rejects a consumed bucket with no window identity', () {
+      expect(
+        antigravityQuotaSummaryWindows({
+          'groups': [
+            {
+              'displayName': 'Gemini Models',
+              'buckets': [
+                {
+                  'remainingFraction': 0.4,
+                  'resetTime': now + 3600,
+                },
+              ],
+            },
+          ],
+        }),
+        isNull,
+      );
+    });
+
+    test('quota summary skips an unused unlabeled helper bucket', () {
+      final windows = antigravityQuotaSummaryWindows({
+        'groups': [
+          {
+            'displayName': 'Gemini Models',
+            'buckets': [
+              {
+                'window': 'weekly',
+                'remainingFraction': 0.5,
+                'resetTime': now + 86400,
+              },
+              {
+                'remainingFraction': 1,
+                'resetTime': now + 3600,
+              },
+            ],
+          },
+        ],
+      });
+      expect(windows, isNotNull);
+      expect(windows!.single.label, 'weekly');
+      expect(windows.single.usedPercent, closeTo(50, 0.01));
+    });
+
+    test('quota summary group rows name the shared pools', () {
+      final models = antigravityQuotaSummaryModelQuotas(
+        quotaSummary(geminiWeekly: 0.9, geminiFiveHour: 0.4),
+      );
+      expect(models.map((m) => m.model), [
+        'Gemini Models',
+        'Claude and GPT models',
+      ]);
+      expect(models.first.usedPercent, closeTo(60, 0.01));
+      expect(models.first.windowLabel, '5h');
+    });
+
     test('surfaces the most-constrained binding limit as one weekly window',
         () {
       // The endpoint reports each model's single binding limit with no window

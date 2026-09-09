@@ -4,6 +4,7 @@
 library;
 
 import 'models.dart';
+import 'util.dart';
 
 /// A coarse "resets in ..." label for an optional reset time: `soon` when
 /// unknown, `now` when already reached, else the largest useful whole unit
@@ -130,4 +131,55 @@ String countdown(int resetsAt, int now) {
   final minutes = (secs % 3600) ~/ 60;
   if (hours > 0) return '${hours}h${minutes}m';
   return minutes > 0 ? '${minutes}m' : '<1m';
+}
+
+/// Compact glance line for remaining GPU memory when both total and available
+/// bytes are known. Used-centric host lines stay in opened detail with RAM,
+/// utilization, and inventory.
+String? localRuntimeVramFreeLabel(LocalHardwareInfo? hardware) {
+  if (hardware == null) return null;
+  final total = hardware.gpuMemoryTotalBytes;
+  final available = hardware.gpuMemoryAvailableBytes;
+  if (total == null || total <= 0 || available == null) return null;
+  final free = available.clamp(0, total);
+  return 'VRAM ${formatCompactBytes(free)} free of ${formatCompactBytes(total)}';
+}
+
+bool _isLocalHostVramDetail(String detail) =>
+    detail.trim().toLowerCase().startsWith('local host vram');
+
+bool _isLocalRuntimeGlanceDetail(String detail) {
+  final lower = detail.trim().toLowerCase();
+  if (_isLocalHostVramDetail(detail)) return true;
+  if (lower.contains('more loaded')) return true;
+  if (lower.contains('upstream routing')) return true;
+  return false;
+}
+
+/// Loaded-model extras and free VRAM for a collapsed local card or unselected
+/// `top` row. Host RAM, utilization, disk inventory, and GPU-resident context
+/// stay in [localRuntimeExpandedDetails].
+List<String> localRuntimeGlanceDetails(ProviderQuota quota) {
+  if (!quota.isLocal) return const [];
+  final vram = localRuntimeVramFreeLabel(quota.localHardware);
+  return [
+    if (vram != null) vram,
+    for (final detail in quota.details)
+      if (_isLocalRuntimeGlanceDetail(detail) &&
+          (vram == null || !_isLocalHostVramDetail(detail)))
+        detail,
+  ];
+}
+
+/// Host inventory and loaded-model context shown after a local card is opened
+/// or its `top` row is selected.
+List<String> localRuntimeExpandedDetails(ProviderQuota quota) {
+  if (!quota.isLocal) return const [];
+  final vram = localRuntimeVramFreeLabel(quota.localHardware);
+  return [
+    for (final detail in quota.details)
+      if (!_isLocalRuntimeGlanceDetail(detail) ||
+          (vram != null && _isLocalHostVramDetail(detail)))
+        detail,
+  ];
 }

@@ -183,6 +183,36 @@ void main() {
         }
       };
 
+  Map<String, dynamic> summary(double remainingFraction) => {
+        'groups': [
+          {
+            'displayName': 'Gemini Models',
+            'buckets': [
+              {
+                'bucketId': 'gemini-weekly',
+                'displayName': 'Weekly Limit Remaining',
+                'window': 'weekly',
+                'remainingFraction': remainingFraction,
+                'resetTime': DateTime.now()
+                    .add(const Duration(days: 3))
+                    .toUtc()
+                    .toIso8601String(),
+              },
+              {
+                'bucketId': 'gemini-5h',
+                'displayName': 'Five Hour Limit Remaining',
+                'window': '5h',
+                'remainingFraction': remainingFraction,
+                'resetTime': DateTime.now()
+                    .add(const Duration(hours: 2))
+                    .toUtc()
+                    .toIso8601String(),
+              },
+            ],
+          },
+        ],
+      };
+
   test('collectAccounts reads every active account in order', () async {
     final tokenCalls = <String>[];
     final loadTokens = <String>[];
@@ -611,8 +641,12 @@ void main() {
             }),
             200,
           );
-        case 'fetchAvailableModels':
+        case 'retrieveUserQuotaSummary':
           projects.add(body['project']?.toString());
+          expect(req.url.host, 'daily-cloudcode-pa.googleapis.com');
+          return http.Response(jsonEncode(summary(0.4)), 200);
+        case 'fetchAvailableModels':
+          expect(req.url.host, 'daily-cloudcode-pa.googleapis.com');
           return http.Response(jsonEncode(models(0.4)), 200);
       }
       return http.Response('bad method', 404);
@@ -625,9 +659,15 @@ void main() {
       client: client,
     ).collectAccounts();
 
-    expect(methods, ['loadCodeAssist', 'onboardUser', 'fetchAvailableModels']);
+    expect(methods, [
+      'loadCodeAssist',
+      'onboardUser',
+      'retrieveUserQuotaSummary',
+      'fetchAvailableModels',
+    ]);
     expect(projects, ['project-api']);
-    expect(q.single.windows.single.usedPercent, 60);
+    expect(q.single.windows.map((w) => w.label), ['5h', 'weekly']);
+    expect(q.single.windows.first.usedPercent, 60);
   });
 
   test('Cloud Code request timeout stays bounded and visible', () async {
@@ -695,7 +735,7 @@ void main() {
     expect(decoded.retryAfterSeconds, 120);
   });
 
-  test('Cloud Code server failure preserves the model-fetch stage', () async {
+  test('Cloud Code server failure preserves the quota-summary stage', () async {
     final methods = <String>[];
     final q = await AntigravityAdapter(
       accountSource: () => [candidate('busy@example.com')],
@@ -715,11 +755,11 @@ void main() {
       }),
     ).collectAccounts();
 
-    expect(methods, ['loadCodeAssist', 'fetchAvailableModels']);
+    expect(methods, ['loadCodeAssist', 'retrieveUserQuotaSummary']);
     expect(q.single.ok, isFalse);
     expect(
       q.single.error,
-      'Antigravity fetchAvailableModels request returned HTTP 503',
+      'Antigravity retrieveUserQuotaSummary request returned HTTP 503',
     );
     expect(q.single.error, isNot(contains('internal deployment detail')));
     expect(q.single.pipeHealth, providerPipeHealthDegraded);
@@ -1021,6 +1061,58 @@ void main() {
     expect(q.single.modelQuotas.single.usedPercent, closeTo(60, 1e-9));
     expect(q.single.windows.single.usedPercent, closeTo(60, 1e-9));
     expect(q.single.perMachine, isFalse);
+  });
+
+  test('quota summary beats a full remainingFraction model table', () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('agy@example.com')],
+      tokenResolver: (_, __) async => 'token',
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(project: 'p'),
+      fetchModels: (_, __) async => models(1),
+      fetchQuotaSummary: (_, __) async => summary(0.44),
+    ).collectAccounts();
+
+    expect(q.single.windows.map((w) => w.label), ['5h', 'weekly']);
+    expect(q.single.windows.first.usedPercent, closeTo(56, 0.01));
+    expect(q.single.windows.last.usedPercent, closeTo(56, 0.01));
+    expect(q.single.perMachine, isFalse);
+  });
+
+  test('a malformed quota summary does not fall back to a full model table',
+      () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('agy@example.com')],
+      tokenResolver: (_, __) async => 'token',
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(project: 'p'),
+      fetchModels: (_, __) async => models(1),
+      fetchQuotaSummary: (_, __) async => {
+        'groups': 'not-a-list',
+      },
+    ).collectAccounts();
+
+    expect(q.single.windows, isEmpty);
+    expect(q.single.error, contains('unreadable'));
+    expect(q.single.perMachine, isTrue);
+  });
+
+  test('paidTier is the plan name when Code Assist reports free-tier',
+      () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('agy@example.com')],
+      tokenResolver: (_, __) async => 'token',
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => {
+        'cloudaicompanionProject': {'id': 'p'},
+        'currentTier': {'id': 'free-tier', 'name': 'Antigravity'},
+        'paidTier': {'id': 'g1-pro-tier', 'name': 'Google AI Pro'},
+      },
+      fetchModels: (_, __) async => models(0.5),
+      fetchQuotaSummary: (_, __) async => summary(0.5),
+    ).collectAccounts();
+
+    expect(q.single.plan, 'Google AI Pro');
   });
 
   test('empty or throwing account sources fail softly', () async {
