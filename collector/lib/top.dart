@@ -837,7 +837,8 @@ void _addScopedQuotaRows(
   required bool selected,
 }) {
   var leading = first;
-  for (final modelQuota in sparseScopedModelQuotas(q, glance: !selected)) {
+  for (final modelQuota
+      in sparseScopedModelQuotas(q, glance: !selected, now: now)) {
     final remaining = modelQuota.remainingPercent!;
     final used = 100 - remaining;
     final reset = modelQuota.resetsAt == null

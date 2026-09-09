@@ -224,6 +224,22 @@ void main() {
     expect(lines.any((l) => _plain(l).contains('5h')), isFalse);
   });
 
+  test('spent weekly hides leftover 5h even when 5h resets later', () {
+    final lines = _frame([
+      _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 9, resetsAt: _now + 4 * 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 3600),
+      ]),
+    ]);
+    expect(lines.any((l) => _plain(l).contains('5h')), isFalse);
+    expect(
+      lines.any(
+          (l) => _plain(l).contains('weekly') && _plain(l).contains('spent')),
+      isTrue,
+    );
+  });
+
   test('a spent short window still shows the healthy longer window', () {
     final lines = _frame([
       _q('codex', [
@@ -747,6 +763,37 @@ void main() {
     expect(text, contains('fable'));
     expect(text, contains('  6% free'));
     expect(text, contains('  0% free'));
+  });
+
+  test('spent weekly glance is spent plus reset, without leftover 5h or Fable',
+      () {
+    final q = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'a',
+      asOf: _now,
+      windows: [
+        QuotaWindow(label: '5h', usedPercent: 0),
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 100,
+          resetsAt: _now + 2 * 86400,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'Fable',
+          usedPercent: 100,
+          resetsAt: _now + 2 * 86400,
+          windowLabel: 'weekly',
+        ),
+      ],
+    );
+    final text = _frame([q], width: 110).map(_plain).join('\n');
+    expect(text, contains('spent'));
+    expect(text, contains('resets'));
+    expect(text, isNot(contains('5h')));
+    expect(text, isNot(contains('fable')));
   });
 
   test('Codex Spark waits for the selected top row', () {

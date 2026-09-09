@@ -21,11 +21,20 @@ export 'route_receipt.dart';
 List<ModelQuota> sparseScopedModelQuotas(
   ProviderQuota quota, {
   bool glance = true,
+  int? now,
 }) {
   if (quota.provider != claudeProviderId && quota.provider != codexProviderId) {
     return const [];
   }
   if (quota.windows.isEmpty) return const [];
+  if (glance && now != null) {
+    final headroom = providerHeadroom(quota, now);
+    if (headroom != null && headroom <= kSpentHeadroomFloor) {
+      // A spent shared weekly already answers the card. Leftover Fable or
+      // unused 5h bars are not extra capacity.
+      return const [];
+    }
+  }
   return [
     for (final modelQuota in quota.modelQuotas)
       if (modelQuota.remainingPercent != null &&
@@ -35,10 +44,13 @@ List<ModelQuota> sparseScopedModelQuotas(
 }
 
 /// Model rows the default human status/`doctor` line should name. Claude Fable
-/// stays; Codex Spark and exhaustive Antigravity tables wait for opened
-/// detail, selected `top`, JSON, and MCP.
-List<ModelQuota> doctorVisibleModelQuotas(ProviderQuota quota) =>
-    sparseScopedModelQuotas(quota);
+/// stays while the shared windows still have room; Codex Spark and exhaustive
+/// Antigravity tables wait for opened detail, selected `top`, JSON, and MCP.
+List<ModelQuota> doctorVisibleModelQuotas(
+  ProviderQuota quota, {
+  int? now,
+}) =>
+    sparseScopedModelQuotas(quota, now: now);
 
 /// Installed-tool footnotes for doctor. Skip anything already in the table or
 /// hidden, so a cancelled Kiro does not keep advertising itself after hide.
@@ -411,27 +423,64 @@ QuotaWindow? bindingWindow(ProviderQuota q, int now) {
 /// window under a spent long one is unusable and must stay hidden (the same
 /// reason [bindingWindow] collapses it).
 ///
-/// "Longer" is judged by reset time, and requires *both* resets to be known:
-/// the candidate must be non-spent and reset strictly later than the spent
-/// binding window. An unknown reset is not evidence of a longer period (unlike
-/// in [bindingWindow], where an unknown clear time is conservatively the longest
-/// wait), so a null-reset healthy window is never resurfaced under a spent one.
-/// When several qualify, the latest-resetting one wins.
+/// "Longer" is the named period when both labels are known (`5h` < `weekly`),
+/// not the reset clock. A leftover 5h that happens to reset after a spent
+/// weekly is still unusable. Reset order is only the fallback when a label is
+/// not a known period. An unknown reset is not evidence of a longer period
+/// (unlike in [bindingWindow], where an unknown clear time is conservatively
+/// the longest wait), so a null-reset healthy window is never resurfaced under
+/// a spent one. When several qualify, the latest-resetting one wins.
 QuotaWindow? secondaryVisibleWindow(ProviderQuota q, int now) {
   final binding = bindingWindow(q, now);
-  final bindingReset = binding?.resetsAt;
-  if (binding == null || bindingReset == null) return null;
+  if (binding == null) return null;
   final headroom = providerHeadroom(q, now);
   if (headroom == null || headroom > kSpentHeadroomFloor) return null;
+  final bindingReset = binding.resetsAt;
+  final bindingRank = quotaWindowPeriodRank(binding.label);
   QuotaWindow? best;
   for (final w in q.windows) {
     if (identical(w, binding)) continue;
     if (quotaWindowHeadroom(q, w, now) <= kSpentHeadroomFloor) continue;
+    if (!_isLongerQuotaWindow(
+      candidate: w,
+      bindingRank: bindingRank,
+      bindingReset: bindingReset,
+    )) {
+      continue;
+    }
     final wr = w.resetsAt;
-    if (wr == null || wr <= bindingReset) continue;
-    if (best == null || wr > best.resetsAt!) best = w;
+    if (best == null ||
+        (wr != null && (best.resetsAt == null || wr > best.resetsAt!))) {
+      best = w;
+    }
   }
   return best;
+}
+
+/// Known quota periods in hours, so a spent weekly never resurfaces a leftover
+/// 5h just because that shorter pool resets later.
+int? quotaWindowPeriodRank(String label) {
+  final slug = label.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  return switch (slug) {
+    '5h' || '5hour' || 'fivehour' || 'session' => 5,
+    'daily' || '1d' || '24h' => 24,
+    'weekly' || '7d' || '7day' => 168,
+    'monthly' || '30d' => 720,
+    _ => null,
+  };
+}
+
+bool _isLongerQuotaWindow({
+  required QuotaWindow candidate,
+  required int? bindingRank,
+  required int? bindingReset,
+}) {
+  final candidateRank = quotaWindowPeriodRank(candidate.label);
+  if (bindingRank != null && candidateRank != null) {
+    return candidateRank > bindingRank;
+  }
+  final wr = candidate.resetsAt;
+  return wr != null && bindingReset != null && wr > bindingReset;
 }
 
 /// Windows the default `doctor` line should name.

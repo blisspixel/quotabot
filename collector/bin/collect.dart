@@ -3748,7 +3748,11 @@ String _doctorWindowDetail(
   final percent = window.percent;
   final valid =
       percent != null && percent.isFinite && percent >= 0 && percent <= 100;
-  final usage = valid ? '${percent.round()}% used' : 'usage unavailable';
+  final usage = !valid
+      ? 'usage unavailable'
+      : window.exhausted
+          ? 'spent'
+          : '${percent.round()}% used';
   final qualifier = switch (state) {
     'PROVIDER DRIFT' => 'last trusted',
     'cached' => 'last known',
@@ -3898,7 +3902,7 @@ void _printDoctor(
     for (final d in details) {
       print('  $indent ${_stateColumn('')} $d');
     }
-    final modelQuotas = doctorVisibleModelQuotas(q);
+    final modelQuotas = doctorVisibleModelQuotas(q, now: now);
     if (modelQuotas.isNotEmpty) {
       // Compact human summary; the full per-model table is in `quotabot json`
       // and over MCP, so this stays one short line. Codex Spark is omitted

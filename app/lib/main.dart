@@ -1869,7 +1869,7 @@ class _DashboardState extends State<Dashboard>
           // The tight default hides the provenance line, spend caption, and
           // the "usually" line; Fable stays with the shared windows. Codex
           // Spark waits for the opened card.
-          final glanceScoped = desktopScopedModelQuotas(q).length;
+          final glanceScoped = desktopScopedModelQuotas(q, now: now).length;
           final detailScoped = desktopDetailScopedModelQuotas(q).length;
           final rows =
               providerTileQuotaRowCount(q, now) +
@@ -5419,7 +5419,7 @@ class ProviderTile extends StatelessWidget {
     final showDetail = expanded || !expandable;
     final scopedModelQuotas = showDetail
         ? desktopDetailScopedModelQuotas(quota)
-        : desktopScopedModelQuotas(quota);
+        : desktopScopedModelQuotas(quota, now: now);
     final trustLine = desktopProviderTrustLine(quota, now);
     final trustDetail = desktopProviderTrustDetail(quota, now);
     final rawPlan = quota.plan?.trim();
@@ -6394,8 +6394,8 @@ WinView _modelQuotaView(ModelQuota modelQuota) {
 /// Codex Spark waits for opened detail. Antigravity's model-quota list is
 /// exhaustive and remains available only through model-routing surfaces.
 @visibleForTesting
-List<ModelQuota> desktopScopedModelQuotas(ProviderQuota quota) =>
-    sparseScopedModelQuotas(quota);
+List<ModelQuota> desktopScopedModelQuotas(ProviderQuota quota, {int? now}) =>
+    sparseScopedModelQuotas(quota, now: now);
 
 @visibleForTesting
 List<ModelQuota> desktopDetailScopedModelQuotas(ProviderQuota quota) =>
@@ -6438,7 +6438,7 @@ int providerTileQuotaRowCount(ProviderQuota quota, int now) {
   // A sparse scoped pool renders as two visual lines: its model identity and
   // its provider window meter. Count both so the native window-size fallback
   // does not clip the new dedicated row before measured sizing takes over.
-  return providerRows + desktopScopedModelQuotas(quota).length;
+  return providerRows + desktopScopedModelQuotas(quota, now: now).length;
 }
 
 Color _availColor(num remaining) {

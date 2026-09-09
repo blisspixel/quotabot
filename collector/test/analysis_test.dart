@@ -101,6 +101,37 @@ void main() {
       expect(doctorVisibleModelQuotas(antigravity), isEmpty);
     });
 
+    test('glance and doctor hide Fable when the shared weekly is spent', () {
+      final claude = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'a',
+        asOf: _now,
+        windows: [
+          QuotaWindow(label: '5h', usedPercent: 0),
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 100,
+            resetsAt: _now + 2 * 86400,
+          ),
+        ],
+        modelQuotas: [
+          ModelQuota(
+            model: 'Fable',
+            usedPercent: 100,
+            resetsAt: _now + 2 * 86400,
+            windowLabel: 'weekly',
+          ),
+        ],
+      );
+      expect(sparseScopedModelQuotas(claude, now: _now), isEmpty);
+      expect(doctorVisibleModelQuotas(claude, now: _now), isEmpty);
+      expect(
+        sparseScopedModelQuotas(claude, glance: false, now: _now).single.model,
+        'Fable',
+      );
+    });
+
     test('doctor skips hidden and already-shown detected tools', () {
       final antigravity = _q('antigravity', [
         QuotaWindow(label: 'weekly', usedPercent: 50),
@@ -474,6 +505,16 @@ void main() {
       expect(secondaryVisibleWindow(q, _now)?.label, 'weekly');
     });
 
+    test('surfaces weekly after spent 5h even when weekly resets sooner', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now + 4 * 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 42, resetsAt: _now + 2 * 3600),
+      ]);
+      expect(bindingWindow(q, _now)?.label, '5h');
+      expect(secondaryVisibleWindow(q, _now)?.label, 'weekly');
+    });
+
     test('hides a healthy short window under a spent long window', () {
       final q = _q('codex', [
         QuotaWindow(label: '5h', usedPercent: 20, resetsAt: _now + 3600),
@@ -481,6 +522,16 @@ void main() {
             label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 86400),
       ]);
       // A green 5h under a spent weekly is unusable; do not resurface it.
+      expect(bindingWindow(q, _now)?.label, 'weekly');
+      expect(secondaryVisibleWindow(q, _now), isNull);
+    });
+
+    test('hides leftover 5h even when it resets after a spent weekly', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 9, resetsAt: _now + 4 * 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 3600),
+      ]);
       expect(bindingWindow(q, _now)?.label, 'weekly');
       expect(secondaryVisibleWindow(q, _now), isNull);
     });
@@ -508,6 +559,18 @@ void main() {
         QuotaWindow(label: '5h', usedPercent: 9, resetsAt: _now + 3600),
         QuotaWindow(
             label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 86400),
+      ]);
+      expect(
+        doctorVisibleWindows(q, _now).map((window) => window.label),
+        ['weekly'],
+      );
+    });
+
+    test('hides leftover 5h that resets after a spent weekly', () {
+      final q = _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 9, resetsAt: _now + 4 * 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 3600),
       ]);
       expect(
         doctorVisibleWindows(q, _now).map((window) => window.label),

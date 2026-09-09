@@ -91,7 +91,9 @@ and OAuth token settlement.
 
 - `doctor` no longer lists a leftover 5h bar next to a spent weekly cap. The
   binding window is the one that matters; a green or partly-used short window
-  under a spent longer one is unusable, matching desktop and `top`.
+  under a spent longer one is unusable, matching desktop and `top`. A spent
+  weekly glance is just that pool spent plus when it resets - not a leftover
+  5h or Fable bar. Doctor names it `spent` instead of `100% used`.
 
 - Desktop Install latest update stops the CLI updater if it exceeds the wait,
   instead of leaving that process running after the dialog times out.
