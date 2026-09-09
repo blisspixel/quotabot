@@ -83,20 +83,25 @@ Future<void> shutDownMcpCollection(
     return;
   }
   snapshots.stopAdmitting();
-  await _awaitBounded(snapshots.settle, drainTimeout);
-  await _awaitBounded(settleOwnedCollectionWork, drainTimeout);
+  final deadline = DateTime.now().add(drainTimeout);
+  await _awaitUntil(snapshots.settle, deadline);
+  await _awaitUntil(settleOwnedCollectionWork, deadline);
   retireSharedHttpClient();
 }
 
-Future<void> _awaitBounded(
+Future<void> _awaitUntil(
   Future<void> Function() work,
-  Duration timeout,
+  DateTime deadline,
 ) async {
+  final remaining = deadline.difference(DateTime.now());
+  if (remaining <= Duration.zero) return;
   try {
-    await work().timeout(timeout);
+    await work().timeout(remaining);
   } catch (_) {
     // Bounded shutdown still retires the HTTP client. Settlement errors must
-    // not skip that retirement.
+    // not skip that retirement. One drain budget is shared across snapshot
+    // settle and owned collection work so stacked waits cannot consume the
+    // caller's whole process-exit timeout.
   }
 }
 

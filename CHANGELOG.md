@@ -102,7 +102,9 @@ and OAuth token settlement.
 - MCP shutdown stops new snapshot admissions, waits a bounded time for the
   current snapshot, adapters, grant refreshes, and metadata gates, then
   retires the shared HTTP client. A late continuation can no longer open a
-  new keep-alive pool after the server entrypoint returns.
+  new keep-alive pool after the server entrypoint returns. Snapshot settle
+  and owned-work drain share one deadline so shutdown cannot stack two full
+  waits before the process can exit.
 
 - Claude, Codex, Grok, and Antigravity token POSTs keep ownership until the
   original OAuth request settles. A successful late rotation is still saved
