@@ -35,7 +35,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.11.4';
+const _version = '0.11.5';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -146,6 +146,67 @@ Future<_VerifiedRead> _readForVerify([
       ),
     );
 
+QuotaProfile? _durableHiddenProfile(QuotaProfile? requested) {
+  if (requested != null) return requested;
+  final stored = loadProfile(defaultProfileName);
+  final hidden = loadDurableHiddenTargets();
+  if (stored == null) {
+    if (hidden.isEmpty) return null;
+    return QuotaProfile(
+      name: defaultProfileName,
+      hiddenProviders: hidden,
+    );
+  }
+  final effective = profileWithHiddenProviders(stored, hidden);
+  final noOp = effective.hiddenProviders.isEmpty &&
+      effective.providers.isEmpty &&
+      effective.accounts.isEmpty &&
+      effective.preferenceOrder.isEmpty &&
+      effective.routingPolicy.canonical == ProfileRoutingPolicy.balanced;
+  if (noOp) return null;
+  return effective;
+}
+
+void _runHide(String command, List<String> pos, bool wantsJson) {
+  if (command == 'hidden' || pos.isEmpty) {
+    final hidden = loadDurableHiddenTargets().toList()..sort();
+    if (wantsJson) {
+      print(_jsonPretty({
+        'schema': 'quotabot.hide.v1',
+        'hidden': hidden,
+      }));
+      return;
+    }
+    if (hidden.isEmpty) {
+      stdout.writeln('no providers hidden');
+      return;
+    }
+    stdout.writeln('hidden: ${hidden.join(', ')}');
+    return;
+  }
+  final raw = pos.first;
+  final id = normalizeHiddenTarget(raw);
+  if (id == null) {
+    stderr.writeln('quotabot: unknown provider "$raw"');
+    exitCode = _exitUsage;
+    return;
+  }
+  persistHiddenTarget(id, hide: command != 'unhide');
+  final hidden = loadDurableHiddenTargets().toList()..sort();
+  if (wantsJson) {
+    print(_jsonPretty({
+      'schema': 'quotabot.hide.v1',
+      'hidden': hidden,
+      'provider': id,
+      'hidden_now': command != 'unhide',
+    }));
+    return;
+  }
+  stdout.writeln(
+    command == 'unhide' ? 'showing $id' : 'hiding $id',
+  );
+}
+
 Future<List<ProviderQuota>> _collectProfiled(
   QuotaProfile? profile, {
   Set<String> excludedProviders = const {},
@@ -154,8 +215,9 @@ Future<List<ProviderQuota>> _collectProfiled(
   _printSimulationNoticeIfNeeded();
   final results =
       _simulatedSnapshot ?? await collectAll(onProviderDone: onProviderDone);
+  final effective = _durableHiddenProfile(profile);
   final profiled =
-      profile == null ? List.of(results) : applyProfile(results, profile);
+      effective == null ? List.of(results) : applyProfile(results, effective);
   return filterExcludedProviders(profiled, excludedProviders);
 }
 
@@ -166,9 +228,10 @@ Future<_VerifiedRead> _collectProfiledForVerify(
 }) async {
   _printSimulationNoticeIfNeeded();
   if (_simulatedSnapshot != null) {
-    final profiled = profile == null
+    final effective = _durableHiddenProfile(profile);
+    final profiled = effective == null
         ? List.of(_simulatedSnapshot!)
-        : applyProfile(_simulatedSnapshot!, profile);
+        : applyProfile(_simulatedSnapshot!, effective);
     return _VerifiedRead(
       filterExcludedProviders(profiled, excludedProviders),
       buildRuntimeAccessReport(
@@ -183,9 +246,10 @@ Future<_VerifiedRead> _collectProfiledForVerify(
   final collected = await collectAllWithRuntimeAccess(
     adapterProviderIds: adapterProviderIds,
   );
-  final profiled = profile == null
+  final effective = _durableHiddenProfile(profile);
+  final profiled = effective == null
       ? List.of(collected.providers)
-      : applyProfile(collected.providers, profile);
+      : applyProfile(collected.providers, effective);
   return _VerifiedRead(
     filterExcludedProviders(profiled, excludedProviders),
     collected.runtimeAccess,
@@ -392,6 +456,11 @@ Future<void> _runMain(List<String> rawArgs) async {
       return;
     case 'logout':
       _logout(pos.length > 1 ? pos[1] : '');
+      return;
+    case 'hide':
+    case 'unhide':
+    case 'hidden':
+      _runHide(cmd, pos.skip(1).toList(), wantsJson);
       return;
     case 'manual':
       await _runManual(pos.skip(1).toList(), flags, wantsJson);
@@ -643,6 +712,8 @@ Future<void> _runMain(List<String> rawArgs) async {
             results,
             preferenceOrder: profile?.preferenceOrder ?? const [],
             analyticsIncidentInventory: incidentInventory,
+            hiddenTargets:
+                profile?.hiddenProviders ?? loadDurableHiddenTargets(),
           );
     return;
   }
@@ -862,6 +933,8 @@ const _knownCommands = {
   'check',
   'doctor',
   'explain',
+  'hide',
+  'hidden',
   'json',
   'login',
   'logout',
@@ -873,6 +946,7 @@ const _knownCommands = {
   'status',
   'suggest',
   'top',
+  'unhide',
   'update',
   'verify',
   'watch',
@@ -1657,6 +1731,9 @@ String? _commandOptionError(String command, Set<String> flags) {
     'explain',
     'verify',
     'update',
+    'hide',
+    'unhide',
+    'hidden',
   };
   final allowed = <String>{'color', 'no-color'};
   if (jsonCommands.contains(command)) allowed.add('json');
@@ -1790,7 +1867,7 @@ String? _positionalError(String command, List<String> positionals) {
     return 'unexpected argument "${positionals[maximum]}" for manual $action';
   }
   final maximum = switch (command) {
-    'login' || 'logout' || 'check' || 'stats' => 2,
+    'login' || 'logout' || 'check' || 'stats' || 'hide' || 'unhide' => 2,
     _ => 1,
   };
   if (positionals.length <= maximum) return null;
@@ -2124,10 +2201,12 @@ Future<void> _runTop(
   var failStreak = 0;
   var refreshFailure = '';
   var selected = 0; // cursor index into the visible (sorted, unhidden) list
-  // Provider/account identities hidden this session with the x key. Keyed by
-  // account, not bare provider, so hiding one account of a duplicated provider
-  // does not also hide its other accounts (selection is per account too).
+  var inspectModels = false;
+  // Provider/account identities hidden this session with the x key. Same
+  // `provider` / `provider|account` targets as `quotabot hide`, persisted to
+  // the active profile so a cancelled subscription stays off after quit.
   final hidden = <String>{};
+  final sessionHidden = <String>{};
   var copied = ''; // transient confirmation shown after the copy-route key
   final quit = Completer<void>();
   Timer? repaint;
@@ -2199,6 +2278,7 @@ Future<void> _runTop(
             : null,
         hidden: hidden.length,
         copied: copied,
+        inspectModels: inspectModels,
       );
     }
     final buf = StringBuffer()
@@ -2289,9 +2369,28 @@ Future<void> _runTop(
     copied = '';
     final visible = frame().visible;
     if (selected >= 0 && selected < visible.length) {
-      hidden.add(quotaIdentityKeyFor(visible[selected]));
+      final target = durableHideTargetIn(visible[selected], data);
+      hidden.add(target);
+      sessionHidden.add(target);
+      persistHiddenTarget(target, hide: true, profile: profile);
     }
     draw(); // draw() reclamps the cursor to the now-shorter list
+  }
+
+  void unhideSession() {
+    copied = '';
+    if (sessionHidden.isEmpty) {
+      hidden.clear();
+      draw();
+      return;
+    }
+    for (final target in sessionHidden) {
+      persistHiddenTarget(target, hide: false, profile: profile);
+    }
+    hidden.removeAll(sessionHidden);
+    sessionHidden.clear();
+    draw();
+    unawaited(reloader.refreshNow());
   }
 
   void copyRoute() {
@@ -2332,11 +2431,12 @@ Future<void> _runTop(
       } else if (b == 120 || b == 104) {
         hideSel(); // x, h: hide the selected provider
       } else if (b == 117) {
-        copied = '';
-        hidden.clear(); // u: unhide all
-        draw();
+        unhideSession(); // u: restore what this session hid
       } else if (b == 99) {
         copyRoute(); // c: copy the recommended route to the clipboard
+      } else if (b == 109 || b == 77) {
+        inspectModels = !inspectModels; // m, M: inspect selected models
+        draw();
       }
     }
   });
@@ -2391,7 +2491,16 @@ void _printHelp([String? command]) {
     '  status, doctor      every provider, its windows and resets (default)',
   );
   stdout.writeln(
-    '  top                 live dashboard (q quit, r refresh, s sort, j/k move, x hide, c copy route)',
+    '  hide <provider>     keep a cancelled subscription off the default view',
+  );
+  stdout.writeln(
+    '  unhide <provider>   show a previously hidden provider again',
+  );
+  stdout.writeln(
+    '  hidden              list providers hidden by hide or top x',
+  );
+  stdout.writeln(
+    '  top                 live dashboard (q quit, r refresh, s sort, j/k move, x hide, c copy, m models)',
   );
   stdout.writeln(
     '  watch               alert when a window goes red, naming where to route'
@@ -3107,7 +3216,8 @@ Future<void> _check(
   final targetAdapter = _providerAdapterForName(name);
   final rawKey = name.trim().toLowerCase();
   final key = targetAdapter?.id ?? normalizeProviderId(name) ?? rawKey;
-  final allowedAdapterIds = _adapterIdsForScope(profile, excludedProviders);
+  final allowedAdapterIds =
+      _adapterIdsForScope(_durableHiddenProfile(profile), excludedProviders);
   final targetAdapterIds = {
     if (targetAdapter != null && allowedAdapterIds.contains(targetAdapter.id))
       targetAdapter.id,
@@ -3468,10 +3578,12 @@ String _stateStyled(String state) {
 }
 
 /// The account label for a doctor row, shown only to disambiguate a provider
-/// that appears under more than one real account. A single-account provider
-/// gets its identity in the provenance tag instead of the row label.
+/// that appears under more than one real account. Opaque credential digests
+/// stay out of the glance; JSON and opened detail still carry them.
 String _doctorAccountSuffix(ProviderQuota q, Map<String, int> counts) =>
-    (counts[q.provider] ?? 0) > 1 && _providerHasDoctorAccountIdentity(q)
+    (counts[q.provider] ?? 0) > 1 &&
+            _providerHasDoctorAccountIdentity(q) &&
+            quotaAccountBelongsOnGlance(q.account)
         ? ' (${quotaAccountDisplayLabel(q.account)})'
         : '';
 
@@ -3494,7 +3606,9 @@ List<String> _providerProvenanceParts(
   if (admission != null) parts.add(admission);
   final spendClass = providerSpendClass(q);
   if (spendClass != null) parts.add(spendClass);
-  if (includeAccount && providerHasDoctorProvenanceIdentity(q)) {
+  if (includeAccount &&
+      providerHasDoctorProvenanceIdentity(q) &&
+      quotaAccountBelongsOnGlance(q.account)) {
     parts.add(quotaAccountDisplayLabel(q.account));
   }
   final captured = routeCaptureAgeLabel(q.asOf, now);
@@ -3601,18 +3715,6 @@ bool providerHasDoctorProvenanceIdentity(ProviderQuota q) =>
         q.account.contains('@') ||
         isOpaqueCredentialIdentity(q.account));
 
-List<QuotaWindow> _doctorVisibleWindows(ProviderQuota quota, int now) {
-  final used = quota.windows.where((w) {
-    final percent = w.percent;
-    return percent == null ||
-        !percent.isFinite ||
-        percent < 0 ||
-        percent > 100 ||
-        quotaWindowUsedPercent(quota, w, now) > 0.5;
-  }).toList();
-  return used.isEmpty ? quota.windows : used;
-}
-
 String _doctorState(ProviderQuota q, int now) {
   if (q.isLocal) {
     if (!q.ok || q.error != null || q.sourceClassViolation != null) {
@@ -3646,7 +3748,11 @@ String _doctorWindowDetail(
   final percent = window.percent;
   final valid =
       percent != null && percent.isFinite && percent >= 0 && percent <= 100;
-  final usage = valid ? '${percent.round()}% used' : 'usage unavailable';
+  final usage = !valid
+      ? 'usage unavailable'
+      : window.exhausted
+          ? 'spent'
+          : '${percent.round()}% used';
   final qualifier = switch (state) {
     'PROVIDER DRIFT' => 'last trusted',
     'cached' => 'last known',
@@ -3678,15 +3784,22 @@ String doctorModelSummary(
       known.where((quota) => !isCurrentModelQuotaEvidenceAt(quota, now)).length;
   String summary;
   if (known.isEmpty) {
-    summary = '${quotas.length} models tracked, balances unavailable';
+    final tracked = quotas.length == 1
+        ? '1 model tracked'
+        : '${quotas.length} models tracked';
+    summary = '$tracked, balances unavailable';
   } else {
     final mostUsed = known.reduce(
       (a, b) => a.usedPercent! >= b.usedPercent! ? a : b,
     );
     final windowLabel = mostUsed.windowLabel;
-    summary = '${quotas.length} models tracked, most used: '
-        '${mostUsed.model} ${mostUsed.usedPercent!.round()}%'
+    final named = '${mostUsed.model} ${mostUsed.usedPercent!.round()}%'
         '${windowLabel == null ? '' : ' ($windowLabel)'}';
+    if (known.length == 1) {
+      summary = named;
+    } else {
+      summary = '${quotas.length} models tracked, most used: $named';
+    }
   }
   if (expired > 0) {
     summary +=
@@ -3698,7 +3811,12 @@ String doctorModelSummary(
         '; $unknown ${unknown == 1 ? 'balance' : 'balances'} unavailable';
   }
   if (provider == claudeProviderId || provider == codexProviderId) {
-    summary = 'model-specific: $summary; separate from shared account limits';
+    final singleFable =
+        known.length == 1 && isClaudeFableModelLabel(known.single.model);
+    if (!singleFable) {
+      summary = 'model-specific: $summary';
+    }
+    summary = '$summary; separate from shared account limits';
   }
   if (provider == claudeProviderId && providerQuota != null) {
     final fable = quotas
@@ -3708,7 +3826,7 @@ String doctorModelSummary(
         ? null
         : claudeFableSpendEvidenceAt(providerQuota, fable.model, now);
     if (spend != null) {
-      summary += '; Fable spend: ${spend.compactLabel}';
+      summary += '; ${spend.compactLabel}';
     }
   }
   return summary;
@@ -3718,6 +3836,7 @@ void _printDoctor(
   List<ProviderQuota> results, {
   List<String> preferenceOrder = const [],
   required AnalyticsIncidentInventory analyticsIncidentInventory,
+  Set<String> hiddenTargets = const {},
 }) {
   final now = nowEpoch();
   final storageNoticesByIdentity = _usingSimulation
@@ -3746,7 +3865,7 @@ void _printDoctor(
           '${q.displayName}${_doctorAccountSuffix(q, accountCounts)}'.length)
       .fold(28, (w, len) => len > w ? len : w);
   final indent = ' '.padRight(nameWidth);
-  for (final q in results) {
+  for (final q in orderProvidersForHumanStatus(results)) {
     final state = _doctorState(q, now);
     final detail = q.isLocal
         ? (isLocalRuntimeReachableAt(q, now) && q.error == null
@@ -3757,7 +3876,7 @@ void _printDoctor(
             // availability state), otherwise its error. A real failure sets
             // error, not status, so an ERROR row still shows the failure.
             ? (q.status ?? q.error ?? '')
-            : _doctorVisibleWindows(q, now)
+            : doctorVisibleWindows(q, now)
                 .map((w) => _doctorWindowDetail(w, now, state))
                 .join(', ');
     final namePart =
@@ -3774,15 +3893,23 @@ void _printDoctor(
     if (resetMessage != null) {
       print('  $indent ${_stateColumn('')} ${style.green(resetMessage)}');
     }
-    for (final d in q.details) {
+    final details = q.isLocal
+        ? [
+            ...localRuntimeGlanceDetails(q),
+            ...localRuntimeExpandedDetails(q),
+          ]
+        : q.details;
+    for (final d in details) {
       print('  $indent ${_stateColumn('')} $d');
     }
-    if (q.modelQuotas.isNotEmpty) {
+    final modelQuotas = doctorVisibleModelQuotas(q, now: now);
+    if (modelQuotas.isNotEmpty) {
       // Compact human summary; the full per-model table is in `quotabot json`
-      // and over MCP, so this stays one short line.
+      // and over MCP, so this stays one short line. Codex Spark is omitted
+      // here the same way it is omitted from glance cards.
       final summary = doctorModelSummary(
         q.provider,
-        q.modelQuotas,
+        modelQuotas,
         now,
         providerQuota: q,
       );
@@ -3893,12 +4020,17 @@ void _printDoctor(
   );
 
   // Passive detection for robustness: report installed popular agentic tools
-  // even if no active subscription or full quota data (e.g. cancelled Kiro CLI).
-  final detected =
-      _usingSimulation ? const <String>[] : detectInstalledAgenticTools();
+  // even if no active subscription or full quota data. Skip tools already in
+  // the table or hidden, so a cancelled Kiro does not keep advertising itself.
+  final detected = doctorPassiveDetectedTools(
+    detected:
+        _usingSimulation ? const <String>[] : detectInstalledAgenticTools(),
+    shown: results,
+    hidden: hiddenTargets,
+  );
   if (detected.isNotEmpty) {
     print('\nDetected installed agentic dev coding tools (passive check):');
-    for (final t in detected) {
+    for (final t in detected.toList()..sort()) {
       print(
         '  $t (local data may be available opportunistically; see DATA_SOURCES)',
       );
@@ -4006,9 +4138,10 @@ Future<void> _runVerify(
   Set<String> excludedProviders, {
   bool requireLive = false,
 }) async {
-  final adapterProviderIds = profile == null && excludedProviders.isEmpty
+  final effective = _durableHiddenProfile(profile);
+  final adapterProviderIds = effective == null && excludedProviders.isEmpty
       ? null
-      : _adapterIdsForScope(profile, excludedProviders);
+      : _adapterIdsForScope(effective, excludedProviders);
   final read = await _readForVerify(
     profile,
     excludedProviders,
@@ -4712,8 +4845,8 @@ String _localProviderReadState(ProviderQuota quota) =>
 
 bool _modelHasAccountIdentity(ModelEntry e) =>
     !e.local &&
-    hasSpecificQuotaAccount(e.account) &&
-    (e.account.contains('@') || isOpaqueCredentialIdentity(e.account));
+    quotaAccountBelongsOnGlance(e.account) &&
+    e.account.contains('@');
 
 /// Prints a routing recommendation: where to send the next request and why,
 /// with the ranked alternatives below it.
@@ -4779,8 +4912,8 @@ String _routeCandidateProvenance(RouteCandidate c, int decisionAsOf) {
 
 bool _routeHasAccountIdentity(RouteCandidate c) =>
     !c.isLocal &&
-    hasSpecificQuotaAccount(c.account) &&
-    (c.account.contains('@') || isOpaqueCredentialIdentity(c.account));
+    quotaAccountBelongsOnGlance(c.account) &&
+    c.account.contains('@');
 
 const routeFutureCaptureLabel = capturedInFutureLabel;
 

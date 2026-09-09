@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -134,6 +135,7 @@ class TokenStore {
   static final _providerPattern = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
   static const _accountKey = '_account';
   static const _maxTokenBytes = 128 * 1024;
+  static final Set<Future<void>> _activeRefreshTransactions = {};
   static File _file(String provider, {String? account}) {
     final providerName = _providerFileName(provider);
     final accountName = _normalizeAccount(account);
@@ -262,25 +264,41 @@ class TokenStore {
     String? account,
     Duration acquisitionTimeout = defaultFileGuardAcquisitionTimeout,
   }) async {
-    final accountName = _normalizeAccount(account);
-    final f = _file(provider, account: accountName);
-    if (!f.existsSync()) return run(null);
-    final lockFile = _prepareLockFile(f, qualifier: '.refresh');
-    final guard = await acquireInterprocessFileGuard(
-      lockFile,
-      hardenClaim: _hardenTokenFile,
-      acquisitionTimeout: acquisitionTimeout,
-    );
+    final done = Completer<void>();
+    _activeRefreshTransactions.add(done.future);
     try {
-      final current = _readRecord(
-        f,
-        provider: provider,
-        account: accountName,
-        suppressIoErrors: true,
+      final accountName = _normalizeAccount(account);
+      final f = _file(provider, account: accountName);
+      if (!f.existsSync()) return await run(null);
+      final lockFile = _prepareLockFile(f, qualifier: '.refresh');
+      final guard = await acquireInterprocessFileGuard(
+        lockFile,
+        hardenClaim: _hardenTokenFile,
+        acquisitionTimeout: acquisitionTimeout,
       );
-      return await run(current);
+      try {
+        final current = _readRecord(
+          f,
+          provider: provider,
+          account: accountName,
+          suppressIoErrors: true,
+        );
+        return await run(current);
+      } finally {
+        guard.release();
+      }
     } finally {
-      guard.release();
+      _activeRefreshTransactions.remove(done.future);
+      if (!done.isCompleted) done.complete();
+    }
+  }
+
+  /// Waits for original refresh transactions in this isolate, including token
+  /// POSTs whose caller already received a publication deadline. Payloads and
+  /// errors remain with the original caller; this tracks settlement.
+  static Future<void> drainActiveRefreshTransactions() async {
+    while (_activeRefreshTransactions.isNotEmpty) {
+      await Future.wait(_activeRefreshTransactions.toList(growable: false));
     }
   }
 

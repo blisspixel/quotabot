@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-09-05. This file is the forward plan. It records brief shipped
+Updated 2026-09-09. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -94,15 +94,18 @@ same evidence in the app and their agent harnesses.** Useful product work
 continues while publisher identities are unavailable. Signing remains a native
 distribution gate before 1.0; store admission is not a product-development gate.
 
-The 0.11.4 release rejects a quota reset boundary that advances with the clock
-while nothing has been consumed, withdraws stale meters past an age ceiling, and
-stops the desktop offering an update it cannot install. The 0.11.2 release
-adds reset confirmation, provider-scoped metadata retry coordination, explicit
-admission evidence and current Grok billing support.
+The 0.11.5 release reads the live Claude weekly pool when the session row omits
+a reset, keeps glance and doctor honest about leftover versus spent, retires the
+shared HTTP client on MCP shutdown, and keeps OAuth token ownership through
+settlement. The 0.11.4 release rejects a quota reset boundary that advances with
+the clock while nothing has been consumed, withdraws stale meters past an age
+ceiling, and stops the desktop offering an update it cannot install. The 0.11.2
+release adds reset confirmation, provider-scoped metadata retry coordination,
+explicit admission evidence and current Grok billing support.
 The previous increments provide inspectable desktop models, conservative
 hardware evidence, and tested advisory harness and Agent Plugins setup. Further
-work closes the independent credential and shutdown lifecycle gaps and improves
-native use before expanding local-only promises.
+work still needs native Claude Keychain discovery, idle-machine grant evidence,
+and native identity before expanding local-only promises.
 The September research records the current code baseline, primary sources,
 uncertainties, and concrete tests for
 [local models](docs/research/2026-09-local-models.md),
@@ -114,31 +117,27 @@ reports are dated evidence; this section owns the execution order.
 
 **Build in this order**
 
-1. **Close the two live provider-truth gaps.** Both were found against real
-   signed-in accounts, and both are invisible to hosted CI, which is why they
-   lead. Antigravity reads the Cloud Code allowance while usage lands in the
-   `agy` shared pool, so it reported a permanently full balance behind a reset
-   boundary that advanced with the clock. 0.11.3 rejects that reading rather
-   than routing on it, so a drifted Antigravity card is now the expected state
-   rather than a regression; closing the gap needs a source that reports the
-   pool actually spent, validated against an account whose consumption is
-   known. Separately, Claude stores its macOS credentials in the login Keychain
-   rather than `~/.claude/.credentials.json`, so every normally signed-in macOS
-   user sees Claude as an error; `os_secret_store.dart` already implements the
-   Keychain read but is wired only to Antigravity. Prove the credential path on
-   a native signed-in host, with fixtures for both storage shapes, and without
-   writing any host credential file.
+1. **Close the remaining live provider-truth gap.** Both gaps were found
+   against real signed-in accounts, and both are invisible to hosted CI, which
+   is why they lead. Antigravity now reads the daily Cloud Code grouped summary
+   that `agy` spends (`retrieveUserQuotaSummary` on
+   `daily-cloudcode-pa.googleapis.com`), validated on 2026-09-08 against a
+   Google AI Pro account whose Gemini five-hour and weekly buckets were
+   consumed while the non-prefixed Cloud Code Assist host still reported a
+   full unused balance. The remaining gap is Claude on macOS: it stores its
+   credentials in the login Keychain rather than
+   `~/.claude/.credentials.json`, so every normally signed-in macOS user sees
+   Claude as an error; `os_secret_store.dart` already implements the Keychain
+   read but is wired only to Antigravity. Prove the credential path on a native
+   signed-in host, with fixtures for both storage shapes, and without writing
+   any host credential file.
 2. **Finish credential and shutdown recovery.** Reset confirmation, coalesced
-   return/pause recovery, usage-read ownership, admission and accurate recovery
-   labels are implemented. Next, retain Claude/Codex credential-transaction
-   ownership through original OAuth request settlement while keeping callers'
-   publication deadlines bounded and preserving safe late token rotation.
-   Track nested grant resolution before a worker closes. Separately, stop new
-   MCP snapshot admissions and bound shutdown without allowing a late pending
-   snapshot to restart a closed HTTP client. Preserve existing host-account
-   independence and repeat synthetic late-success, failure, replacement and
-   restart cases. Real idle-machine and original display-disagreement evidence
-   remain distinct from these reproducible regressions.
+   return/pause recovery, usage-read ownership, admission, accurate recovery
+   labels, original OAuth request settlement, nested grant-transaction drain,
+   and MCP shutdown that stops snapshot admissions without recreating a closed
+   HTTP client are implemented. Preserve existing host-account independence.
+   Real idle-machine and original display-disagreement evidence remain distinct
+   from these reproducible regressions.
 3. **Establish execution scope before expanding local-only advice.** The
    explicit upstream veto, declared reasoning support, and conservative Windows
    GPU correction are in place. Next, require a bounded positive producer and
@@ -158,13 +157,14 @@ reports are dated evidence; this section owns the execution order.
    views and a wide mini strip; captures follow the product instead of driving
    one-off layouts.
 5. **Extend inspectable choices across desktop and `top`.** The desktop model
-   detail is shipped. Add keyboard-accessible model detail to `top` and a bounded
-   comparison of reported capabilities and fit, reusing the same registry and
-   displayed snapshot. Answer: what is eligible, what is loaded, which
+   detail is shipped. `top` `m` now inspects the selected local runtime with the
+   same registry order: loaded first, then installed, with reported context,
+   capabilities, eligibility, and a remainder for large inventories. Host
+   pressure stays on the selected row. Next, add a bounded side-by-side
+   comparison of reported capabilities and fit, and keep useful detail readable
+   at larger text sizes. Answer remains: what is eligible, what is loaded, which
    context and capabilities are known, why a model is eligible or excluded, and
-   what to do when evidence is missing. Show loaded models first, installed
-   inventory second, and host pressure separately. Keep useful detail readable
-   at narrow widths and larger text sizes.
+   what to do when evidence is missing.
 6. **Make everyday native use dependable.** Prioritize honest GPU evidence and
    runtime reachability, Linux behavior when a tray host is absent, coalesced
    freshness recovery after sleep or foregrounding, and Windows/WSL/host scope.
@@ -461,7 +461,7 @@ plan semantics remain uneven.
 
 ## Current state
 
-The current line, **0.11.4**, is the stable release version and carries
+The current line, **0.11.5**, is the stable release version and carries
 the latest hardening inventory described in [Next](#next). The stable line
 contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
@@ -486,9 +486,12 @@ upstream and embedding-only admission gaps. Its native
 [release](https://github.com/blisspixel/quotabot/actions/runs/33977671639) and
 [install lifecycle](https://github.com/blisspixel/quotabot/actions/runs/33980712404)
 passed, with matching CLI and desktop payloads installed and verified on Windows.
-The 0.11.4 increment rejects unverifiable reset boundaries, bounds how long a
-cached percentage may still be drawn as a meter, and makes local host evidence
-and the desktop update path state only what they can support. The 0.11.2
+The 0.11.5 increment admits current Claude session rows that omit a reset,
+stops MCP snapshots from recreating a closed HTTP client, and keeps OAuth
+token ownership through settlement. The 0.11.4 increment rejects unverifiable
+reset boundaries, bounds how long a cached percentage may still be drawn as a
+meter, and makes local host evidence and the desktop update path state only
+what they can support. The 0.11.2
 increment adds bounded reset recovery, provider-specific usage
 coordination, explicit request admission, and modern Grok billing. Each new tag
 must repeat the native build and installation gates.
@@ -723,12 +726,12 @@ provider, before a forecast is built on top of it.
   without exposing or guessing the account identity. Reconnection and an exact
   current provider row remain required today.
 - Pin every remaining supported response shape with sanitized fixtures.
-- **Done:** Antigravity weekly-window semantics resolved from live evidence. The
-  Cloud Code endpoint reports each model's single binding limit with no window
-  type; quotabot surfaces the account's most-constrained one as a single weekly
-  window with its true reset, rather than a reset-delta guess that mislabeled a
-  near-term weekly as "5h". The separate burst limit and per-model-group
-  breakdown are not exposed by this endpoint and stay in the per-model quotas.
+- **Done:** Antigravity weekly-window semantics resolved from live evidence, then
+  replaced by the grouped daily Cloud Code summary. `retrieveUserQuotaSummary`
+  names weekly and five-hour buckets for the Gemini and Claude/GPT pools, so
+  the account card no longer infers cadence from a reset delta or a single
+  model-facing remainingFraction. Per-model catalog rows remain gates onto
+  those pools and are never added together.
 - **Done:** prefer LM Studio's current `GET /api/v1/models` contract, preserving
   v0 and OpenAI-compatible fallbacks. Parse loaded instances, context, size,
   quantization, and capability evidence without loading or invoking a model.

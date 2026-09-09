@@ -11,9 +11,10 @@ order.
 
 ## 1. Antigravity reads an allowance the user is not spending
 
-**Open. Mitigated in 0.11.3, not solved.**
+**Closed, 2026-09-08.** Mitigated in 0.11.3 by rejecting a sliding unused
+reset; solved by reading the daily Cloud Code grouped summary `agy` uses.
 
-The adapter calls
+The previous adapter called
 `https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels`. Against a
 correctly authenticated account whose grant had refreshed hours earlier, every
 one of 21 models returned `remainingFraction: 1.0` with one shared `resetTime`
@@ -30,21 +31,20 @@ explanation was eliminated: identity is bound to the token rather than to local
 state and fails closed on mismatch, the credential was current, `parseReset`
 correctly reads an absolute epoch, and the read was live rather than cached.
 
-The remaining explanation is that this endpoint reports the Cloud Code and
-Gemini Code Assist allowance while Antigravity usage lands in the `agy` shared
-pool. Google moved free, Pro and Ultra users off Gemini CLI on 2026-06-18 and
-onto the closed-source Antigravity CLI, which draws one shared quota that drains
-faster than the previous split arrangement
+That host reports the Cloud Code and Gemini Code Assist allowance. Antigravity
+usage lands in the `agy` shared pool on
+`https://daily-cloudcode-pa.googleapis.com`. Google moved free, Pro and Ultra
+users off Gemini CLI on 2026-06-18 and onto the closed-source Antigravity CLI,
+which draws one shared quota that drains faster than the previous split
+arrangement
 ([The New Stack, accessed 2026-09-06](https://thenewstack.io/google-antigravity-cli/)).
-quotabot's own passive read already disagrees with the live one and says so:
-"Local Antigravity status reports higher rate limits."
-
-0.11.3 rejects the reading rather than routing on it. **A drifted Antigravity
-card is the expected state on 0.11.3 and later, not a regression.** Closing this
-needs an endpoint that reports the pool `agy` actually spends; the roadmap
-already records that no machine-readable Antigravity balance API is documented.
-Any candidate must be validated against an account whose consumption is known
-before admission.
+On 2026-09-08, against a signed-in Google AI Pro account that was actively
+using `agy`, `retrieveUserQuotaSummary` on the daily host returned Gemini
+weekly remaining about 0.72 and five-hour remaining about 0.44, while the same
+token on the non-prefixed host still returned remainingFraction 1.0 on every
+Gemini and Claude/GPT bucket. The adapter now uses the daily host and the
+grouped summary for account windows. 0.11.3's never-approaches rule remains as
+a backstop for a weekly window that slides with zero usage.
 
 ## 2. Claude is undiscoverable on macOS
 
@@ -130,9 +130,10 @@ and it must be read alongside `total_slots`.
 
 ## Acceptance for the open items
 
-- An Antigravity balance source is admitted only with dated evidence from an
-  account whose consumption is independently known, and only after the reading
-  survives the never-approaches rule.
+- Antigravity included-quota windows come from `retrieveUserQuotaSummary` on
+  the daily Cloud Code host, with dated evidence from an account whose
+  consumption is independently known. The never-approaches rule remains a
+  backstop for a weekly window that slides with zero usage.
 - The macOS Claude credential path is proven on a native signed-in host, with
   fixtures for both the Keychain-present and file-present cases, and without
   writing any host credential file.

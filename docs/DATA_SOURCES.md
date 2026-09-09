@@ -202,7 +202,11 @@ PROV-DM conformance.
   `anthropic-beta: oauth-2025-04-20` header. quotabot never writes the host
   credentials file.
 - Current responses provide a `limits` array with shared session and weekly rows
-  plus model-scoped weekly rows, each carrying a percent and ISO `resets_at`.
+  plus model-scoped weekly rows, each carrying a percent. Weekly rows also carry
+  ISO `resets_at`. A current session row may omit `resets_at` (JSON null); that
+  is a 5h window with unknown reset, not a reason to drop the live weekly bar
+  or to quarantine the observation as "5h reset disappeared". The 5h window
+  disappearing entirely is still drift.
   Older responses expose equivalent `five_hour`, `seven_day`, and per-model
   blocks with `utilization`; those remain a compatibility fallback only when
   the combined observation proves both shared binding pools. Admission is
@@ -290,8 +294,12 @@ PROV-DM conformance.
 
 - Host account: the exact first-party OIDC/external scope in
   `~/.grok/auth.json`, issued by `https://auth.x.ai` for the supported public
-  Grok CLI client. Personal and team principals produce separate opaque pool
-  identities. Email is not a quota pool. API-key, customer-issuer, staging and
+  Grok CLI client. Personal principals are `principal_type` `User` or omit the
+  type; a personal row may still carry `principal_id` and `team_id`, which do
+  not select the Team quota pool. Team principals require `principal_type`
+  `Team` with matching `principal_id` and `team_id`. Personal and team
+  principals produce separate opaque pool identities. Email is not a quota pool.
+  API-key, customer-issuer, staging and
   legacy WebLogin records do not select this transport; legacy users receive an
   explicit re-login step.
   Old email-based Grok profile filters remain exact and can require reselection;
@@ -352,20 +360,23 @@ State lives in the Antigravity globalStorage SQLite database at
 - Live usage: the quota endpoint only accepts tokens minted by Antigravity's own
   OAuth client and an onboarded project, so `login antigravity` uses that public
   client and the adapter runs `:onboardUser` (retried) to provision the project,
-  then calls the Cloud Code API
-  (`https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`, then
-  `:fetchAvailableModels`) for per-model `quotaInfo` with `remainingFraction`,
-  `resetTime`, and `isExhausted`. A present `isExhausted` that is not a boolean
-  rejects the live table. `isExhausted: true` on a row with a reset is 100%
-  used, even when `remainingFraction` still reads full. These are quota metadata
-  calls, not generation,
-  so they cost no tokens. Antigravity's product surface currently describes two
-  shared pools, one for Gemini models and one for Claude/GPT models, each with a
-  weekly limit and a five-hour limit. The endpoint exposes only model-facing
-  binding fractions and resets, without pool identity or window type. quotabot
-  therefore preserves the model gates but never sums them or describes them as
-  independent balances.
-  Non-metered helper models the endpoint lists alongside real ones - tab-completion
+  then calls the daily Cloud Code API that `agy` uses
+  (`https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`, then
+  `:retrieveUserQuotaSummary`, then `:fetchAvailableModels`). The grouped
+  summary is the pool Antigravity spends: named Gemini and Claude/GPT groups,
+  each with a weekly bucket and a five-hour bucket carrying
+  `remainingFraction`, `resetTime`, and a `window` of `weekly` or `5h`. The
+  non-prefixed `cloudcode-pa.googleapis.com` host reports `remainingFraction`
+  1.0 for those Gemini buckets, which is the Cloud Code Assist allowance, not
+  the shared `agy` pool, so it is not used. These are quota metadata calls, not
+  generation, so they cost no tokens. Until typed shared pools, the account card
+  shows one `5h` and one `weekly` window: the most-constrained bucket of each
+  kind. A spent longer window still binds routing. Per-model
+  `fetchAvailableModels` rows remain model-facing gates and are never added
+  together. A present `isExhausted` that is not a boolean rejects that live
+  table. `isExhausted: true` on a row with a reset is 100% used, even when
+  `remainingFraction` still reads full.
+  Non-metered helper models the model catalog lists alongside real ones - tab-completion
   and chat models that carry no reset window - are skipped rather than rejecting
   the whole table. A metered row (one that carries a reset window) whose fraction
   is unparseable still rejects the live table so a hidden sibling cannot overstate
@@ -374,7 +385,8 @@ State lives in the Antigravity globalStorage SQLite database at
   otherwise valid model rows between reads as rollout and account availability
   change. A removed row no longer quarantines every surviving Antigravity quota;
   surviving rows still receive reset and monotonicity validation, while an empty
-  or malformed live table still fails closed.
+  or malformed live table still fails closed. A malformed grouped summary does
+  not fall back to the model catalog for account windows.
 - The local `userStatus` cache is this-machine state. It is used for account and
   plan discovery, and as an offline last-known fallback when live quota is
   unavailable. A successful live read is preferred and is not overridden by local
@@ -385,21 +397,16 @@ State lives in the Antigravity globalStorage SQLite database at
   are never stored. A 401 or 403 keeps the local fallback with reconnect
   guidance; a timeout, 429, or 5xx remains failed live evidence so last-trusted
   server quota can stay visibly stale and the adaptive refresh can back off.
-- The Code Assist tier field reports `free-tier` even for paid accounts, so it is
-  not used as a plan signal; when the quota endpoint returns nothing the adapter
-  says so honestly rather than mislabeling the account as free.
-- Antigravity's Cloud Code endpoint reports each model's single binding limit -
-  `{remainingFraction, resetTime}` - with no field naming its Gemini or
-  Claude/GPT shared pool or whether the binding cap is weekly or five-hour.
-  quotabot surfaces the account's most-constrained binding limit as a single
-  conservative weekly headline with its true reset,
-  rather than guessing the window type from the reset delta, which mislabeled a
-  weekly whose reset happened to fall within a few hours as a "5h" window. The
-  separate five-hour limit and explicit shared-pool breakdown that Antigravity's
-  own UI shows are not exposed by this endpoint; per-model detail is carried by
-  model-facing gates. These gates may repeat one shared balance and are never
-  added together. A reset beyond eight days out (a week plus a day of buffer) is
-  treated as an indeterminate balance and not asserted as a window.
+- The Code Assist `currentTier` field reports `free-tier` even for paid
+  accounts, so it is not used as a plan signal. When `loadCodeAssist` includes
+  `paidTier`, that name is the plan (for example Google AI Pro). When the quota
+  endpoint returns nothing the adapter says so honestly rather than mislabeling
+  the account as free.
+- A reset beyond eight days out (a week plus a day of buffer) on the
+  `fetchAvailableModels` fallback parser is treated as an indeterminate
+  balance and not asserted as a window. The grouped summary already names
+  weekly versus five-hour, so that path does not guess cadence from the reset
+  delta.
 - The adapter constructs the SQLite path cross-platform (Windows APPDATA, macOS
   Library, Linux XDG) and scans Antigravity profile directories. Each active
   account gets its own live read when a matching account grant, active CLI token,
@@ -509,10 +516,11 @@ unreadable or non-regular marker entry fails closed without trying credentials.
   unverified; whole-database and WAL modification times are unrelated shared
   state and never make it current. Timestamped evidence older than one hour
   remains stale until Cursor refreshes its usage view.
-- Account shown automatically for duplicate-provider cards so two accounts are
-  never visually ambiguous. The global "Show account names" setting controls
-  whether those duplicate-account labels are exposed; single-account labels
-  remain hidden.
+- Duplicate emails can still label compact route, notifications, and group
+  headers when "Show account names" is on, so two accounts are never ambiguous
+  there. Collapsed quota cards keep the provider name; opened detail shows the
+  account, including short credential digests. Single-account labels remain
+  hidden at a glance.
 - Cursor's supported team Admin API can report current-cycle on-demand spend and
   effective limits, but it does not document the current on-demand-enabled
   toggle, its enforcement can lag, and pooled Enterprise limits have different

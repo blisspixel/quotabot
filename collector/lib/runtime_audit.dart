@@ -366,13 +366,18 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
             dataClass: 'credential'),
       ],
       network: [
-        _https('POST', 'cloudcode-pa.googleapis.com',
+        _https('POST', 'daily-cloudcode-pa.googleapis.com',
             '/v1internal:loadCodeAssist', 'Antigravity Code Assist metadata'),
-        _https('POST', 'cloudcode-pa.googleapis.com', '/v1internal:onboardUser',
-            'Antigravity Code Assist onboarding'),
+        _https('POST', 'daily-cloudcode-pa.googleapis.com',
+            '/v1internal:onboardUser', 'Antigravity Code Assist onboarding'),
         _https(
             'POST',
-            'cloudcode-pa.googleapis.com',
+            'daily-cloudcode-pa.googleapis.com',
+            '/v1internal:retrieveUserQuotaSummary',
+            'Antigravity grouped weekly and five-hour quota metadata'),
+        _https(
+            'POST',
+            'daily-cloudcode-pa.googleapis.com',
             '/v1internal:fetchAvailableModels',
             'Antigravity per-model quota metadata'),
         _https('POST', 'oauth2.googleapis.com', '/token',

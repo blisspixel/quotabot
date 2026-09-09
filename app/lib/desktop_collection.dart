@@ -2,10 +2,9 @@ import 'dart:async';
 import 'dart:isolate';
 
 import 'package:quotabot_collector/collector.dart'
-    show collectAll, drainActiveAdapterCollections;
+    show collectAll, settleOwnedCollectionWork;
 import 'package:quotabot_collector/http_client.dart';
 import 'package:quotabot_collector/models.dart';
-import 'package:quotabot_collector/provider_read_gate.dart';
 
 /// A reader and its data must be sendable to a worker isolate. Production uses
 /// the collector directly; test readers use synthetic metadata only.
@@ -234,8 +233,9 @@ void _collectionWorker(_WorkerInput input) {
     if (!closing || collecting || draining) return;
     draining = true;
     // The outer fleet must finish first: it can still be setting up a gate.
-    await drainActiveAdapterCollections();
-    await ProviderReadGate.drainActive();
+    // Grant-refresh transactions can outlive a publication deadline, so they
+    // drain here with adapters and metadata read gates.
+    await settleOwnedCollectionWork();
     // Closing a pooled client before original adapters settle would cancel
     // ungated metadata reads. After settlement it releases idle sockets so the
     // worker exits without waiting for a remote keep-alive timeout.

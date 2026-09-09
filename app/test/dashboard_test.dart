@@ -524,6 +524,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Next: Codex'), findsOneWidget);
+    final nextLine = tester.widget<Text>(
+      find.textContaining('Next: Codex').first,
+    );
+    expect(nextLine.style?.fontWeight, FontWeight.w600);
     final details = find.byTooltip('Explain recommendation');
     expect(details, findsOneWidget);
 
@@ -1350,7 +1354,8 @@ void main() {
 
     const warning = 'Settings not saved (storage unavailable)';
     final warningTooltip = find.byWidgetPredicate(
-      (widget) => widget is Tooltip && widget.message == warning,
+      (widget) =>
+          widget is Tooltip && (widget.message?.contains(warning) ?? false),
     );
     expect(find.byTooltip('Expand'), findsOneWidget);
     expect(warningTooltip, findsOneWidget);
@@ -1361,7 +1366,10 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.bySemanticsLabel(warning), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(RegExp(RegExp.escape(warning))),
+      findsOneWidget,
+    );
   });
 
   testWidgets('tray initialization failure explains close behavior', (
@@ -1714,10 +1722,15 @@ void main() {
       find.bySemanticsLabel(RegExp(r'No quota data.*Open decision details')),
       findsOneWidget,
     );
-    expect(find.bySemanticsLabel(warning), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(RegExp(RegExp.escape(warning))),
+      findsOneWidget,
+    );
     expect(
       find.bySemanticsLabel(
-        'No current quota data; showing cached or unavailable providers',
+        RegExp(
+          'No current quota data; showing cached or unavailable providers',
+        ),
       ),
       findsOneWidget,
     );
@@ -1769,7 +1782,10 @@ void main() {
       find.bySemanticsLabel(RegExp(r'No quota data.*Open decision details')),
       findsOneWidget,
     );
-    expect(find.bySemanticsLabel(warning), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(RegExp(RegExp.escape(warning))),
+      findsOneWidget,
+    );
     for (final tooltip in ['Expand', 'Close']) {
       final control = find.byTooltip(tooltip);
       expect(control, findsOneWidget);
@@ -2215,11 +2231,11 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Latest stable: 0.10.0'), findsNothing);
-
-    // The app cannot install its own update, so no control here may promise
-    // one. Every action opens a release page.
     expect(
-      find.textContaining('cannot update the desktop app'),
+      find.descendant(
+        of: find.byType(AlertDialog).last,
+        matching: find.widgetWithText(FilledButton, 'Install latest update'),
+      ),
       findsOneWidget,
     );
     expect(
@@ -2227,11 +2243,48 @@ void main() {
       findsNothing,
     );
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Open stable release'));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog).last,
+        matching: find.widgetWithText(TextButton, 'Open stable release'),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(opened, [latest.url]);
     expect(tester.takeException(), isNull);
 
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('settings can install the latest CLI update', (tester) async {
+    await _useDesktopSurface(tester);
+    var installs = 0;
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(),
+          cliUpdater: () async {
+            installs++;
+            return const QuotabotCliInstallResult(
+              ok: true,
+              message: 'Installed CLI 0.12.0.',
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    final install = find.byKey(const ValueKey('settings-install-update'));
+    await tester.ensureVisible(install);
+    await tester.tap(install);
+    await tester.pump();
+    await tester.pump();
+    expect(installs, 1);
+    expect(find.text('Update installed'), findsOneWidget);
+    expect(find.textContaining('Installed CLI 0.12.0.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -2423,6 +2476,12 @@ void main() {
     await tester.ensureVisible(releases);
     await tester.pumpAndSettle();
     expect(releases, findsOneWidget);
+    expect(find.text('Connections'), findsOneWidget);
+    expect(find.text('Install latest update'), findsOneWidget);
+    final connections = tester.widget<Text>(find.text('Connections'));
+    expect(connections.maxLines, 1);
+    expect(connections.overflow, TextOverflow.ellipsis);
+    expect(connections.softWrap, isFalse);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox());
@@ -2616,6 +2675,7 @@ void main() {
     await tester.pump();
 
     expect(find.textContaining('Next: Claude'), findsOneWidget);
+    expect(find.textContaining('80% included'), findsOneWidget);
     expect(find.textContaining('80% free'), findsWidgets);
 
     await tester.tap(find.byTooltip('Refresh now'));

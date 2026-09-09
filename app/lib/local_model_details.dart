@@ -171,14 +171,17 @@ class _LocalModelDetailsDialogState extends State<LocalModelDetailsDialog> {
 
   Widget _inventorySummary(AppChromeTheme chrome) {
     final hardware = widget.quota.localHardware;
+    final ramTotal = hardware?.systemMemoryTotalBytes;
+    final gpuName = hardware?.gpuName;
+    final gpuTotal = hardware?.gpuMemoryTotalBytes;
+    final gpuUtil = hardware?.gpuUtilizationPercent;
     final hostFacts = <String>[
-      if (hardware?.systemMemoryTotalBytes != null)
-        'RAM: ${_memoryLabel(hardware!.systemMemoryTotalBytes!, hardware.systemMemoryAvailableBytes)}',
-      if (hardware?.gpuName != null) 'GPU: ${hardware!.gpuName}',
-      if (hardware?.gpuMemoryTotalBytes != null)
-        'GPU memory: ${_memoryLabel(hardware!.gpuMemoryTotalBytes!, hardware.gpuMemoryAvailableBytes)}',
-      if (hardware?.gpuUtilizationPercent != null)
-        'GPU activity: ${hardware!.gpuUtilizationPercent}%',
+      if (ramTotal != null)
+        'RAM: ${_memoryLabel(ramTotal, hardware?.systemMemoryAvailableBytes)}',
+      if (gpuName != null) 'GPU: $gpuName',
+      if (gpuTotal != null)
+        'GPU memory: ${_memoryLabel(gpuTotal, hardware?.gpuMemoryAvailableBytes)}',
+      if (gpuUtil != null) 'GPU activity: $gpuUtil%',
     ];
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),

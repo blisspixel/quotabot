@@ -58,7 +58,11 @@ Widget _wrap(
   home: Scaffold(body: child),
 );
 
-Widget _tile(ProviderQuota quota, {VoidCallback? onToggle}) => Align(
+Widget _tile(
+  ProviderQuota quota, {
+  VoidCallback? onToggle,
+  bool expanded = false,
+}) => Align(
   alignment: Alignment.topCenter,
   child: SizedBox(
     width: 340,
@@ -66,6 +70,7 @@ Widget _tile(ProviderQuota quota, {VoidCallback? onToggle}) => Align(
       quota: quota,
       cardColor: const Color(0xFF1C1F25),
       nowEpochSeconds: _now,
+      expanded: expanded,
       onToggle: onToggle,
     ),
   ),
@@ -517,6 +522,7 @@ void main() {
       _wrap(
         _tile(
           _quota(models: const [ModelInfo(id: 'keyboard-model', local: true)]),
+          expanded: true,
           onToggle: () => toggles++,
         ),
       ),
@@ -617,6 +623,8 @@ void main() {
       expect(find.byType(LocalModelDetailsButton), findsNothing);
       await tester.tap(find.byTooltip('Expand'));
       await tester.pumpAndSettle();
+      await tester.tap(find.byType(ProviderTile));
+      await tester.pumpAndSettle();
       await tester.tap(find.byType(LocalModelDetailsButton));
       await tester.pumpAndSettle();
       expect(_model('compact-model'), findsOneWidget);
@@ -680,6 +688,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(collects, 1);
+    await tester.tap(find.byType(ProviderTile));
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(LocalModelDetailsButton));
     await tester.pumpAndSettle();
     expect(_model('snapshot-model'), findsOneWidget);

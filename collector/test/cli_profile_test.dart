@@ -160,4 +160,55 @@ void main() {
       expect(result.stderr as String, isNot(contains('no provider named')));
     }
   });
+
+  test('hide persists on the default profile and drops that provider',
+      () async {
+    final hide = await runCli(['hide', 'claude', '--no-color']);
+    expectExitCode(hide, 0);
+    expect(hide.stdout as String, contains('hiding claude'));
+
+    final listed = await runCli(['hidden', '--no-color']);
+    expectExitCode(listed, 0);
+    expect(listed.stdout as String, contains('claude'));
+
+    final json = jsonDecode(
+      (await runCli(['--json'])).stdout as String,
+    ) as Map<String, dynamic>;
+    expect(
+      (json['providers'] as List).map((p) => p['provider']),
+      isNot(contains('claude')),
+    );
+
+    final show = await runCli(['unhide', 'claude', '--no-color']);
+    expectExitCode(show, 0);
+    expect(show.stdout as String, contains('showing claude'));
+  }, timeout: const Timeout(Duration(minutes: 1)));
+
+  test('hidden lists leftover desktop prefs until hide writes both stores',
+      () async {
+    final prefsDir = Directory('${temp.path}/quotabot/app')
+      ..createSync(recursive: true);
+    File('${prefsDir.path}/prefs.json').writeAsStringSync(
+      jsonEncode({
+        'hidden': ['lemonade'],
+        'compact': true,
+      }),
+    );
+
+    final listed = await runCli(['hidden', '--no-color']);
+    expectExitCode(listed, 0);
+    expect(listed.stdout as String, contains('lemonade'));
+
+    final hide = await runCli(['hide', 'kiro', '--no-color']);
+    expectExitCode(hide, 0);
+
+    final after = await runCli(['hidden', '--no-color']);
+    expect(after.stdout as String, contains('kiro'));
+    expect(after.stdout as String, contains('lemonade'));
+    final prefs = jsonDecode(
+      File('${prefsDir.path}/prefs.json').readAsStringSync(),
+    ) as Map<String, dynamic>;
+    expect(prefs['hidden'], containsAll(['kiro', 'lemonade']));
+    expect(prefs['compact'], isTrue);
+  }, timeout: const Timeout(Duration(minutes: 1)));
 }

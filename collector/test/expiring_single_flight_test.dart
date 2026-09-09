@@ -85,4 +85,71 @@ void main() {
       throwsArgumentError,
     );
   });
+
+  test('stopAdmitting joins the in-flight load and starts no new one',
+      () async {
+    final release = Completer<int>();
+    var loads = 0;
+    final cache = ExpiringSingleFlight<int>(
+      load: () {
+        loads++;
+        return release.future;
+      },
+      now: () => 100,
+    );
+
+    final first = cache.read();
+    cache.stopAdmitting();
+    expect(cache.isAdmitting, isFalse);
+    final joined = cache.read();
+    expect(loads, 1);
+    release.complete(4);
+    expect(await first, 4);
+    expect(await joined, 4);
+    expect(loads, 1);
+  });
+
+  test('stopAdmitting returns a cached value instead of refreshing it',
+      () async {
+    var now = 100;
+    var loads = 0;
+    final cache = ExpiringSingleFlight<int>(
+      load: () async => ++loads,
+      now: () => now,
+    );
+
+    expect(await cache.read(), 1);
+    cache.stopAdmitting();
+    now = 200;
+    expect(await cache.read(), 1);
+    expect(loads, 1);
+  });
+
+  test('stopAdmitting with no cache and no in-flight load rejects readers',
+      () async {
+    final cache = ExpiringSingleFlight<int>(
+      load: () async => 1,
+      now: () => 100,
+    );
+    cache.stopAdmitting();
+    expect(() => cache.read(), throwsStateError);
+  });
+
+  test('settle waits for the in-flight load and ignores its error', () async {
+    final release = Completer<int>();
+    final cache = ExpiringSingleFlight<int>(
+      load: () => release.future,
+      now: () => 100,
+    );
+
+    final read = cache.read();
+    var settled = false;
+    final waiting = cache.settle().then((_) => settled = true);
+    await Future<void>.delayed(Duration.zero);
+    expect(settled, isFalse);
+    release.completeError(StateError('load failed'));
+    await waiting;
+    expect(settled, isTrue);
+    await expectLater(read, throwsStateError);
+  });
 }

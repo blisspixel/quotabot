@@ -3,6 +3,7 @@ library;
 
 import 'dart:async';
 
+import 'credential_identity.dart';
 import 'model_quota_matching.dart';
 import 'provider_source.dart';
 
@@ -1335,6 +1336,23 @@ bool hasSpecificQuotaAccount(String account) {
   return normalized.isNotEmpty &&
       !const {'unknown', 'default', 'installed', 'cli'}.contains(normalized);
 }
+
+final _localInventoryAccountPattern =
+    RegExp(r'^\d+\s+models?$', caseSensitive: false);
+
+/// True when [account] is a local runtime inventory summary such as `14 models`,
+/// not a login identity.
+bool isLocalInventoryAccount(String account) =>
+    _localInventoryAccountPattern.hasMatch(account.trim());
+
+/// True when a compact glance row can show this account. Irreversible
+/// credential digests and local inventory counts belong in JSON, verify, and
+/// opened card detail, not in doctor, top, suggest, collapsed card titles, or
+/// group headers.
+bool quotaAccountBelongsOnGlance(String account) =>
+    hasSpecificQuotaAccount(account) &&
+    !isOpaqueCredentialIdentity(account) &&
+    !isLocalInventoryAccount(account);
 
 /// Internal key used when local analytics need account-specific history. Public
 /// JSON keeps provider and account as separate fields; this is only for maps.

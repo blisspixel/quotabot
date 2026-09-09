@@ -466,10 +466,11 @@ List<ModelQuota> claudeModelQuotas(
     claudeLiveUsage(data, observedAt: observedAt)?.modelQuotas ?? const [];
 
 /// Parses Anthropic's current `limits` array. Recognized rows need a complete
-/// kind/group/scope pairing, bounded numeric percent, and positive ISO reset.
-/// `is_active` is advisory: Claude reports enforced weekly rows as inactive
-/// while still displaying them in `/usage`. Unknown kinds remain additive only
-/// when they do not carry any canonical quota marker.
+/// kind/group/scope pairing and a bounded numeric percent. Weekly rows also
+/// need a positive ISO reset. A session row may omit `resets_at`. `is_active`
+/// is advisory: Claude reports enforced weekly rows as inactive while still
+/// displaying them in `/usage`. Unknown kinds remain additive only when they
+/// do not carry any canonical quota marker.
 ({
   bool valid,
   List<QuotaWindow> windows,
@@ -497,8 +498,14 @@ List<ModelQuota> claudeModelQuotas(
     if (kind == 'session' || kind == 'weekly_all') {
       final label = _claudeLimitLabel(row);
       final percent = _claudeCanonicalPercent(row);
-      final reset = _claudeCanonicalReset(row);
-      if (label == null || percent == null || reset == null) {
+      final reset = _claudeOptionalReset(row);
+      // A current session row can omit resets_at. Dropping the whole account
+      // for that would freeze last-known 5h and weekly while the live weekly
+      // bar is already spent. Weekly still needs a parseable reset.
+      if (label == null ||
+          percent == null ||
+          reset.malformed ||
+          (kind == 'weekly_all' && reset.value == null)) {
         return (
           valid: false,
           windows: const [],
@@ -508,7 +515,7 @@ List<ModelQuota> claudeModelQuotas(
       final candidate = QuotaWindow(
         label: label,
         usedPercent: percent,
-        resetsAt: reset,
+        resetsAt: reset.value,
       );
       final current = byLabel[label];
       if (current == null ||
@@ -522,8 +529,11 @@ List<ModelQuota> claudeModelQuotas(
       final model =
           row['group'] == 'weekly' ? _claudeScopedModelName(row) : null;
       final percent = _claudeCanonicalPercent(row);
-      final reset = _claudeCanonicalReset(row);
-      if (model == null || percent == null || reset == null) {
+      final reset = _claudeOptionalReset(row);
+      if (model == null ||
+          percent == null ||
+          reset.malformed ||
+          reset.value == null) {
         return (
           valid: false,
           windows: const [],
@@ -533,7 +543,7 @@ List<ModelQuota> claudeModelQuotas(
       final candidate = ModelQuota(
         model: model,
         usedPercent: percent,
-        resetsAt: reset,
+        resetsAt: reset.value,
         windowLabel: 'weekly',
       );
       final key = model.toLowerCase();
@@ -715,8 +725,13 @@ double? _claudeCanonicalPercent(Map<dynamic, dynamic> row) {
   return _strictBoundedPercent(row['percent']);
 }
 
-int? _claudeCanonicalReset(Map<dynamic, dynamic> row) {
-  return _strictClaudeIsoEpoch(row['resets_at']);
+({bool malformed, int? value}) _claudeOptionalReset(Map<dynamic, dynamic> row) {
+  if (!row.containsKey('resets_at') || row['resets_at'] == null) {
+    return (malformed: false, value: null);
+  }
+  final value = _strictClaudeIsoEpoch(row['resets_at']);
+  if (value == null) return (malformed: true, value: null);
+  return (malformed: false, value: value);
 }
 
 String? _claudeScopedModelName(Map<dynamic, dynamic> row) {
@@ -872,19 +887,168 @@ int? parseIsoToEpoch(dynamic v) {
 /// asserted as a plan-level window.
 const _antigravityMaxWindowHorizon = 8 * 86400;
 
+/// Account-level Antigravity windows from `retrieveUserQuotaSummary`.
+///
+/// The daily Cloud Code host reports named shared pools (Gemini models, and
+/// Claude and GPT models), each with a weekly bucket and a five-hour bucket.
+/// Until typed shared pools, the account card shows one `5h` and one `weekly`
+/// window: the most-constrained bucket of each kind. A spent longer window still
+/// binds routing. Returns null when the payload is present but unreadable so
+/// callers fail closed instead of falling back to the always-full
+/// `fetchAvailableModels` table on the non-daily host.
+List<QuotaWindow>? antigravityQuotaSummaryWindows(Map<String, dynamic>? resp) {
+  final buckets = _antigravityQuotaSummaryBuckets(resp);
+  if (buckets == null) return null;
+  if (buckets.isEmpty) return const [];
+
+  QuotaWindow? fiveHour;
+  QuotaWindow? weekly;
+  for (final bucket in buckets) {
+    final used = ((1 - bucket.remainingFraction) * 100).toDouble();
+    final candidate = QuotaWindow(
+      label: bucket.label,
+      usedPercent: used,
+      resetsAt: bucket.resetsAt,
+    );
+    if (bucket.label == '5h') {
+      fiveHour = _tighterAntigravityWindow(fiveHour, candidate);
+    } else {
+      weekly = _tighterAntigravityWindow(weekly, candidate);
+    }
+  }
+  return [
+    if (fiveHour != null) fiveHour,
+    if (weekly != null) weekly,
+  ];
+}
+
+/// Group-level Antigravity model quotas from `retrieveUserQuotaSummary`.
+///
+/// Each named pool becomes one row whose used percent is its tightest bucket.
+/// Per-model rows from [antigravityModelQuotasFromLive] remain preferred when
+/// that table is present and metered.
+List<ModelQuota> antigravityQuotaSummaryModelQuotas(
+    Map<String, dynamic>? resp) {
+  final buckets = _antigravityQuotaSummaryBuckets(resp);
+  if (buckets == null || buckets.isEmpty) return const [];
+  final byGroup = <String, _AntigravitySummaryBucket>{};
+  for (final bucket in buckets) {
+    final current = byGroup[bucket.group];
+    if (current == null ||
+        bucket.remainingFraction < current.remainingFraction) {
+      byGroup[bucket.group] = bucket;
+    }
+  }
+  return [
+    for (final bucket in byGroup.values)
+      ModelQuota(
+        model: bucket.group,
+        usedPercent: ((1 - bucket.remainingFraction) * 100).toDouble(),
+        resetsAt: bucket.resetsAt,
+        windowLabel: bucket.label,
+      ),
+  ];
+}
+
+QuotaWindow _tighterAntigravityWindow(QuotaWindow? current, QuotaWindow next) {
+  if (current == null) return next;
+  final currentUsed = current.usedPercent ?? -1;
+  final nextUsed = next.usedPercent ?? -1;
+  if (nextUsed > currentUsed) return next;
+  if (nextUsed < currentUsed) return current;
+  final currentReset = current.resetsAt;
+  final nextReset = next.resetsAt;
+  if (nextReset != null && (currentReset == null || nextReset < currentReset)) {
+    return next;
+  }
+  return current;
+}
+
+typedef _AntigravitySummaryBucket = ({
+  String group,
+  String label,
+  double remainingFraction,
+  int? resetsAt,
+});
+
+/// Parses the grouped weekly and five-hour buckets. Null means the payload is
+/// structurally untrustworthy; an empty list means there is no metered pool.
+List<_AntigravitySummaryBucket>? _antigravityQuotaSummaryBuckets(
+  Map<String, dynamic>? resp,
+) {
+  if (resp == null) return const [];
+  if (!resp.containsKey('groups')) return const [];
+  final groups = resp['groups'];
+  if (groups is! List) return null;
+  final out = <_AntigravitySummaryBucket>[];
+  for (final group in groups) {
+    if (group is! Map) return null;
+    final displayName = group['displayName']?.toString().trim();
+    final groupName = (displayName != null && displayName.isNotEmpty)
+        ? displayName
+        : 'Models';
+    final buckets = group['buckets'];
+    if (buckets == null) continue;
+    if (buckets is! List) return null;
+    for (final bucket in buckets) {
+      if (bucket is! Map) return null;
+      final rawFraction = bucket['remainingFraction'];
+      final remainingFraction = _fraction(rawFraction);
+      if (rawFraction != null && remainingFraction == null) return null;
+      if (remainingFraction == null) continue;
+      final label = _antigravitySummaryWindowLabel(bucket);
+      if (label == null) {
+        // An unlabeled consumed bucket could be the binding pool.
+        if (remainingFraction < 1) return null;
+        continue;
+      }
+      final resetsAt = parseReset(bucket['resetTime']);
+      if (resetsAt == null || resetsAt <= 0) {
+        if (remainingFraction < 1) return null;
+        continue;
+      }
+      out.add((
+        group: groupName,
+        label: label,
+        remainingFraction: remainingFraction,
+        resetsAt: resetsAt,
+      ));
+    }
+  }
+  return out;
+}
+
+String? _antigravitySummaryWindowLabel(Map<Object?, Object?> bucket) {
+  final window = bucket['window']?.toString().trim().toLowerCase();
+  if (window == '5h' ||
+      window == 'five_hour' ||
+      window == 'five-hour' ||
+      window == 'five hour') {
+    return '5h';
+  }
+  if (window == 'weekly') return 'weekly';
+  final id = bucket['bucketId']?.toString().trim().toLowerCase() ?? '';
+  if (id.endsWith('-5h') || id.contains('5h')) return '5h';
+  if (id.contains('weekly')) return 'weekly';
+  final name = bucket['displayName']?.toString().trim().toLowerCase() ?? '';
+  if (name.contains('five hour') ||
+      name.contains('5-hour') ||
+      name.contains('5 hour') ||
+      name.contains('5h')) {
+    return '5h';
+  }
+  if (name.contains('weekly')) return 'weekly';
+  return null;
+}
+
 /// The account's binding Antigravity limit as a single weekly-allowance window.
 ///
-/// The Cloud Code endpoint reports one `quotaInfo` per model: a single
+/// `fetchAvailableModels` reports one `quotaInfo` per model: a single
 /// `remainingFraction` and `resetTime`, its tightest cap across the plan's
 /// weekly allowance and its short-term burst limit, with no field naming which
-/// window that is. Earlier this was bucketed by reset delta into 5h/daily/weekly
-/// labels, which mislabels a weekly whose reset happens to fall within a few
-/// hours (the common case near a refresh) as a "5h" window. Instead, surface the
-/// most-constrained model's binding limit as the account's weekly allowance -
-/// the cap a subscription user tracks - with its true reset time. The separate
-/// burst limit and the per-model-group breakdown that Antigravity's own CLI
-/// shows are not exposed by this endpoint; per-model detail is carried by
-/// [antigravityModelQuotasFromLive]. A reset beyond
+/// window that is. Live collection prefers [antigravityQuotaSummaryWindows].
+/// This parser remains for the per-model table and for injected tests that
+/// still supply only the model catalog. A reset beyond
 /// [_antigravityMaxWindowHorizon] is treated as an indeterminate balance and not
 /// asserted as a window.
 List<QuotaWindow> antigravityWindows(Map<String, dynamic>? resp, int now) {
@@ -916,8 +1080,12 @@ List<QuotaWindow> antigravityWindows(Map<String, dynamic>? resp, int now) {
 /// This is authoritative and cross-machine, unlike the local `userStatus`
 /// cache (which only reflects usage on the machine that wrote it), so it is
 /// preferred whenever the live read succeeds. Each entry is keyed by the model
-/// id and carries `{quotaInfo: {remainingFraction, resetTime}}`.
-List<ModelQuota> antigravityModelQuotasFromLive(Map<String, dynamic>? resp) {
+/// id and carries `{quotaInfo: {remainingFraction, resetTime}}`. When [windows]
+/// from the quota summary are present, a matching reset stamps [ModelQuota.windowLabel].
+List<ModelQuota> antigravityModelQuotasFromLive(
+  Map<String, dynamic>? resp, {
+  List<QuotaWindow> windows = const [],
+}) {
   final models = _antigravityLiveQuotaRows(resp);
   if (models == null) return const [];
   return models
@@ -927,9 +1095,25 @@ List<ModelQuota> antigravityModelQuotasFromLive(Map<String, dynamic>? resp) {
           usedPercent:
               ((1 - model.remainingFraction) * 100).clamp(0, 100).toDouble(),
           resetsAt: model.resetsAt,
+          windowLabel: _antigravityWindowLabelForReset(model.resetsAt, windows),
         ),
       )
       .toList();
+}
+
+String? _antigravityWindowLabelForReset(
+  int resetsAt,
+  List<QuotaWindow> windows,
+) {
+  String? label;
+  for (final window in windows) {
+    final windowReset = window.resetsAt;
+    if (windowReset == null) continue;
+    if ((windowReset - resetsAt).abs() > 2) continue;
+    if (label != null && label != window.label) return null;
+    label = window.label;
+  }
+  return label;
 }
 
 typedef _AntigravityLiveQuotaRow = ({

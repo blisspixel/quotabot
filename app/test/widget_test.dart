@@ -681,6 +681,7 @@ void main() {
       );
       expect(quotaDisplayKey(_provider('grok', 'default')), 'grok');
       expect(quotaDisplayKey(_provider('grok', 'unknown')), 'grok');
+      expect(quotaDisplayKey(_provider('ollama', '14 models')), 'ollama');
     });
 
     test('keeps distinct provider accounts in setup recovery rows', () {
@@ -737,6 +738,15 @@ void main() {
       expect(quotaShouldShowAccountLabel(quota, {'antigravity': 2}), isTrue);
     });
 
+    test('hides opaque credential labels even with multiple accounts', () {
+      const opaque =
+          'credential:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      final quota = _provider('grok', opaque);
+
+      expect(quotaShouldShowAccountLabel(quota, {'grok': 2}), isFalse);
+      expect(quotaShouldDisambiguateAccount(quota, {'grok': 2}), isTrue);
+    });
+
     test('keeps a flat list when every provider has a single account', () {
       // Different providers signed in with different emails is the common case,
       // not multi-account, so it must not group by email.
@@ -782,6 +792,24 @@ void main() {
         expect(groups.last.quotas.single.provider, 'ollama');
       },
     );
+
+    test('does not group by opaque credential digests', () {
+      const first =
+          'credential:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      const second =
+          'credential:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      final groups = groupProvidersForDisplay([
+        _provider('grok', first),
+        _provider('grok', second),
+      ]);
+
+      expect(groups, hasLength(1));
+      expect(groups.single.account, isNull);
+      expect(groups.single.quotas.map((q) => q.provider).toList(), [
+        'grok',
+        'grok',
+      ]);
+    });
   });
 
   group('desktop route signal', () {
@@ -809,7 +837,8 @@ void main() {
 
       // Compact glance line: route and headroom only, so it never truncates.
       expect(line, contains('Next: Claude'));
-      expect(line, contains('80% free'));
+      expect(line, contains('80% included'));
+      expect(line, isNot(contains('80% free')));
       expect(line, isNot(contains('confidence')));
       expect(line, isNot(contains('after burn')));
       expect(line, isNot(contains('solo@example.com')));
@@ -822,6 +851,7 @@ void main() {
         showAccounts: true,
       );
       expect(detail, contains('scope: whole account'));
+      expect(detail, contains('80% included'));
       expect(detail, contains('60% after burn'));
       expect(detail, contains('medium confidence (67%)'));
       expect(detail, contains('Receipt: qb-$now-'));

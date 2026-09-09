@@ -111,6 +111,67 @@ void main() {
     expect(status.updateAvailable, isFalse);
   });
 
+  test('CLI path uses the owner-only install location', () {
+    if (Platform.isWindows) {
+      const root = r'C:\Users\nicks\AppData\Local';
+      final expected = '$root\\quotabot\\bin\\quotabot.exe';
+      expect(
+        defaultQuotabotCliPath(
+          environment: const {'LOCALAPPDATA': root},
+          exists: (path) => path == expected,
+        ),
+        expected,
+      );
+    } else {
+      const home = '/home/nicks';
+      final expected = '$home/.local/share/quotabot/bin/quotabot';
+      expect(
+        defaultQuotabotCliPath(
+          environment: const {'HOME': home},
+          exists: (path) => path == expected,
+        ),
+        expected,
+      );
+    }
+    expect(
+      defaultQuotabotCliPath(
+        environment: Platform.isWindows
+            ? const {'LOCALAPPDATA': r'C:\Users\nicks\AppData\Local'}
+            : const {'HOME': '/home/nicks'},
+        exists: (_) => false,
+      ),
+      isNull,
+    );
+  });
+
+  test('CLI installer reports the selected version from update JSON', () async {
+    final result = await installQuotabotCliUpdate(
+      executable: 'quotabot',
+      runner: (exe, args) async {
+        expect(exe, 'quotabot');
+        expect(args, ['update', '--json']);
+        return ProcessResult(
+          1,
+          0,
+          jsonEncode({
+            'schema': 'quotabot.update.v1',
+            'installed': true,
+            'target_version': '0.12.0',
+          }),
+          '',
+        );
+      },
+    );
+    expect(result.ok, isTrue);
+    expect(result.message, 'Installed CLI 0.12.0.');
+  });
+
+  test('CLI installer fails closed when the updater is missing', () async {
+    final result = await installQuotabotCliUpdate(executable: '');
+    expect(result.ok, isFalse);
+    expect(result.message, contains('CLI updater was not found'));
+  });
+
   test('release parser ignores drafts, malformed rows, and external URLs', () {
     final status = parseQuotabotReleases([
       release('v9.0.0', draft: true),

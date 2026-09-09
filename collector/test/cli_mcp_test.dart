@@ -316,7 +316,9 @@ void main() {
         await process.stdin.flush();
         // Stdin deliberately stays open: graceful exit requires cancellation of
         // the fixture's signal stream, as it does for the real signal watcher.
-        expect(await process.exitCode.timeout(const Duration(seconds: 10)), 0);
+        // The drain budget is 5s; keep this above that so a slow Windows runner
+        // can still finish after HTTP close.
+        expect(await process.exitCode.timeout(const Duration(seconds: 20)), 0);
       } else {
         process.kill();
         await process.exitCode.timeout(const Duration(seconds: 10));

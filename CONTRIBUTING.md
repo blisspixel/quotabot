@@ -1,7 +1,9 @@
 # Contributing to quotabot
 
 Thanks for your interest. quotabot is a small, local-first tool, and
-contributions that keep it simple and correct are very welcome.
+contributions that keep it simple and correct are very welcome. Agents editing
+this repository follow [CLAUDE.md](CLAUDE.md). The MCP and CLI contract for
+agents using quotabot is [AGENTS.md](AGENTS.md).
 
 ## Ways to help
 

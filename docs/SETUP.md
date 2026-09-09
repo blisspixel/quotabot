@@ -166,7 +166,7 @@ release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` or
 `vMAJOR.MINOR.PATCH-rc.N` selects one exact tag for a reproducible rollback.
 
 The current stable release is
-[v0.11.4](https://github.com/blisspixel/quotabot/releases/tag/v0.11.4). Its
+[v0.11.5](https://github.com/blisspixel/quotabot/releases/tag/v0.11.5). Its
 release workflow enforces the exact immutable 14-asset contract, and its
 unpinned GitHub Latest smoke covers exact-tag installation, upgrade from the
 actual prior stable, persistent state, source setup, stable-channel resolution,

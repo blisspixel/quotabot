@@ -57,6 +57,10 @@ typedef AntigravityFetchModels = Future<Map<String, dynamic>?> Function(
   String access,
   String? project,
 );
+typedef AntigravityFetchQuotaSummary = Future<Map<String, dynamic>?> Function(
+  String access,
+  String? project,
+);
 
 class _AntigravityRequestFailure implements Exception {
   final String method;
@@ -84,14 +88,15 @@ class _AntigravityRequestFailure implements Exception {
 ///
 /// Antigravity is a VS Code fork that stores its account and Google OAuth token
 /// in a globalStorage SQLite database. We read the email and plan from the
-/// `antigravityAuthStatus` protobuf and query live model quota from the Cloud
-/// Code API. After `quotabot login antigravity` the adapter uses its own grant
-/// (see [GoogleAuth]); otherwise it falls back to the access token the IDE
-/// currently holds, then the `agy` OS-keyring grant (Windows Credential Manager,
-/// macOS Keychain, Linux secret-service under `gemini` / `antigravity`), then
-/// `~/.gemini/oauth_creds.json`. These quota calls are metadata lookups and
-/// cost no tokens. Primary account from disk; additional accounts come from
-/// the cross-platform profile scan and per-account caches.
+/// `antigravityAuthStatus` protobuf and query live quota from the daily Cloud
+/// Code API that `agy` itself uses. After `quotabot login antigravity` the
+/// adapter uses its own grant (see [GoogleAuth]); otherwise it falls back to the
+/// access token the IDE currently holds, then the `agy` OS-keyring grant
+/// (Windows Credential Manager, macOS Keychain, Linux secret-service under
+/// `gemini` / `antigravity`), then `~/.gemini/oauth_creds.json`. These quota
+/// calls are metadata lookups and cost no tokens. Primary account from disk;
+/// additional accounts come from the cross-platform profile scan and
+/// per-account caches.
 class AntigravityAdapter {
   static const id = antigravityProviderId;
   static const name = antigravityProviderName;
@@ -101,6 +106,7 @@ class AntigravityAdapter {
   final AntigravityLoadCodeAssist? _loadCodeAssistFn;
   final AntigravityOnboardUser? _onboardUserFn;
   final AntigravityFetchModels? _fetchModelsFn;
+  final AntigravityFetchQuotaSummary? _fetchQuotaSummaryFn;
   final http.Client? _http;
   final Duration _requestTimeout;
   final List<String> Function()? _dbPathSource;
@@ -117,6 +123,7 @@ class AntigravityAdapter {
     AntigravityLoadCodeAssist? loadCodeAssist,
     AntigravityOnboardUser? onboardUser,
     AntigravityFetchModels? fetchModels,
+    AntigravityFetchQuotaSummary? fetchQuotaSummary,
     http.Client? client,
     Duration requestTimeout = const Duration(seconds: 15),
     List<String> Function()? dbPathSource,
@@ -131,6 +138,7 @@ class AntigravityAdapter {
         _loadCodeAssistFn = loadCodeAssist,
         _onboardUserFn = onboardUser,
         _fetchModelsFn = fetchModels,
+        _fetchQuotaSummaryFn = fetchQuotaSummary,
         _http = client,
         _requestTimeout = requestTimeout,
         _dbPathSource = dbPathSource,
@@ -155,7 +163,10 @@ class AntigravityAdapter {
     }
   }
 
-  static const _api = 'https://cloudcode-pa.googleapis.com/v1internal';
+  // The host `agy` uses for quota. The non-prefixed cloudcode-pa host reports
+  // remainingFraction=1 for every Gemini bucket, which is the Cloud Code Assist
+  // allowance, not the shared pool Antigravity spends.
+  static const _api = 'https://daily-cloudcode-pa.googleapis.com/v1internal';
 
   // The Gemini CLI's public installed-app OAuth client (shipped in the
   // open-source google-gemini/gemini-cli). quotabot uses it only to refresh the
@@ -725,21 +736,34 @@ class AntigravityAdapter {
         }
       }
 
+      final summary = await _quotaSummary(access, project);
       final models = await (_fetchModelsFn ?? _fetchAvailableModels)(
         access,
         project,
       );
-      final windows = antigravityWindows(models, asOf);
+      final summaryWindows = antigravityQuotaSummaryWindows(summary);
+      if (summary != null && summaryWindows == null) {
+        return offline(
+          source.localModel != null
+              ? 'connected (this machine only); Antigravity local status is available, but live quota windows are unreadable'
+              : 'connected (this machine only); Antigravity live quota summary is unreadable',
+        );
+      }
+      // Grouped weekly and five-hour buckets from retrieveUserQuotaSummary are
+      // the pool agy spends. The model catalog is per-model gates, and a
+      // fallback only when tests inject that catalog without a summary.
+      final windows =
+          summary == null ? antigravityWindows(models, asOf) : summaryWindows!;
       // Authoritative live quota from the Cloud Code endpoint. The local
       // userStatus cache is this-machine state, so it is only used by the
       // offline path and must not override a successful live read.
-      final liveModelQuotas = antigravityModelQuotasFromLive(models);
-
-      // Tier name from the load response (do not surface the raw `free-tier`
-      // id as a plan: the Code Assist tier field does not reflect the user's
-      // actual Antigravity entitlement, so it would mislabel paid accounts).
-      final tierObj = findKey(load, 'currentTier');
-      final tierName = tierObj is Map ? tierObj['name']?.toString() : null;
+      var liveModelQuotas = antigravityModelQuotasFromLive(
+        models,
+        windows: windows,
+      );
+      if (liveModelQuotas.isEmpty) {
+        liveModelQuotas = antigravityQuotaSummaryModelQuotas(summary);
+      }
 
       if (windows.isEmpty) {
         return offline(source.localModel != null
@@ -751,7 +775,7 @@ class AntigravityAdapter {
         provider: id,
         displayName: name,
         account: account,
-        plan: plan ?? tierName,
+        plan: plan ?? _planFromLoad(load),
         asOf: asOf,
         status: source.localModel,
         details: [
@@ -864,6 +888,51 @@ class AntigravityAdapter {
       _post(access, 'fetchAvailableModels', {
         if (project != null) 'project': project,
       });
+
+  Future<Map<String, dynamic>?> _retrieveUserQuotaSummary(
+    String access,
+    String? project,
+  ) =>
+      _post(access, 'retrieveUserQuotaSummary', {
+        if (project != null) 'project': project,
+      });
+
+  /// Grouped weekly and five-hour limits. Injected catalog-only tests skip this
+  /// so they keep covering the fetchAvailableModels parser; production and
+  /// MockClient paths always read the summary `agy` uses.
+  Future<Map<String, dynamic>?> _quotaSummary(
+    String access,
+    String? project,
+  ) {
+    if (_fetchQuotaSummaryFn != null) {
+      return _fetchQuotaSummaryFn(access, project);
+    }
+    if (_http == null &&
+        (_loadCodeAssistFn != null ||
+            _fetchModelsFn != null ||
+            _onboardUserFn != null)) {
+      return Future<Map<String, dynamic>?>.value(null);
+    }
+    return _retrieveUserQuotaSummary(access, project);
+  }
+
+  /// Prefers the Google One `paidTier` name. `currentTier` is the Cloud Code
+  /// Assist API tier and stays `free-tier` for consumer accounts, so it is not
+  /// a plan signal.
+  static String? _planFromLoad(Map<String, dynamic> load) {
+    final paid = findKey(load, 'paidTier');
+    if (paid is Map) {
+      final name = paid['name']?.toString().trim();
+      if (name != null && name.isNotEmpty) return name;
+    }
+    final current = findKey(load, 'currentTier');
+    if (current is! Map) return null;
+    final id = current['id']?.toString();
+    if (id == 'free-tier') return null;
+    final name = current['name']?.toString().trim();
+    if (name != null && name.isNotEmpty) return name;
+    return null;
+  }
 
   /// Reads a Cloud Code project id from a `cloudaicompanionProject` value that
   /// may be a bare string or a `{id: ...}` object.

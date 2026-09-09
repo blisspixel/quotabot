@@ -46,12 +46,12 @@ void _assertFixtureParses(ProviderAdapterRegistration entry, int now) {
       expect(models.map((m) => m.model), ['Opus']);
       expect(models.single.usedPercent, 12);
     case ProviderFixtureKind.antigravityQuota:
-      // The Cloud Code endpoint reports each model's binding limit; quotabot
-      // surfaces the account's most-constrained one as a single weekly window.
-      final windows = antigravityWindows(_fixtureMap(entry.fixtureFile), now);
-      expect(windows, hasLength(1));
-      expect(windows.single.label, 'weekly');
-      expect(windows.single.usedPercent! > 50, isTrue);
+      final windows =
+          antigravityQuotaSummaryWindows(_fixtureMap(entry.fixtureFile));
+      expect(windows, isNotNull);
+      expect(windows!.map((w) => w.label), ['5h', 'weekly']);
+      expect(windows.first.usedPercent! > 50, isTrue);
+      expect(windows.last.usedPercent! > 50, isTrue);
     case ProviderFixtureKind.cursorState:
       final windows = cursorWindows(_fixtureMap(entry.fixtureFile), now);
       expect(windows.single.label, 'monthly');

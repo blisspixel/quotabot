@@ -173,4 +173,74 @@ void main() {
       expect(providerFailureSummary(quota), message);
     });
   });
+
+  group('local runtime glance details', () {
+    const hardware = LocalHardwareInfo(
+      asOf: 1000,
+      gpuMemoryTotalBytes: 12 * 1024 * 1024 * 1024,
+      gpuMemoryAvailableBytes: 8 * 1024 * 1024 * 1024,
+    );
+
+    ProviderQuota local({
+      List<String> details = const [],
+      LocalHardwareInfo? localHardware,
+    }) =>
+        ProviderQuota(
+          provider: 'ollama',
+          displayName: 'Ollama',
+          account: '14 models',
+          asOf: 1000,
+          kind: ProviderQuotaKind.local,
+          status: 'qwen loaded',
+          details: details,
+          localHardware: localHardware,
+        );
+
+    test('keeps free VRAM and extra loaded models on the glance', () {
+      final quota = local(
+        localHardware: hardware,
+        details: const [
+          '4 GB GPU resident . 32K running context',
+          '+2 more loaded',
+          '14 installed . 203.3 GB on disk',
+          'Local host RAM 32.8 GB of 63.9 GB used (51%)',
+          'Local host VRAM 4.0 GB of 12.0 GB used (33%) . NVIDIA GeForce RTX 4090',
+          'Local host GPU utilization 27%',
+        ],
+      );
+
+      expect(
+        localRuntimeVramFreeLabel(hardware),
+        'VRAM 8.0 GB free of 12.0 GB',
+      );
+      expect(localRuntimeGlanceDetails(quota), [
+        'VRAM 8.0 GB free of 12.0 GB',
+        '+2 more loaded',
+      ]);
+      expect(localRuntimeExpandedDetails(quota), [
+        '4 GB GPU resident . 32K running context',
+        '14 installed . 203.3 GB on disk',
+        'Local host RAM 32.8 GB of 63.9 GB used (51%)',
+        'Local host VRAM 4.0 GB of 12.0 GB used (33%) . NVIDIA GeForce RTX 4090',
+        'Local host GPU utilization 27%',
+      ]);
+    });
+
+    test('falls back to the host VRAM line when free bytes are unknown', () {
+      final quota = local(
+        details: const [
+          '3 installed . 18 GB on disk',
+          'Local host VRAM 4.0 GB of 12.0 GB used (33%)',
+        ],
+      );
+
+      expect(localRuntimeVramFreeLabel(null), isNull);
+      expect(localRuntimeGlanceDetails(quota), [
+        'Local host VRAM 4.0 GB of 12.0 GB used (33%)',
+      ]);
+      expect(localRuntimeExpandedDetails(quota), [
+        '3 installed . 18 GB on disk',
+      ]);
+    });
+  });
 }

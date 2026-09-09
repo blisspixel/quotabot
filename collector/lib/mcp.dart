@@ -39,7 +39,7 @@ import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.11.4';
+const quotabotMcpVersion = '0.11.5';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
@@ -513,7 +513,8 @@ final _windowSchema = JsonSchema.object(
 );
 
 /// One per-model quota entry, either an exhaustive model-facing gate such as
-/// Antigravity or a sparse scoped overlay such as Claude Fable and Codex Spark.
+/// Antigravity or a sparse scoped overlay such as Claude Fable. Codex Spark
+/// is the same overlay in JSON and doctor, not on the default glance.
 /// Multiple gates can refer to one provider pool and must never be summed. The
 /// shared `windows` summary stays the provider headline.
 final _requestAdmissionSchema = JsonSchema.string(

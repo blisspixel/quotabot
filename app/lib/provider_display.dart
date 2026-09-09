@@ -38,7 +38,7 @@ List<ProviderDisplayGroup> groupProvidersForDisplay(List<ProviderQuota> data) {
   // define a group and land in the account-less bucket.
   final accountsByProvider = <String, Set<String>>{};
   for (final q in data) {
-    if (!q.isLocal && quotaHasSpecificAccount(q)) {
+    if (!q.isLocal && quotaAccountBelongsOnGlance(q.account)) {
       accountsByProvider
           .putIfAbsent(q.provider, () => <String>{})
           .add(q.account);
@@ -54,7 +54,9 @@ List<ProviderDisplayGroup> groupProvidersForDisplay(List<ProviderQuota> data) {
   final grouped = <String, List<ProviderQuota>>{};
   final groupAccounts = <String, String?>{};
   for (final q in data) {
-    final account = !q.isLocal && quotaHasSpecificAccount(q) ? q.account : null;
+    final account = !q.isLocal && quotaAccountBelongsOnGlance(q.account)
+        ? q.account
+        : null;
     final key = account ?? '';
     grouped.putIfAbsent(key, () => <ProviderQuota>[]).add(q);
     groupAccounts.putIfAbsent(key, () => account);
@@ -145,10 +147,15 @@ String desktopRouteSignalLine(
   if (candidate.isLocal) {
     buf.write(' - local fallback');
   } else if (candidate.headroom != null) {
-    final prefix = candidate.stale ? 'cached ' : '';
-    buf.write(' - $prefix${candidate.headroom!.round()}% free');
+    buf.write(' - ${_routeHeadroomPhrase(candidate)}');
   }
   return buf.toString();
+}
+
+String _routeHeadroomPhrase(RouteCandidate candidate) {
+  final prefix = candidate.stale ? 'cached ' : '';
+  final unit = candidate.isMeasuredQuotaPlan ? 'included' : 'free';
+  return '$prefix${candidate.headroom!.round()}% $unit';
 }
 
 /// The full route detail (provenance, burn-adjusted headroom, confidence, age),
@@ -185,8 +192,7 @@ String desktopRouteDetailLine(
   if (candidate.isLocal) {
     parts.add('fallback');
   } else if (candidate.headroom != null) {
-    final prefix = candidate.stale ? 'cached ' : '';
-    parts.add('$prefix${candidate.headroom!.round()}% free');
+    parts.add(_routeHeadroomPhrase(candidate));
     final effective = candidate.effectiveHeadroom;
     if (effective != null && candidate.headroom! - effective >= 1) {
       final burnActive =

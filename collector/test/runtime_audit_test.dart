@@ -217,6 +217,18 @@ void main() {
       antigravityNetwork.any((r) => r['path'] == '/v1internal:onboardUser'),
       isTrue,
     );
+    expect(
+      antigravityNetwork.any(
+        (r) =>
+            r['host'] == 'daily-cloudcode-pa.googleapis.com' &&
+            r['path'] == '/v1internal:retrieveUserQuotaSummary',
+      ),
+      isTrue,
+    );
+    expect(
+      antigravityNetwork.any((r) => r['host'] == 'cloudcode-pa.googleapis.com'),
+      isFalse,
+    );
     final lemonade = providers.firstWhere((p) => p['provider'] == 'lemonade');
     final lemonadeNetwork =
         (lemonade['network'] as List).cast<Map<String, dynamic>>();

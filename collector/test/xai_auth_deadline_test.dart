@@ -167,4 +167,43 @@ void main() {
     expect(requests, 1);
     expect(TokenStore.load('grok')!.accessToken, 'old');
   });
+
+  test('a late 200 token rotation is persisted after the publication deadline',
+      () async {
+    var requests = 0;
+    final started = Completer<void>();
+    final release = Completer<void>();
+    final auth = XaiAuth(
+      client: MockClient((_) async {
+        requests++;
+        started.complete();
+        await release.future;
+        return http.Response(
+          jsonEncode({
+            'access_token': 'new',
+            'refresh_token': 'R1',
+            'expires_in': 3600,
+          }),
+          200,
+        );
+      }),
+      requestTimeout: const Duration(milliseconds: 10),
+      refreshAcquisitionTimeout: const Duration(milliseconds: 20),
+    );
+    final refresh = auth.freshAccessToken(requiredDefaultOwner: 'owner');
+    await started.future;
+    var drained = false;
+    final drain =
+        TokenStore.drainActiveRefreshTransactions().then((_) => drained = true);
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(drained, isFalse);
+    expect(TokenStore.load('grok')!.accessToken, 'old');
+    release.complete();
+    expect(await refresh, 'new');
+    await drain;
+    expect(drained, isTrue);
+    expect(requests, 1);
+    expect(TokenStore.load('grok')!.accessToken, 'new');
+    expect(TokenStore.load('grok')!.refreshToken, 'R1');
+  });
 }

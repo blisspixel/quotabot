@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import 'oauth_http.dart';
 import 'oauth_util.dart';
 import 'provider_disconnect.dart';
 import 'tokens.dart';
@@ -55,9 +56,14 @@ class OpenAiAuth {
   // use a short-lived client, so the fresh auth object created for each collect
   // never leaves an owned connection pool behind.
   final http.Client? _client;
+  final Duration requestTimeout;
 
-  OpenAiAuth({String? clientId, http.Client? client})
-      : clientId = _firstNonEmpty(
+  OpenAiAuth({
+    String? clientId,
+    http.Client? client,
+    this.requestTimeout = const Duration(seconds: 15),
+  })  : assert(requestTimeout.inMicroseconds > 0),
+        clientId = _firstNonEmpty(
           clientId,
           Platform.environment['QUOTABOT_OPENAI_CLIENT_ID'],
           const String.fromEnvironment('QUOTABOT_OPENAI_CLIENT_ID'),
@@ -358,15 +364,15 @@ class OpenAiAuth {
   }
 
   Future<Map<String, dynamic>?> _post(Map<String, String> form) async {
-    final url = Uri.parse(_tokenEndpoint);
-    const headers = {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    };
-    final client = _client;
-    final request = client == null
-        ? http.post(url, headers: headers, body: form)
-        : client.post(url, headers: headers, body: form);
-    final resp = await request.timeout(const Duration(seconds: 15));
+    final resp = await postOAuthTokenRequest(
+      uri: Uri.parse(_tokenEndpoint),
+      headers: const {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      bodyFields: form,
+      timeout: requestTimeout,
+      client: _client,
+    );
     if (resp.statusCode != 200) return null;
     try {
       final decoded = jsonDecode(resp.body);

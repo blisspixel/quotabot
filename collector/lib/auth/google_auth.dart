@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import 'oauth_http.dart';
 import 'oauth_util.dart';
 import 'provider_disconnect.dart';
 import 'tokens.dart';
@@ -36,8 +37,14 @@ class GoogleAuth {
   // Injected clients remain caller-owned. Default requests are one-shot so the
   // short-lived auth objects created during collection do not leak pools.
   final http.Client? _client;
-  GoogleAuth({String? clientId, String? clientSecret, http.Client? client})
-      : clientId = _firstNonEmpty(
+  final Duration requestTimeout;
+  GoogleAuth({
+    String? clientId,
+    String? clientSecret,
+    http.Client? client,
+    this.requestTimeout = const Duration(seconds: 15),
+  })  : assert(requestTimeout.inMicroseconds > 0),
+        clientId = _firstNonEmpty(
             clientId,
             Platform.environment['QUOTABOT_GOOGLE_CLIENT_ID'],
             const String.fromEnvironment('QUOTABOT_GOOGLE_CLIENT_ID'),
@@ -190,15 +197,15 @@ class GoogleAuth {
   }
 
   Future<Map<String, dynamic>?> _post(Map<String, String> form) async {
-    final url = Uri.parse(_tokenEndpoint);
-    const headers = {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    };
-    final client = _client;
-    final request = client == null
-        ? http.post(url, headers: headers, body: form)
-        : client.post(url, headers: headers, body: form);
-    final resp = await request.timeout(const Duration(seconds: 15));
+    final resp = await postOAuthTokenRequest(
+      uri: Uri.parse(_tokenEndpoint),
+      headers: const {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      bodyFields: form,
+      timeout: requestTimeout,
+      client: _client,
+    );
     if (resp.statusCode != 200) return null;
     // Parse inside a guard: a malformed 200 body is token material, and a raw
     // FormatException would put a slice of it into an error string.

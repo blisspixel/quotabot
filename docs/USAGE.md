@@ -33,13 +33,18 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   the long scrolling overflow menu. Choose or manage a named profile, hide or
   show provider cards, set cadence and provider order, select text size, and
   toggle always-on-top, taskbar visibility, notifications, and "Show account
-  names". Account names auto-hide for single-account providers and show only
-  when a provider has more than one account on screen.
+  names". Collapsed quota cards keep the provider name; open a card to see its
+  account. Duplicate emails can still appear on compact route, notifications,
+  and group headers when that toggle is on. Single-account providers stay
+  unlabeled at a glance, and credential digests never occupy the collapsed
+  list. Local runtime cards keep loaded or ready status plus free VRAM at a
+  glance; open the card for RAM, utilization, disk, and the Models list.
 - **Updates:** Settings shows the installed build. "Check for updates" is a
   user-invoked GitHub read that shows the latest release candidate and stable
-  release separately, then opens the selected release for signing status,
-  checksums, assets, and install guidance. quotabot does not contact GitHub for
-  updates automatically and never prompts on launch.
+  release separately. "Install latest update" runs the checksum-verified CLI
+  updater (`quotabot update`). That command does not replace the open tray
+  window; restart the desktop app after a matching desktop install. GitHub
+  is contacted only when you use one of those actions, never on launch.
 - **Setup/help:** shows the current setup state for supported providers,
   including key-based providers hidden from the main quota view until they are
   configured. A provider that supports quotabot's own login (Grok, Antigravity)
@@ -62,9 +67,12 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   the current app process only and writes no completed preference, so refreshes
   and window recreation in that process stay quiet but a later app launch asks
   again. Finishing the walkthrough persists completion across launches.
-- **Route signal:** the expanded header always shows the next recommended route
-  or an explicit no-safe-route fallback. Compact mode pins the same answer as a
-  `Next` provider or `No route` control. Both work with pointer or keyboard and
+- **Route signal:** the expanded header shows the next recommended route in
+  accent weight, or an amber no-safe-route fallback. Measured included quota
+  reads as percent included; local fallback stays labeled local. Compact mode
+  pins the same answer as a `Next` provider or `No route` control. Compact
+  warnings share one focusable status control. Both work with pointer
+  or keyboard and
   open the shared reason, evidence freshness and scope, spend class, fallback,
   and selectable decision id. Material burn adjustments and confidence remain
   in this detail instead of crowding the glance line. Account names appear only
@@ -98,15 +106,19 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   Inventory alone cannot certify on-device execution, and reported context can
   mean a configured limit or a model maximum. Keyboard activation and Close
   return focus to the Models control.
-- **Tight by default, tap to expand:** each card defaults to its window bars and
-  reset countdowns. Tapping a card expands it to reveal the provenance line, the
-  model-specific rows, the recent "usually ~X% free" line, and the insights panel
+- **Tight by default, tap to expand:** each card defaults to its window bars,
+  including Claude Fable when that plan-gated pool exists, and reset
+  countdowns. Codex Spark stays off the collapsed card. Tapping a card expands
+  it to reveal Spark when present, the provenance line, the model-specific
+  spend caption, the recent "usually ~X% free" line, and the insights panel
   - a headroom sparkline, the p10/p50/p90 distribution, how often it is usable,
   any trend, and the tightest hour of day.
 - Your hidden providers, compact/expanded state, cadence, always-on-top, taskbar,
   notifications, account-names, active profile, and window position persist
-  across restarts. Non-default profiles keep their own hidden-provider, sort,
-  and theme preferences.
+  across restarts. Hidden providers for the default view live on the default
+  profile and are mirrored into desktop prefs so CLI and tray stay in sync.
+  Non-default profiles keep their own hidden-provider, sort, and theme
+  preferences.
 
 The header shows a radial "pool gauge" next to the "Quota" wordmark: it fills to
 the average remaining headroom across visible providers and uses the same smooth
@@ -271,7 +283,7 @@ local metadata. Add `--json` to any read command for machine output.
 |------------------------|-------------------------------------------------------|
 | `status` (or `doctor`) | Every provider, its windows, and resets (the default).|
 | `update` | Check or install the newest checksum-verified release for the selected channel. |
-| `top`                  | Live dashboard that redraws in place (q quit, r now, s sort). |
+| `top`                  | Live dashboard that redraws in place (q quit, r now, s sort, m models). |
 | `models`               | Catalogued models ordered by routability, with explicit availability and caps. |
 | `calibration`          | Forecast reliability from recorded history.          |
 | `manual`               | List, set, or remove self-reported quota entries.     |
@@ -468,11 +480,10 @@ confidence is lower than for live provider telemetry.
 `quotabot top` is the htop view of your plans: one bar per rolling window for
 every provider, each colored on the headroom scale (green healthy, amber
 tightening, orange low, red spent) with a live reset countdown, your local
-runtimes as reachable fallback candidates (leading with loaded model, running
-context, and GPU-resident bytes, then host RAM, VRAM, optional host GPU
-utilization, installed inventory, and disk detail), and a route line that names
-where to send the next
-request. When
+runtimes as reachable fallback candidates (leading with loaded model and free
+VRAM; select a local row for running context, GPU-resident bytes, host RAM,
+optional host GPU utilization, installed inventory, and disk detail), and a
+route line that names where to send the next request. When
 recent history shows a window being drawn down, the binding window also carries a
 forward-looking note:
 a strand probability (the chance it is spent before it resets) when that is
@@ -532,11 +543,27 @@ ordering: `default` (collection order), `headroom` (most free first), `burn`
 (or `QUOTABOT_SORT`) sets the starting order.
 
 Navigate and act with the keyboard: `j`/`k` (or the up/down arrows) move the
-cursor, `x` (or `h`) hides the selected provider for the session and `u` brings
-them all back, and `c` copies the recommended route (the provider to send the
-next request to) to your clipboard via the terminal, so you can paste it straight
-into a tool. The footer shows the hidden count and a brief "copy requested"
-status because OSC 52 does not report whether the terminal accepted it.
+cursor, `x` (or `h`) hides the selected provider on the same durable list as
+`quotabot hide`, `u` restores what you hid this session, `c` copies the
+recommended route (the provider to send the next request to) to your clipboard
+via the terminal, so you can paste it straight into a tool, and `m` inspects
+models for the selected local runtime. That inspect list uses the same registry
+order as the desktop Models dialog: loaded first, then installed, with reported
+context, capabilities, and why a model is eligible or excluded. Host RAM and GPU
+stay on the selected row. A large inventory shows eight models and a remainder.
+The footer shows the hidden count and a brief "copy requested" status because
+OSC 52 does not report whether the terminal accepted it.
+To drop a subscription you no longer pay for, `quotabot hide kiro` writes that
+provider off the default view until `quotabot unhide kiro`. `quotabot hidden`
+lists the durable set, including leftovers still stored in desktop prefs.
+Desktop hide uses the same list.
+
+Claude Fable shows as its own bar under the shared 5h and weekly windows.
+Codex Spark waits for a selected row, an opened card, or JSON; the default
+`doctor` line does not headline it. Hidden tools are omitted from the
+installed-tool footnote. Last-known remaining still uses the
+green-to-red scale, so a cached weekly pool at 6% free reads red rather than
+grey.
 
 A spent longer window collapses its
 provider to one line, the same binding-window rule the widget uses. Piped or on a dumb terminal it prints a single plain frame and
