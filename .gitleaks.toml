@@ -28,8 +28,10 @@ paths = [
   '''(?:^|/)collector/test/cli_mcp_test\.dart$''',
   '''(?:^|/)collector/test/mcp_server_cli_test\.dart$''',
   '''(?:^|/)collector/test/mcp_http_test\.dart$''',
+  '''(?:^|/)collector/test/mcp_shutdown_test\.dart$''',
   '''(?:^|/)collector/test/mcp_subscription_timer_test\.dart$''',
   '''(?:^|/)collector/test/fixtures/mcp_subscription_scenario\.dart$''',
+  '''(?:^|/)collector/test/fixtures/mcp_shutdown_scenario\.dart$''',
 ]
 regexes = [
   '''^0123456789abcdef0123456789abcdef$''',
