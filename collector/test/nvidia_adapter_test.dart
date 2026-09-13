@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/nvidia.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/registry.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -56,7 +57,7 @@ void main() {
       );
     });
 
-    test('reports free trial availability without inventing quota windows',
+    test('reports catalog reachability without inventing quota windows',
         () async {
       final q = await NvidiaAdapter(
         keySource: () => 'nvapi-test',
@@ -72,10 +73,49 @@ void main() {
       ).collect();
 
       expect(q.ok, isTrue);
-      expect(q.plan, 'free trial');
-      expect(q.status, contains('balance unknown'));
+      expect(q.plan, isNull);
+      expect(q.status, 'model catalog reachable; account access unverified');
       expect(q.sourceClass, ProviderSourceClass.statusOnly);
       expect(q.windows, isEmpty);
+    });
+
+    test('a public catalog with an invalid key cannot prove account access',
+        () async {
+      // The live public endpoint returned the same usable listing with no
+      // Authorization and this synthetic invalid bearer on 2026-09-13.
+      const publicCatalog =
+          '{"object":"list","data":[{"id":"nvidia/test-model"}]}';
+      for (final key in [
+        'quotabot-public-metadata-check-invalid',
+        'nvapi-accepted-looking',
+      ]) {
+        final q = await NvidiaAdapter(
+          keySource: () => key,
+          client: MockClient((_) async => http.Response(publicCatalog, 200)),
+        ).collect();
+        final serialized = q.toJson();
+        final restored = ProviderQuota.fromJson(serialized);
+
+        expect(restored.ok, isTrue);
+        expect(restored.plan, isNull);
+        expect(restored.planEvidenceSource, isNull);
+        expect(restored.requestAdmission, RequestAdmission.notReported);
+        expect(restored.status, contains('account access unverified'));
+        expect(restored.details.join(' '), contains('balance remain unknown'));
+        expect(restored.sourceClass, ProviderSourceClass.statusOnly);
+        expect(restored.windows, isEmpty);
+        expect(serialized.toString(), isNot(contains(key)));
+        expect(
+          buildModelRegistry(
+            [restored],
+            restored.asOf,
+            catalog: {
+              'nvidia': [const ModelInfo(id: 'nvidia/test-model')],
+            },
+          ),
+          isEmpty,
+        );
+      }
     });
 
     test('a 200 response must contain a usable model listing', () async {

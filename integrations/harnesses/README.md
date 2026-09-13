@@ -22,6 +22,9 @@ particular harness has loaded it.
 The machine-readable [compatibility record](compatibility.json) contains exact
 source links and support labels. The wider
 [research report](../../docs/research/2026-09-harnesses.md) explains the boundaries.
+The [September 13 currency review](../../docs/research/2026-09-13-mcp-agent-plugins.md)
+records newer upstream releases and protocol requirements. Those research
+baselines do not replace the pack's tested configuration versions above.
 
 ## Use the native CLI
 

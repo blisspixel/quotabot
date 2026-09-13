@@ -4,6 +4,33 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.6 - 2026-09-13
+
+Catalog evidence correctness and current integration guidance.
+
+### Fixed
+
+- Update the MCP examples' transitive Hono dependency from 4.13.3 to 4.13.7,
+  including current parsing, allocation, static-generation, and escaping fixes.
+  Preserve the existing MCP SDK and direct dependency pins.
+
+- NVIDIA model discovery now reports catalog reachability without claiming a
+  valid credential, trial entitlement, or known balance. Public catalogs can
+  return successfully even with an invalid key. Status-only evidence remains
+  excluded from model-budget routes.
+- The runtime read manifest now describes NVIDIA catalog discovery and the
+  actual GPU metadata probes without claiming key validation or discarded
+  Windows `AdapterRAM` capacity.
+
+### Changed
+
+- Refresh provider, runtime, MCP, Agent Plugins, and signing research and the
+  roadmap's acceptance criteria. Keep editing guidance in `CLAUDE.md`, remove
+  conflicting quality-gate prose, and distinguish current research from tested
+  and released compatibility.
+- Test prepared native Agent Plugins launches against four legacy MCP protocol
+  revisions. Modern `2026-07-28` support remains pending.
+
 ## 0.11.5 - 2026-09-09
 
 Live Claude weekly truth, glance and doctor polish, MCP shutdown ownership,

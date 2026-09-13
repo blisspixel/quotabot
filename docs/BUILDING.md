@@ -541,8 +541,12 @@ maintainer will consume it:
    CLI (`bin\quotabot.exe` on Windows or `bin/quotabot` on macOS/Linux) with
    `--version` plus demo-mode `doctor --json` under an isolated config
    directory.
-5. Commit the release metadata on `main`, push it, and wait for hosted Windows,
-   macOS, and Ubuntu CI plus CodeQL and secret scanning to pass before tagging.
+5. Commit release metadata on a first-party branch and open a pull request.
+   Wait for required checks, squash-merge through branch protection, and wait
+   for hosted Windows, macOS, and Ubuntu CI plus CodeQL and secret scanning on
+   the resulting `main` commit before tagging. Keep `main` unchanged from tag
+   creation through final publication; release preflight and publication both
+   require the tag to point at the current protected `main` tip.
 6. For a release that changes provider-ID continuity, require the ordinary
    three-OS collector suite to exercise a synthetic alias without adding one to
    the shipped map. The matrix must cover a released older writer, coordinator

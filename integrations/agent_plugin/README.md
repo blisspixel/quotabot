@@ -5,7 +5,7 @@ advisory skill and a stdio connection to the existing quotabot MCP server. It
 does not select a model, configure inference providers, or install dependencies
 when loaded.
 
-Reviewed 2026-09-04 against the published
+Reviewed 2026-09-13 against the published
 [Agent Plugins specification](https://agent-plugins.org/specification).
 The package version is independent of the quotabot application version.
 
@@ -123,6 +123,12 @@ protocol change that this package does not implement. Agent Plugins 1.0.0 has
 no portable protocol-version override, so no unsupported field is added to
 `mcp.json`.
 
+The current Agent Plugins specification remains 1.0.0, and both vendored
+schemas matched the canonical published bytes on 2026-09-13. Package format,
+MCP protocol revision, and installed-client loading are separate compatibility
+checks. Native bundle tests negotiate each published legacy revision from
+`2024-11-05` through `2025-11-25`; they do not establish `2026-07-28` support.
+
 ## Use the advice
 
 Discover the `quota-advice` skill through the client's own skill controls. The
@@ -178,7 +184,8 @@ Remove-Item Env:QUOTABOT_PLUGIN_TEST_EXECUTABLE
 
 The smoke prepares the real package with empty profile and plugin-data
 directories, resolves its bare command to the supplied executable, and performs
-only legacy MCP initialization, tool discovery, and EOF shutdown. It checks
+legacy MCP initialization, tool discovery, and EOF shutdown for `2024-11-05`,
+`2025-03-26`, `2025-06-18`, and `2025-11-25`. It checks
 protocol-only stdout and leaves no profile metadata. The child inherits only
 basic operating-system executable-search values plus the isolated paths, with
 no provider credentials. It calls no quota tools, subscribes to no resources,

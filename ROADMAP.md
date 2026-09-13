@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-09-09. This file is the forward plan. It records brief shipped
+Updated 2026-09-13. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -114,6 +114,18 @@ uncertainties, and concrete tests for
 [agent harnesses](docs/research/2026-09-harnesses.md), and
 [provider truth gaps](docs/research/2026-09-provider-truth-gaps.md). Those
 reports are dated evidence; this section owns the execution order.
+The [September 13 review](docs/research/2026-09-13-next-review.md) refreshes
+provider, runtime, platform, and harness evidence and records verification limits.
+
+**Immediate compatibility maintenance:** the September 13
+[MCP and Agent Plugins review](docs/research/2026-09-13-mcp-agent-plugins.md)
+confirms that stable `mcp_dart` now implements the final July protocol and its
+2.4.2 release bounds incoming stdio messages. Review that security update
+alongside provider fixes, then implement and prove the modern protocol path
+without dropping legacy clients. The current server still requires
+initialization and does not implement `2026-07-28`. The package passes native
+legacy launch checks; that is not proof of modern protocol or installed-client
+support. This maintenance does not wait for post-1.0 stabilization.
 
 **Build in this order**
 
@@ -124,13 +136,21 @@ reports are dated evidence; this section owns the execution order.
    `daily-cloudcode-pa.googleapis.com`), validated on 2026-09-08 against a
    Google AI Pro account whose Gemini five-hour and weekly buckets were
    consumed while the non-prefixed Cloud Code Assist host still reported a
-   full unused balance. The remaining gap is Claude on macOS: it stores its
-   credentials in the login Keychain rather than
-   `~/.claude/.credentials.json`, so every normally signed-in macOS user sees
-   Claude as an error; `os_secret_store.dart` already implements the Keychain
-   read but is wired only to Antigravity. Prove the credential path on a native
-   signed-in host, with fixtures for both storage shapes, and without writing
-   any host credential file.
+   full unused balance. The remaining gap is Claude on macOS: it can store its
+   credentials only in the login Keychain, so a Keychain-only sign-in is
+   undiscoverable without a usable quotabot-owned grant; `os_secret_store.dart` already
+   implements a Keychain read but is wired only to Antigravity. Use one bounded,
+   injectable host-credential discovery path for collection, current-account
+   discovery, and credential-generation cache admission. Preserve account
+   isolation, explicit disconnect, host-token freshness, and own-grant fallback.
+   Current [Claude authentication guidance](https://code.claude.com/docs/en/authentication)
+   also documents a macOS file fallback and config-directory-scoped Keychain
+   entries; verify both default and `CLAUDE_CONFIG_DIR` discovery without
+   searching unrelated accounts or directories.
+   Prove the credential path on a native signed-in host, with fixtures for both
+   storage shapes, missing or locked Keychain, malformed data, credential
+   replacement, and account mismatch, and without writing any host credential
+   file. A Keychain read alone does not prove current plan entitlement.
 2. **Finish credential and shutdown recovery.** Reset confirmation, coalesced
    return/pause recovery, usage-read ownership, admission, accurate recovery
    labels, original OAuth request settlement, nested grant-transaction drain,
@@ -180,12 +200,18 @@ reports are dated evidence; this section owns the execution order.
    the actual transport or CLI entry point, supported version, OS/runtime
    boundary, model identifier mapping, spend class, and failure behavior. Pin
    the shipped `2025-11-25` protocol and verify legacy compatibility for each
-   harness while preparing the published `2026-07-28` revision through a
-   separate dual-version test matrix. Package the same advice in the portable
+   harness while implementing the published `2026-07-28` revision through a
+   separate matrix covering stdio and authenticated loopback HTTP, discovery,
+   tools, schemas, cache scope, subscriptions, cancellation, bounded messages,
+   version errors, and shutdown. A stable SDK path is now available; the custom
+   HTTP admission and subscription integration still need explicit adaptation.
+   Package the same advice in the portable
    [Agent Plugins format](integrations/agent_plugin/) where a client supports
    it, with a shipped `quotabot mcp` entrypoint and explicit credential and
    environment prerequisites. The primary integration job is account and plan
-   availability advice through supported access under provider terms. MCP
+   availability advice through supported access under provider terms. Record
+   execution-surface billing separately: Claude's interactive windows cannot
+   establish Agent SDK or headless credit availability. MCP
    access does not establish automatic dispatch or permission to bypass a
    limit. Any future explicit model-selection command is secondary and must
    use a documented harness API without inspecting a task or silently rewriting
@@ -461,7 +487,7 @@ plan semantics remain uneven.
 
 ## Current state
 
-The current line, **0.11.5**, is the stable release version and carries
+The current line, **0.11.6**, is the stable release version and carries
 the latest hardening inventory described in [Next](#next). The stable line
 contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
@@ -1074,7 +1100,7 @@ metadata. quotabot currently implements `2025-11-25`; documentation must not
 call that the latest revision or imply support for the new wire contract.
 
 The harness work in [Next](#next) must verify legacy compatibility now and
-prepare a dual-version matrix against supported Dart SDK and client releases.
+implement a dual-version matrix against supported Dart SDK and client releases.
 Preserve existing clients while validating discovery, subscriptions, caching,
 authorization, and JSON Schema on the new path. Trace metadata stays
 content-free. Continue that matrix after stabilization whenever dependencies
@@ -1148,17 +1174,21 @@ implementation only when it passes all of these:
 8. fail-soft behavior and a named maintenance owner;
 9. more routing value than the complexity it adds.
 
-GLM remains the best researched first candidate because its official coding plan
-publishes five-hour and weekly limits, but its time and model weighting means the
-typed shared-pool work comes first.
+Reassess GLM and Copilot together when provider expansion resumes. GLM publishes
+five-hour and weekly limits; Copilot now documents a dedicated AI-credit usage
+read. Neither is admitted until typed pools, complete binding limits, current
+principal scope, and spend controls are proven.
 
 Market review, 2026-07-18: candidate coding plans use provider-specific rolling,
 weekly, or credit pools whose exact ratios and weights are time-sensitive.
 [GLM consumption](https://docs.z.ai/devpack/faq) is model-weighted and
 time-weighted, which is precisely why quota-as-a-typed-shared-pool must land
-before GLM rather than after. [GitHub Copilot billing](https://docs.github.com/en/billing/concepts/product-billing/github-copilot-billing)
-uses a monthly AI Credit pool with optional paid continuation, so if it is ever
-added it is a credit-pool provider like Cursor, never an included-quota plan.
+before GLM rather than after. Updated 2026-09-13: [GitHub Copilot billing](https://docs.github.com/en/copilot/concepts/billing-and-usage/individuals/billing)
+includes base and variable flex credits; organization-billed seats have separate
+pooled allowances and paid-continuation controls. Its [user usage API](https://docs.github.com/en/rest/billing/usage#get-billing-ai-credit-usage-report-for-a-user)
+excludes organization-billed seats and does not itself establish remaining
+admission. Preserve the current credit exclusion until authoritative pool,
+allowance, freshness, and disabled-overage evidence can support a narrower rule.
 [Amazon Q Developer](https://aws.amazon.com/blogs/devops/amazon-q-developer-end-of-support-announcement/)
 blocks new signups from 2026-05-15 and ends support for IDE plugins and paid
 subscriptions on 2027-04-30 while other AWS experiences continue, so it does not

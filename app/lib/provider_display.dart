@@ -399,9 +399,9 @@ String providerSetupText(String provider) {
           'live without reopening the IDE, connect quotabot once and sign in '
           'with the account you want shown.';
     case 'nvidia':
-      return 'Set NVIDIA_API_KEY or nvapi to check NVIDIA NIM trial access. '
-          'quotabot only calls /v1/models and shows availability without a '
-          'numeric balance.';
+      return 'Set NVIDIA_API_KEY or nvapi to enable optional NVIDIA NIM catalog '
+          'discovery. quotabot only calls /v1/models to check catalog '
+          'reachability; account access and numeric quota remain unverified.';
     case 'kiro':
     case 'cursor':
     case 'windsurf':
