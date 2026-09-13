@@ -405,16 +405,15 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("quotabot-desktop-current", verify_job)
         self.assertIn("quotabot-desktop-previous", verify_job)
         self.assertIn("needs.create-release.outputs.previous_tag", verify_job)
-        self.assertIn('gh release download "$previous_tag"', verify_job)
+        self.assertIn('gh release download "$PREVIOUS_TAG"', verify_job)
         self.assertIn("quotabot-previous-release", verify_job)
         self.assertIn("No prior remote stable release", verify_job)
-        self.assertIn('previous_digest="$PREVIOUS_DIGEST"', verify_job)
-        self.assertIn('--source-digest "$previous_digest"', verify_job)
+        self.assertIn('--source-digest "$PREVIOUS_DIGEST"', verify_job)
         self.assertGreaterEqual(
             verify_job.count("python tools/verify_desktop_archive.py"),
             2,
         )
-        self.assertIn("refs/tags/$previous_tag", verify_job)
+        self.assertIn("refs/tags/$PREVIOUS_TAG", verify_job)
         self.assertNotIn(
             "Expand-Archive -LiteralPath $archive -DestinationPath $previous",
             verify_job,

@@ -1903,27 +1903,25 @@ jobs:
           PREVIOUS_TAG: ${{ needs.create-release.outputs.previous_tag }}
           PREVIOUS_DIGEST: ${{ needs.create-release.outputs.previous_digest }}
         run: |
-          previous_tag="$PREVIOUS_TAG"
-          previous_digest="$PREVIOUS_DIGEST"
-          if [ -z "$previous_tag" ]; then
+          if [ -z "$PREVIOUS_TAG" ]; then
             echo 'No prior remote stable release. Fresh-install lifecycle only; upgrade and rollback were not exercised.' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           destination="$RUNNER_TEMP/quotabot-previous-release"
           mkdir -p "$destination"
-          gh release download "$previous_tag" \
+          gh release download "$PREVIOUS_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --pattern "${{ matrix.archive }}" \
             --pattern "${{ matrix.archive }}.sha256" \
             --dir "$destination"
-          printf '%s' "$previous_tag" > "$destination/tag"
+          printf '%s' "$PREVIOUS_TAG" > "$destination/tag"
           python tools/verify_desktop_archive.py \
             "$destination/${{ matrix.archive }}"
           gh attestation verify "$destination/${{ matrix.archive }}" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
-            --source-ref "refs/tags/$previous_tag" \
-            --source-digest "$previous_digest" \
+            --source-ref "refs/tags/$PREVIOUS_TAG" \
+            --source-digest "$PREVIOUS_DIGEST" \
             --deny-self-hosted-runners
       - name: Install Linux desktop runtime prerequisites
         if: runner.os == 'Linux'
