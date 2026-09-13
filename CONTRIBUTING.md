@@ -67,6 +67,9 @@ flutter test
 CI runs static policy, both Dart packages, the harness setup pack, the MCP clients, the LiteLLM router,
 coverage floors, and native packaging. Stacked pull requests get the same
 quality workflows as PRs into main. Run the portable gates locally first.
+Workflow changes also require actionlint and ShellCheck. An actionlint run that
+cannot find ShellCheck silently omits embedded shell analysis and does not
+reproduce the complete static CI gate.
 The exact platform package and readiness commands are in
 [Building from source](docs/BUILDING.md#build-a-release-binary).
 On Windows, `pwsh tools/check.ps1` is the equivalent complete gate and is the
