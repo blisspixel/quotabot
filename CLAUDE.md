@@ -86,6 +86,14 @@ tree. When implementation changes a documented contract, update the matching
 doc in the same change. Dated files under `docs/research/` are evidence, not
 the execution queue.
 
+Start with README, the relevant roadmap item, recent release history, and the
+subsystem's source and tests. Check manifests, lockfiles, CI, and relevant git
+history before choosing an implementation. Verify changing provider policies,
+protocols, dependencies, and commands against current primary documentation;
+record the date and source for decisions that future work will depend on.
+Preserve the established stack and prefer existing dependencies or the standard
+library before adding a package.
+
 ## Canonical seams
 
 Inspect what already exists before adding another.
@@ -105,6 +113,10 @@ Inspect what already exists before adding another.
 - **One HTTP client.** Cloud metadata uses `sharedHttpClient` from
   `collector/lib/http_client.dart`. Inject a client in tests. Do not add a
   second pooled client, logger, cache, credential store, or lease path.
+  Reuse `provider_read_gate.dart` for provider read backoff and
+  `expiring_single_flight.dart` for request coalescing and short-lived result
+  caching. Cache expiry does not bound pending work. Inspect ownership,
+  cancellation, and callers before changing either seam.
 - **Host credentials stay read-only.** Opportunistic reuse of a host token is
   fine. Refresh and persist only quotabot-owned grants. Never invoke a provider
   print or headless prompt command (`claude -p`, TUI slash commands) as a
@@ -114,6 +126,11 @@ Inspect what already exists before adding another.
   trusted evidence visibly stale, or returns an explanatory note. Adapters do
   not throw out of collection. A spent longer window overrides a healthy
   shorter one.
+- **Evidence before eligibility.** A reachable catalog does not prove account
+  access, a localhost endpoint does not prove on-device execution, and an
+  interactive subscription does not prove a headless harness uses included
+  quota. Keep access, execution scope, spend class, and measured balance
+  distinct; unknown evidence must not silently become permission or capacity.
 
 Adding a provider: metadata-only source, thin adapter, pure parser, sanitized
 fixture, registry row, `docs/DATA_SOURCES.md`, `runtime_audit.dart`
@@ -129,6 +146,9 @@ The complete contributor gate is [CONTRIBUTING.md](CONTRIBUTING.md). On
 Windows it is `pwsh tools/check.ps1`, which remaps a Dart SDK path that
 contains spaces. That script is what CI's format, analyze, test, coverage, and
 integration steps correspond to. Do not treat a subset as the ship gate.
+Confirm the pinned Flutter/Dart versions and Python 3.10 through 3.13 resolve
+in this shell first; CI uses Python 3.13. A successful SDK lookup is not a
+version check. Keep dependency resolution locked as the contributor gate does.
 
 Focused loops, after the toolchain is on PATH:
 
@@ -145,6 +165,9 @@ must stay at least 90 percent and desktop at least 80 percent
 (`python tools/check_lcov.py coverage/lcov.info N`). Both packages enable
 `strict-casts`, `strict-inference`, and `strict-raw-types`; `dart analyze` and
 `flutter analyze` must report no issues.
+The MCP TypeScript snippets also require `npm run typecheck` from
+`integrations/mcp_clients/`. Python currently has Ruff and integration tests,
+not a static type-checking gate; do not describe lint success as type safety.
 
 Do not make verification pass by weakening it: no new analyzer ignores, no
 lowered coverage floors, no tests rewritten to accept wrong behavior, no
@@ -167,6 +190,14 @@ Evidence has to match the claim:
   changes.
 - `quotabot doctor` / `explain` is smoke, not a substitute for the gate.
 
+Loop through focused verification, failure diagnosis, repair, and review before
+the full gate. Never hide a failure by relabeling the check or reusing old
+coverage. Report the exact tree and checks, including skips and environmental
+limits. Baseline CI, local tests, released binaries, native client integration,
+and provider-account validation are separate evidence. For consequential
+protocol, credential, concurrency, or spend changes, obtain independent review
+of the implementation and its failure cases.
+
 Do not commit, push, publish, or tag unless asked.
 
 ## Local scratch
@@ -174,6 +205,10 @@ Do not commit, push, publish, or tag unless asked.
 `.agent/` is gitignored. Use it for temporary scripts, notes, and receipts.
 Never store credentials there. Anything that must survive a fresh clone belongs
 in tracked docs, tests, fixtures, or source.
+Reuse its existing structural indexes when useful, check their freshness, and
+inspect the source before editing. For work spanning sessions, leave bounded
+scope, acceptance criteria, decisions, and verification state in the existing
+roadmap or an appropriate durable task. Do not create another priority queue.
 
 ---
 

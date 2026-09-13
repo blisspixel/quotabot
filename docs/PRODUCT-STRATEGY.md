@@ -1,6 +1,6 @@
 # Product strategy
 
-Updated 2026-09-05. Revisit this document when provider quota models, the MCP
+Updated 2026-09-13. Revisit this document when provider quota models, the MCP
 specification, or the product's acquisition path changes materially. The
 execution order and single immediate priority live in
 [ROADMAP.md](../ROADMAP.md#next); this document explains the product reasoning
@@ -37,9 +37,12 @@ flowchart LR
 The harness owns the final selection and request. quotabot receives only the
 bounded metadata needed to explain availability.
 
-The next product gains come from making existing evidence useful in everyday
-work: inspectable local-model choices, dependable native behavior, and explicit
-connections to the agent harnesses people use. The 0.11.0 increment adds
+The immediate product gain is reliable provider evidence: discover Claude
+credentials for Keychain-only macOS sign-ins and prove account-wide refresh on
+idle machines. Every recommendation depends on those inputs. The following
+gains make that evidence useful in everyday work: inspectable local-model
+choices, dependable native behavior, and explicit connections to the agent
+harnesses people use. The 0.11.0 increment adds
 per-model desktop inspection, explicit Ollama reasoning metadata, conservative
 Windows GPU fallback evidence, and versioned harness and Agent Plugins setup.
 Native recovery, terminal detail, connection diagnostics, execution-scope truth,
@@ -316,7 +319,19 @@ The [roadmap Next section](../ROADMAP.md#next) owns the exact execution order.
 The September research is linked from that section and records current source
 evidence, versions, and uncertainty. The rationale for the order is:
 
-### Immediate product priority: useful local-model choices
+### Immediate product priority: reliable provider evidence
+
+A signed-in account that cannot be discovered and a stale machine that cannot
+refresh its quota both undermine the default recommendation. Close the remaining
+Claude macOS credential-source gap through the existing adapter and identity
+seams, then collect dated idle-machine evidence for the shipped grant recovery.
+Deterministic tests prove recovery behavior; a real account cross-check proves
+that the live read reflects the account the user actually consumes.
+
+Signing provisioning proceeds independently. Missing owner identities do not
+block these product fixes or the native evidence that can be gathered now.
+
+### Following product priority: useful local-model choices
 
 A person with several installed models should be able to inspect what is loaded,
 what capabilities are known, whether a context requirement is met, and why a

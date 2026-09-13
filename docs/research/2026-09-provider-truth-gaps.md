@@ -9,6 +9,12 @@ reproducible fixtures alone. The [changelog](../../CHANGELOG.md) records what
 has shipped; the [roadmap Next section](../../ROADMAP.md#next) owns execution
 order.
 
+Currency note, 2026-09-13: preserve the live observations below as dated
+evidence. The market table predates shipped Fable scoped gating and current
+Windsurf quota parsing. Its Copilot API and Fable policy-time statements also
+need the qualifications in the [September 13 review](2026-09-13-next-review.md).
+Use that review and current source for new implementation decisions.
+
 ## 1. Antigravity reads an allowance the user is not spending
 
 **Closed, 2026-09-08.** Mitigated in 0.11.3 by rejecting a sliding unused

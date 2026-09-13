@@ -483,7 +483,7 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       ],
       network: [
         _https('GET', 'integrate.api.nvidia.com', '/v1/models',
-            'NVIDIA model-list metadata and key validation'),
+            'NVIDIA model catalog reachability; account access unverified'),
       ],
       notes: const ['NVIDIA is not treated as measured quota-plan budget.'],
     ),
@@ -545,8 +545,8 @@ List<RuntimeAccessRecord> _localHardwareAccess(
           _file('/proc/meminfo', 'passive system memory capacity',
               dataClass: 'hardware_metadata'),
           _process(
-            '/usr/bin/nvidia-smi --query-gpu=memory.total,memory.free',
-            'largest single NVIDIA GPU memory capacity, when installed',
+            '/usr/bin/nvidia-smi --query-gpu=name,memory.total,memory.free,utilization.gpu',
+            'largest single NVIDIA GPU name, memory capacity, and device utilization, when installed',
           ),
         ],
       'windows' => [
@@ -555,16 +555,16 @@ List<RuntimeAccessRecord> _localHardwareAccess(
             'passive system memory capacity',
           ),
           _process(
-            '${env['SystemRoot'] ?? r'C:\Windows'}\\System32\\nvidia-smi.exe --query-gpu=name,memory.total,memory.free',
-            'largest single NVIDIA GPU name and memory capacity, when installed',
+            '${env['SystemRoot'] ?? r'C:\Windows'}\\System32\\nvidia-smi.exe --query-gpu=name,memory.total,memory.free,utilization.gpu',
+            'largest single NVIDIA GPU name, memory capacity, and device utilization, when installed',
           ),
           _process(
-            '${env['ProgramFiles'] ?? r'C:\Program Files'}\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe --query-gpu=name,memory.total,memory.free',
+            '${env['ProgramFiles'] ?? r'C:\Program Files'}\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe --query-gpu=name,memory.total,memory.free,utilization.gpu',
             'alternate NVIDIA GPU memory utility location, when installed',
           ),
           _process(
             '${env['SystemRoot'] ?? r'C:\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe Get-CimInstance Win32_VideoController',
-            'Windows GPU name and AdapterRAM when nvidia-smi is not present',
+            'Windows GPU name and count when nvidia-smi is not present',
           ),
         ],
       'macos' => [

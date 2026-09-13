@@ -9,14 +9,15 @@ how.
 
 ## The deal
 
-- No account. Nothing to sign up for, nothing to log in to, no profile.
+- No quotabot account. Provider login and local routing profiles remain optional
+  ways to configure existing subscriptions.
 - No subscription, no tiers, no paid unlock. Apache 2.0, all of it.
 - No telemetry. Not opt-out, not opt-in, none at all.
 - No advertising, no upsell, no nag screens.
 - No inference. quotabot is a tool for people who use AI that itself makes no
   model call and reads no prompt, code, or model output.
-- No lock-in. If this project stopped tomorrow, your installed copy keeps
-  working, because nothing it needs runs on our machines. There are none.
+- No lock-in. No quotabot service is needed to read local history or cached
+  quota. Live provider reads still depend on those providers' APIs and policies.
 
 ## Why these, specifically
 
@@ -55,8 +56,10 @@ measures would be lying.
 **Telemetry, however it is dressed up.** The blunt version, from a much-agreed
 comment thread on the subject: anonymized or not, opt-out telemetry is plain
 spying. The recurring worries are consistent - what actually leaves the machine,
-how it gets correlated once it lands, and who can repurpose it later. Every one
-of those worries dissolves if nothing leaves. So nothing does.
+how it gets correlated once it lands, and who can repurpose it later. quotabot
+sends no telemetry. Live quota reads send credentials and metadata requests to
+the configured provider; explicit update checks contact GitHub, and configured
+webhooks send quota alerts. None of these operations sends prompts or code.
 
 **Cloud dependency as an expiry date.** The local-first argument is that
 centralizing data takes away ownership, and that when a service shuts down the
@@ -68,7 +71,7 @@ to shut down. Your history is on your disk, in formats you can read.
 Not "does not currently". Changing any of these would be a different product,
 and the repository treats them as invariants rather than preferences.
 
-1. Require an account, a license key, or a payment to do its job.
+1. Require a quotabot account, a quotabot license key, or payment to quotabot.
 2. Send telemetry, analytics, crash reports, or usage pings anywhere.
 3. Make a model or inference call, or read your prompts, source code, or model
    output.
@@ -85,8 +88,8 @@ The point of a trust claim you can verify is that you do not have to trust it.
 
 | Claim | How to check |
 |---|---|
-| No inference, ever | `quotabot explain` prints every file read and network destination per adapter. No generation endpoint appears, because none exists in the source. |
-| Nothing unexpected leaves the machine | Same command lists the exact provider metadata endpoints contacted. Watch it live with any network monitor; the fleet read is all you will see. CLI and desktop update checks contact GitHub only after you invoke them and send no local quota or account data. |
+| No inference, ever | `quotabot explain` prints the declared read and network manifest without collecting. Runtime audit tests reject generation destinations; inspect the adapters and their injected-transport tests for actual behavior. |
+| Nothing unexpected leaves the machine | Compare that manifest with traffic from an explicitly invoked `quotabot --json` collection using a network monitor. `explain` itself makes no quota request. CLI and desktop update checks contact GitHub only after you invoke them and send no local quota or account data. |
 | No account, no service | Turn off your network and run `quotabot`. Cached history and last-known quota still render, labeled stale. Nothing waits on a login. |
 | Your data is yours | `quotabot --json` is the whole snapshot. History and analytics are plain files under your per-user config directory. |
 | No hidden spend | `quotabot suggest --task=hard` defaults to a `quota` budget. Paid catalog entries require an explicit `--budget=any`. |

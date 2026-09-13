@@ -10,12 +10,12 @@ and recommends where to send the next request. It also shows supported local
 models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
-> **Current stable:** 0.11.5. quotabot remains under active 0.x development.
-> **Next:** close remaining live Claude macOS Keychain discovery, idle-machine
-> grant evidence, and native identity; then stronger local-only claims.
-> Product development continues while release signing is
-> provisioned. See [roadmap Next](ROADMAP.md#next) and the
-> [documentation index](docs/README.md).
+> **Current stable:** 0.11.6. quotabot remains under active 0.x development.
+> **Next:** support Claude discovery for macOS Keychain sign-ins and prove
+> account-wide quota refresh on idle machines, then strengthen execution-scope
+> evidence for local-only advice. Native signing proceeds alongside product
+> development and remains a 1.0 release gate. See [roadmap Next](ROADMAP.md#next)
+> and the [documentation index](docs/README.md).
 
 Release notes state each artifact's Windows and macOS signing status. Current
 artifacts are unsigned; [signing readiness](docs/RELEASE-SIGNING.md) proceeds
@@ -109,11 +109,14 @@ rollback, and uninstall, use the [setup guide](docs/SETUP.md).
 | Install the latest release for this channel | `quotabot update` |
 | Connect an agent to quota advice | `quotabot mcp` |
 
-Provider routing is balanced by default. `--local-first` prefers reachable
-on-device capacity immediately. `--quota-stretch` keeps fresh measured included
+Provider routing is balanced by default. `--local-first` prefers eligible local
+runtime candidates immediately. `--quota-stretch` keeps fresh measured included
 quota above a reserve before preferring local capacity. Model suggestions use
 included quota and local runtimes by default; paid or credit-backed catalog
 entries require an explicit `--budget=any` opt-in.
+Reported cloud and upstream routes are excluded from local budgets. Positive
+execution-scope validation remains [planned work](ROADMAP.md#next): localhost
+alone cannot prove that a runtime executes on this machine.
 
 See the [usage guide](docs/USAGE.md) for profiles, accounts, model capability
 filters, alerts, analytics, drift recovery, routing receipts, and every command.
@@ -198,7 +201,10 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Stable 0.11.5 reads the live Claude weekly pool when the current session row
+Stable 0.11.6 corrects NVIDIA catalog evidence across collection, setup, and
+the read manifest, and expands native legacy MCP launch checks. The September
+review updates provider and protocol priorities without claiming modern MCP
+support. Version 0.11.5 reads the live Claude weekly pool when the current session row
 omits a reset, so a spent weekly cap is no longer hidden behind last-known 5h
 leftover. Glance and doctor hide hashed account labels, keep Fable on the
 default view, and hide Codex Spark until detail. MCP shutdown stops late

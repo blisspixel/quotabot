@@ -10,7 +10,7 @@ import '../models.dart';
 import '../provider_ids.dart';
 import '../util.dart';
 
-/// Detects NVIDIA NIM trial access via env key and safe discovery call.
+/// Checks NVIDIA NIM catalog reachability via an optional discovery call.
 ///
 /// NVIDIA-hosted NIM APIs are available for free development and testing
 /// through build.nvidia.com. The API is OpenAI-compatible at
@@ -19,9 +19,10 @@ import '../util.dart';
 /// inference calls would spend the user's allowance.
 ///
 /// This adapter is opportunistic: if NVIDIA_API_KEY (or nvapi) env is present,
-/// it performs a zero-cost GET /v1/models (discovery only) to confirm the key
-/// works, then reports availability with no quota windows. No login, no tokens
-/// spent, fail-soft.
+/// it performs a zero-cost GET /v1/models (discovery only). The catalog can
+/// return successfully for invalid credentials, so this establishes neither
+/// credential validity nor account access. No quota windows, login, or tokens
+/// spent; fail-soft.
 ///
 /// Key from env only. Honors no extra network if key absent.
 class NvidiaAdapter {
@@ -65,19 +66,18 @@ class NvidiaAdapter {
       if (!_hasUsableModelListing(resp.bodyBytes)) {
         return _keyInvalid(asOf, httpStatus: 200);
       }
-      // Success: key works. NVIDIA does not expose a zero-cost numeric balance
-      // endpoint, so this is availability only rather than a quota window.
+      // The public catalog also succeeds without valid credentials. A listing
+      // proves reachability, never the account's plan, access, or balance.
       return ProviderQuota(
         provider: id,
         displayName: name,
         account: 'default',
-        plan: 'free trial',
         asOf: asOf,
         ok: true,
-        status: 'free trial available; balance unknown',
+        status: 'model catalog reachable; account access unverified',
         details: const [
-          'free serverless APIs for development',
-          'trial rate limits are model-specific and unpublished',
+          'catalog discovery does not verify the configured API key',
+          'trial eligibility and numeric quota balance remain unknown',
         ],
         windows: const [],
         kind: ProviderQuotaKind.subscription,
@@ -101,10 +101,9 @@ class NvidiaAdapter {
         provider: id,
         displayName: name,
         account: 'default',
-        plan: 'free trial',
         asOf: asOf,
         ok: true,
-        status: 'not configured; optional free-trial provider',
+        status: 'not configured; optional catalog discovery',
         windows: const [],
       );
 
@@ -118,7 +117,6 @@ class NvidiaAdapter {
         provider: id,
         displayName: name,
         account: 'default',
-        plan: 'free trial',
         asOf: asOf,
         ok: false,
         error: _modelsFailureMessage(httpStatus, pipeHealth),

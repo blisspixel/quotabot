@@ -166,10 +166,12 @@ certificate profile for quotabot. Create one Entra application or managed
 identity used only by this release environment.
 
 The owner first chooses whether the visible publisher is an eligible individual
-or a legal organization. The Azure billing account type must match that choice,
-and its legal name and address must match the identity-validation documents.
-Public Trust is geographically restricted. Check current eligibility before
-creating resources, and allow for Microsoft's documented identity-validation
+or a legal organization. Individual identity validation requires an Azure billing
+account with Account Type `Individual` and accurate legal name and billing
+address. Organization identity validation does not require an Azure billing
+account with Account Type `Organization`. Public Trust is geographically
+restricted. Check [Microsoft's current prerequisites](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart#prerequisites)
+before creating resources, and allow for its documented identity-validation
 window of 1 through 20 business days or longer when more documents are needed.
 
 Owner checklist:

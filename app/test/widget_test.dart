@@ -157,7 +157,11 @@ void main() {
     expect(nvidia, contains('NVIDIA_API_KEY'));
     expect(nvidia, contains('nvapi'));
     expect(nvidia, contains('/v1/models'));
-    expect(nvidia, contains('without a numeric balance'));
+    expect(nvidia, contains('catalog reachability'));
+    expect(
+      nvidia,
+      contains('account access and numeric quota remain unverified'),
+    );
   });
 
   test(

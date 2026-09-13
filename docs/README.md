@@ -4,7 +4,9 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.11.5. It reads the live Claude weekly
+The current verified stable release is 0.11.6. It corrects NVIDIA catalog
+evidence and expands native legacy MCP launch checks. The September 13 review
+refreshes provider, runtime, and protocol priorities. Version 0.11.5 reads the live Claude weekly
 pool when the session row omits a reset, keeps Fable on glance while hiding
 Codex Spark until detail, and stops MCP snapshots from recreating a closed HTTP
 client. The preceding 0.11.4 rejects a reset boundary that

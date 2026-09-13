@@ -2,6 +2,8 @@
 
 These unmodified Agent Plugins 1.0.0 schemas were retrieved on 2026-09-04 for
 offline development tests. Runtime plugin loading does not fetch them.
+Both files were compared with fresh canonical downloads on 2026-09-13 and
+remain byte-identical. No schema refresh is needed for this review.
 
 | File | Canonical source | SHA-256 |
 |---|---|---|
