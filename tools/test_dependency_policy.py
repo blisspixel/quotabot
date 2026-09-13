@@ -124,7 +124,7 @@ def _checkout_blocks(text: str) -> list[str]:
 
 
 class DependencyPolicyTest(unittest.TestCase):
-    def test_every_update_is_bounded_and_advisory_only(self) -> None:
+    def test_automated_version_update_pull_requests_are_disabled(self) -> None:
         text = DEPENDABOT.read_text(encoding="utf-8")
         blocks = _update_blocks(text)
         expected = {
@@ -144,7 +144,7 @@ class DependencyPolicyTest(unittest.TestCase):
                 )
                 self.assertRegex(
                     body,
-                    r"(?m)^    open-pull-requests-limit: 1$",
+                    r"(?m)^    open-pull-requests-limit: 0$",
                 )
                 self.assertRegex(
                     body,
@@ -397,8 +397,8 @@ class DependencyPolicyTest(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("sdk: '3.12.2'", release)
-        self.assertEqual(18, release.count("uses: actions/setup-python@"))
-        self.assertEqual(18, release.count("python-version: '3.13'"))
+        self.assertEqual(19, release.count("uses: actions/setup-python@"))
+        self.assertEqual(19, release.count("python-version: '3.13'"))
 
         install_smoke = (
             ROOT / ".github" / "workflows" / "install-smoke.yml"

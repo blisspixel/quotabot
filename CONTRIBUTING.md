@@ -139,8 +139,9 @@ Guidelines:
 
 ## Dependency updates
 
-Dependabot pull requests are advisory signals, not merge candidates. For every
-selected dependency update:
+Dependency alerts are advisory signals. Automated version-update and security
+update pull requests are disabled; security alerts remain enabled. For every
+selected update:
 
 1. Read the upstream release notes, security advisory when applicable, and
    breaking-change or runtime requirements.
@@ -153,15 +154,14 @@ selected dependency update:
    new install scripts or platform packages.
 5. Run the relevant format, analysis, unit, coverage, packaging, integration,
    dependency-review, and security gates before merging.
-6. Confirm advisory intake retained the closed pull request as the warning
-   record and deleted its branch. If intake failed, close the pull request and
-   delete the bot branch manually.
+6. Verify commit authorship and release notes before publishing. Do not import
+   bot commits or generated contributor credits.
 
-Dependabot rebases are disabled and each ecosystem is limited to one open
-advisory so warnings stay bounded while selected upgrades remain deliberate.
-Dependabot-triggered CI jobs are skipped. A trusted second-stage workflow reads
-only GitHub metadata, adds the advisory record, closes the pull request, and
-removes its transient bot branch without checking out or executing bot code.
+Each configured ecosystem has `open-pull-requests-limit: 0`; repository settings
+also disable automated security fixes because that limit does not cover them.
+Keep vulnerability alerts and the dependency-review gate enabled. The existing
+advisory intake remains a fallback if a bot PR is opened: it reads only GitHub
+metadata, closes the PR, and removes its branch without executing bot code.
 
 ## Add a provider in 10 minutes
 

@@ -43,6 +43,9 @@ try {
   try {
     Invoke-CheckedCommand `
       -Command 'python' `
+      -Arguments @('tools/check_authorship.py')
+    Invoke-CheckedCommand `
+      -Command 'python' `
       -Arguments @('-m', 'ruff', 'check', '.')
     Invoke-CheckedCommand `
       -Command 'python' `

@@ -13,8 +13,8 @@ paths = [
   '''(?:^|/)collector/lib/adapters/antigravity\.dart$''',
 ]
 regexes = [
-  '''^[ \t]*static[ \t]+const[ \t]+_publicClientSecret[ \t]*=[ \t]*'GOCSPX-[^'\r\n]+';[ \t]*$''',
-  '''^[ \t]*static[ \t]+const[ \t]+_geminiClientSecret[ \t]*=[ \t]*'GOCSPX-[^'\r\n]+';[ \t]*$''',
+  '''^\n?[ \t]*static[ \t]+const[ \t]+_publicClientSecret[ \t]*=[ \t]*'GOCSPX-[^'\r\n]+';[ \t]*$''',
+  '''^\n?[ \t]*static[ \t]+const[ \t]+_geminiClientSecret[ \t]*=[ \t]*'GOCSPX-[^'\r\n]+';[ \t]*$''',
 ]
 
 [[allowlists]]

@@ -563,16 +563,29 @@ maintainer will consume it:
    does not prove. Complete equivalent native interactive checks on macOS and
    Linux. Record an unavailable cell explicitly rather than treating a
    shared-code test as native evidence.
-8. Verify the official repository still has the active `v*` tag ruleset that
-   blocks updates and deletion, plus GitHub release immutability. Immutability
-   applies only to releases published after the setting was enabled on July 18,
-   2026. v0.9.4 and later releases are locked under that policy; v0.9.2 and
-   earlier releases were not changed retroactively.
+8. Verify the official repository has the active `v*` tag ruleset that blocks
+   updates and deletion, plus GitHub release immutability. Historical tags and
+   releases remain unchanged, with their original source commits and provenance.
+   The authorship gate pins those existing tags to an exact baseline and applies
+   the current identity and message rules to active branches and every new tag.
+   The local publication helper requires immutability to be enabled before
+   creating a release.
 9. Push an annotated `vX.Y.Z` or `vX.Y.Z-rc.N` tag. Wait for every `Release` workflow job,
    including its reusable CI quality gate, four CLI builds, four clean CLI
    execution legs, three desktop builds, and three clean desktop
-   archive-verification legs, to pass.
-10. Confirm that every CLI archive contains `lib/install.ps1` and
+   archive-verification legs, to pass. CI preserves an attested `release-handoff`
+   artifact; it does not create, upload, or publish a GitHub release.
+10. From the exact clean source checkout, use the repository owner's existing
+   human GitHub CLI login to run `python tools/publish_release.py --run-id RUN_ID
+   --directory .agent/publish-vX.Y.Z`, choosing an empty download directory.
+   The helper checks the successful workflow attempt, protected main and tag,
+   attested handoff, all seven archive contracts and their provenance, and the
+   exact fourteen-file inventory. It creates an owner-authored draft, uploads
+   through that same login, freshly downloads and verifies every draft asset,
+   then checks the unchanged draft and publishes it immutably. No owner token
+   belongs in CI. A failed attempt can resume the matching owner draft using a
+   new empty handoff directory; published assets are never replaced.
+   Confirm that every CLI archive contains `lib/install.ps1` and
    `lib/install.sh`, so `quotabot update` uses an installer authenticated by the
    archive checksum and provenance rather than a mutable branch copy.
 11. Confirm that a stable tag is published as neither draft nor prerelease, or
@@ -600,7 +613,8 @@ maintainer will consume it:
       --deny-self-hosted-runners
     ```
 
-    The release workflow creates the attestation before uploading each pair.
+    CI attests each archive and the final verified handoff. The local owner
+    publication command verifies those attestations before uploading each pair.
 13. After publication, dispatch `Install smoke` immediately. For an RC, set the
     `target_tag` input to the exact `vX.Y.Z-rc.N` tag; leaving it blank resolves
     the latest stable release instead. Require the clean install, prior-version
@@ -608,6 +622,11 @@ maintainer will consume it:
     macOS, and Linux.
 14. Confirm GitHub security signals are clear: CI, CodeQL, secret scanning,
     Dependabot alerts, and the dependency-review PR gate.
+
+Use the preserved published stable release as the actual prior-version fixture.
+Verify its archive against its original tag and source digest. Historical
+attestations remain evidence for those original bytes and commits, never for a
+rewritten commit or a new release.
 
 The `Install smoke` workflow automates the post-release clean-host portion of
 this checklist on native Windows, macOS, and Linux runners. It resolves the

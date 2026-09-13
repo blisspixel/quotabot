@@ -1,0 +1,293 @@
+{
+  "schema": "quotabot.legacy-release-refs.v1",
+  "repository": "blisspixel/quotabot",
+  "captured_from": "f5e48b4eefd711f9aae5e2eb142ee7b4ab70a497",
+  "purpose": "Preserve exact historical release records. These pins do not exempt commits reachable from active refs or new tags. The unpublished v0.11.6 tag is excluded.",
+  "refs": [
+    {
+      "name": "refs/tags/v0.10.0",
+      "object_type": "tag",
+      "object_id": "062c16ee47b924192207b11e6412204f96a1cd12"
+    },
+    {
+      "name": "refs/tags/v0.10.0-rc.1",
+      "object_type": "tag",
+      "object_id": "3bd7536a85a2168f053c1de1544103d701f04f32"
+    },
+    {
+      "name": "refs/tags/v0.10.0-rc.10",
+      "object_type": "tag",
+      "object_id": "2889f580af61579eddf54bc270f3bde6dd5402bc"
+    },
+    {
+      "name": "refs/tags/v0.10.0-rc.11",
+      "object_type": "tag",
+      "object_id": "fea1c4357812366b5985079017eedab4c94d2e8e"
+    },
+    {
+      "name": "refs/tags/v0.10.0-rc.12",
+      "object_type": "commit",
+      "object_id": "fd3e115b3079c4fc39b239d2c9cadaf079224cc1"
+    },
+    {
+      "name": "refs/tags/v0.10.0-rc.16",
+      "object_type": "tag",
+      "object_id": "4a2c6588452deb33ff90ee80e4e2a5f89133a9b5"
+    },
+    {
+      "name": "refs/tags/v0.10.0-rc.17",
+      "object_type": "tag",
+      "object_id": "c884ff680e39a4a0ee9ae7de75a29262c896cdfe"
+    },
+    {
+      "name": "refs/tags/v0.10.0-rc.2",
+      "object_type": "tag",
+      "object_id": "344dbb82881c5b4599ba5b5355f146a2c1097105"
+    },
+    {
+      "name": "refs/tags/v0.10.0-rc.3",
+      "object_type": "tag",
+      "object_id": "bacdd0dbcf47a606a90feab5274716cdb2a50c62"
+    },
+    {
+      "name": "refs/tags/v0.10.0-rc.4",
+      "object_type": "tag",
+      "object_id": "e71b4fa0cf175cb29c558198d343686e54f4903d"
+    },
+    {
+      "name": "refs/tags/v0.10.0-rc.5",
+      "object_type": "tag",
+      "object_id": "13647a5df3c542c8f16c4467c290c8ec0c91edda"
+    },
+    {
+      "name": "refs/tags/v0.10.0-rc.6",
+      "object_type": "tag",
+      "object_id": "d4aa4e402cd5ba82398e3240db30bf94bb53673f"
+    },
+    {
+      "name": "refs/tags/v0.10.0-rc.9",
+      "object_type": "tag",
+      "object_id": "3f266457eb72fea86aa9e7302980f1a3c09296af"
+    },
+    {
+      "name": "refs/tags/v0.10.1",
+      "object_type": "tag",
+      "object_id": "96c4e810c5ffc82443852421c5a3ae8fb164922d"
+    },
+    {
+      "name": "refs/tags/v0.10.1-rc.1",
+      "object_type": "tag",
+      "object_id": "3f5ed0385a15a4a1a230500d4d2132d0c318f624"
+    },
+    {
+      "name": "refs/tags/v0.10.2",
+      "object_type": "tag",
+      "object_id": "9cc609d510c8321f3100edc114e959cb0b685c3f"
+    },
+    {
+      "name": "refs/tags/v0.10.2-rc.1",
+      "object_type": "tag",
+      "object_id": "dcec032b6453a3a60be36b7b52ba6c86d38f723e"
+    },
+    {
+      "name": "refs/tags/v0.10.3",
+      "object_type": "tag",
+      "object_id": "bdfd25830eb6f29fafa59cae3bf3e09545507b46"
+    },
+    {
+      "name": "refs/tags/v0.11.0",
+      "object_type": "tag",
+      "object_id": "41322f86ef38c9726e7cbeca47e6421dcab4bd27"
+    },
+    {
+      "name": "refs/tags/v0.11.1",
+      "object_type": "tag",
+      "object_id": "bc499b6ba014399832eec1e381af3b25d921081d"
+    },
+    {
+      "name": "refs/tags/v0.11.2",
+      "object_type": "tag",
+      "object_id": "78fb9fc87738ad872cc9748f64a3a7aa570e87af"
+    },
+    {
+      "name": "refs/tags/v0.11.3",
+      "object_type": "tag",
+      "object_id": "a3eb93cd3fe615c3320af726ec559c928845eade"
+    },
+    {
+      "name": "refs/tags/v0.11.4",
+      "object_type": "tag",
+      "object_id": "4f9937d1a3842aced585dbe5da6761677f3d400e"
+    },
+    {
+      "name": "refs/tags/v0.11.5",
+      "object_type": "tag",
+      "object_id": "0842f7fc19d71a1db191b1ab064b57dcf5d7062c"
+    },
+    {
+      "name": "refs/tags/v0.2.0",
+      "object_type": "tag",
+      "object_id": "f5349d58dd2a17f1b997b2cd5317752dcf18f37a"
+    },
+    {
+      "name": "refs/tags/v0.3.0",
+      "object_type": "tag",
+      "object_id": "5992041cb1e3d5fb1513c5ad9a1ea7e457621483"
+    },
+    {
+      "name": "refs/tags/v0.4.0",
+      "object_type": "tag",
+      "object_id": "815aab4032d66487b5c2b20bd4f220a72b637df0"
+    },
+    {
+      "name": "refs/tags/v0.5.0",
+      "object_type": "tag",
+      "object_id": "f785404d84cf335a600865f2219f09d337fb87b4"
+    },
+    {
+      "name": "refs/tags/v0.5.1",
+      "object_type": "tag",
+      "object_id": "a707bb7756c0e113b475e8e44634eb143356179c"
+    },
+    {
+      "name": "refs/tags/v0.5.10",
+      "object_type": "tag",
+      "object_id": "ff3ec54bc57e406e7d195754d181848fb5f047ef"
+    },
+    {
+      "name": "refs/tags/v0.5.11",
+      "object_type": "tag",
+      "object_id": "825619b89d8c1d2264cb97c325f71aa21268fd9e"
+    },
+    {
+      "name": "refs/tags/v0.5.12",
+      "object_type": "tag",
+      "object_id": "827d8188fdb8adca9d61313f9119a001bf5e3f9d"
+    },
+    {
+      "name": "refs/tags/v0.5.13",
+      "object_type": "tag",
+      "object_id": "87a751f6257f9c2af5c30bf45c561bb9805f8855"
+    },
+    {
+      "name": "refs/tags/v0.5.14",
+      "object_type": "tag",
+      "object_id": "2c49a49072e4442c5c22be1ff86f7a204e729f6b"
+    },
+    {
+      "name": "refs/tags/v0.5.15",
+      "object_type": "commit",
+      "object_id": "35776af90d26b7d54302a183756ef03e10a6a1a3"
+    },
+    {
+      "name": "refs/tags/v0.5.16",
+      "object_type": "commit",
+      "object_id": "66cbe86cf385e4c8434c5c71bf3eeb1a64057d5e"
+    },
+    {
+      "name": "refs/tags/v0.5.17",
+      "object_type": "tag",
+      "object_id": "e187eed1f510b242766b3f6ec5db6074a5cdbb1c"
+    },
+    {
+      "name": "refs/tags/v0.5.18",
+      "object_type": "tag",
+      "object_id": "61aaab1fad7da36a2340a313017c89ed343b3ad3"
+    },
+    {
+      "name": "refs/tags/v0.5.2",
+      "object_type": "tag",
+      "object_id": "3830c557a414ff8a4db74b1b2bd524ca14a71cab"
+    },
+    {
+      "name": "refs/tags/v0.5.3",
+      "object_type": "tag",
+      "object_id": "29511c4326573ec2cbd286337ac625f23f26bec6"
+    },
+    {
+      "name": "refs/tags/v0.5.4",
+      "object_type": "tag",
+      "object_id": "0f6474243d2b4c17b20a5091ab7bb4faf33cea65"
+    },
+    {
+      "name": "refs/tags/v0.5.5",
+      "object_type": "commit",
+      "object_id": "82141789445c12395ef249a3ede5121d31257443"
+    },
+    {
+      "name": "refs/tags/v0.5.6",
+      "object_type": "commit",
+      "object_id": "a892eb3048b40c08585d529c10d711c9441d19a3"
+    },
+    {
+      "name": "refs/tags/v0.5.7",
+      "object_type": "commit",
+      "object_id": "d80fd369430bfad748b1f3d3aa85416de6944937"
+    },
+    {
+      "name": "refs/tags/v0.5.8",
+      "object_type": "commit",
+      "object_id": "a139258729c60c7d2fd41962599a626b10818e1a"
+    },
+    {
+      "name": "refs/tags/v0.5.9",
+      "object_type": "tag",
+      "object_id": "e0eb377b6d9861f913d5a1a5635dcc00f8a6b4fa"
+    },
+    {
+      "name": "refs/tags/v0.8.0",
+      "object_type": "tag",
+      "object_id": "3edad77080d0db8fd3fdaaf9dd77e7e416f6d187"
+    },
+    {
+      "name": "refs/tags/v0.8.1",
+      "object_type": "tag",
+      "object_id": "9ceac778ab9bbb6e397f7e7cac804b5a8b50f93b"
+    },
+    {
+      "name": "refs/tags/v0.9.0",
+      "object_type": "commit",
+      "object_id": "aa989fbd1d6270aa0fe32176419c95855fa06bf2"
+    },
+    {
+      "name": "refs/tags/v0.9.1",
+      "object_type": "tag",
+      "object_id": "54dcff5e19a838e1bffcc9050604e03c58fa8ac5"
+    },
+    {
+      "name": "refs/tags/v0.9.2",
+      "object_type": "tag",
+      "object_id": "43731d18d657fa73602380ad321efa0d77cc5dde"
+    },
+    {
+      "name": "refs/tags/v0.9.4",
+      "object_type": "tag",
+      "object_id": "0df0d7411a667a70d38666024a525d551bc9a1e4"
+    },
+    {
+      "name": "refs/tags/v0.9.5",
+      "object_type": "tag",
+      "object_id": "55a8ac22eef6d3b41dde8df5181084bfcb18e3e8"
+    },
+    {
+      "name": "refs/tags/v0.9.6",
+      "object_type": "tag",
+      "object_id": "90bd2b42cfc2a1999dc3703145c3fce5856f6028"
+    },
+    {
+      "name": "refs/tags/v0.9.7",
+      "object_type": "tag",
+      "object_id": "e288916d68668b8fb84b4d0fa881a92131240f8f"
+    },
+    {
+      "name": "refs/tags/v0.9.8",
+      "object_type": "tag",
+      "object_id": "8ecf9a23526e9a883eaf97ef38f60a074cba481b"
+    },
+    {
+      "name": "refs/tags/v0.9.9",
+      "object_type": "tag",
+      "object_id": "5a1b12fe1370c50efdf4b3236347e8e8e62becc5"
+    }
+  ]
+}

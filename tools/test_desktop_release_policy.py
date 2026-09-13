@@ -52,7 +52,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             "secret-scan-gate",
         ):
             self.assertIn(f"      - {gate}", publish_job)
-        self.assertIn("Refusing to replace assets on published release", workflow)
+        self.assertIn("tools/publish_release.py", publish_job)
         for asset in (
             "release/quotabot-windows-x64-desktop.zip",
             "release/quotabot-darwin-arm64-desktop.zip",
@@ -63,8 +63,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         audit_job = workflow.split("  audit-release-assets:\n", 1)[1].split(
             "  publish-release:\n", 1
         )[0]
-        self.assertIn("Draft release asset set is incomplete or unexpected", audit_job)
-        self.assertEqual(audit_job.count(".sha256"), 12)
+        self.assertIn("tools/release_handoff.py manifest", audit_job)
+        self.assertEqual(audit_job.count(".sha256"), 5)
         self.assertIn("sha256sum --check", audit_job)
         self.assertIn("quotabot-final-macos-evidence", audit_job)
         self.assertIn("quotabot-final-windows-evidence", audit_job)
@@ -121,7 +121,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         verify_at = build_job.index("python tools/verify_cli_archive.py")
         attest_at = build_job.index("actions/attest-build-provenance@")
-        upload_at = build_job.index("gh release upload")
+        upload_at = build_job.rindex("actions/upload-artifact@")
         self.assertLess(verify_at, attest_at)
         self.assertLess(attest_at, upload_at)
         self.assertNotIn("release/quotabot-*", build_job)
@@ -131,7 +131,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             verify_job,
         )
         self.assertIn("ubuntu-24.04-arm", verify_job)
-        self.assertIn("Accept: application/octet-stream", verify_job)
+        self.assertIn("name: release-archive-cli-", verify_job)
         self.assertIn("gh attestation verify", verify_job)
         self.assertIn("--source-digest", verify_job)
         self.assertIn("--deny-self-hosted-runners", verify_job)
@@ -141,81 +141,53 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertEqual(audit_job.count("python tools/verify_cli_archive.py"), 4)
 
     def test_prerelease_tags_cannot_replace_the_latest_stable_release(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+        publication = (ROOT / "tools" / "publish_release.py").read_text(
             encoding="utf-8"
         )
-        create_job = workflow.split("  create-release:\n", 1)[1].split("  build:\n", 1)[
-            0
-        ]
-        publish_job = workflow.split("  publish-release:\n", 1)[1]
-
-        self.assertIn("expected_prerelease=false", create_job)
-        self.assertIn("expected_prerelease=true", create_job)
-        self.assertIn("prerelease_args+=(--prerelease --latest=false)", create_job)
-        self.assertIn("--json isDraft,isPrerelease", create_job)
-        self.assertIn("Draft prerelease classification does not match", create_job)
-
-        self.assertIn("expected_prerelease=false", publish_job)
-        self.assertIn("expected_prerelease=true", publish_job)
-        self.assertIn("expected_make_latest=true", publish_job)
-        self.assertIn("expected_make_latest=false", publish_job)
-        self.assertIn("[.tag_name, .draft, .prerelease] | @tsv", publish_job)
-        self.assertIn('-f make_latest="$expected_make_latest"', publish_job)
-        self.assertIn('"repos/$GITHUB_REPOSITORY/releases/latest"', publish_job)
-        self.assertIn("Stable release did not become GitHub Latest", publish_job)
-        self.assertIn("Prerelease unexpectedly replaced GitHub Latest", publish_job)
-        classification_check = publish_job.index(
-            "The draft prerelease classification changed after creation"
+        self.assertIn('"--prerelease", "--latest=false"', publication)
+        self.assertIn('"make_latest": "false" if prerelease else "true"', publication)
+        self.assertIn('"prerelease": "-" in metadata["tag"]', publication)
+        self.assertIn("Prerelease unexpectedly replaced GitHub Latest", publication)
+        self.assertIn(
+            "Published stable release did not become GitHub Latest", publication
         )
-        publish = publish_job.index("gh api --method PATCH")
-        self.assertLess(classification_check, publish)
+        self.assertLess(
+            publication.rindex("require_draft("),
+            publication.index('payload={"draft": False'),
+        )
 
     def test_release_metadata_is_bound_through_final_publication(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
         )
-        create_job = workflow.split("  create-release:\n", 1)[1].split("  build:\n", 1)[
-            0
-        ]
-        publish_job = workflow.split("  publish-release:\n", 1)[1]
-
-        for output_name in (
-            "release_title_sha256",
-            "release_body_sha256",
-        ):
-            self.assertIn(
-                f"{output_name}: ${{{{ steps.ensure_release.outputs.{output_name} }}}}",
-                create_job,
-            )
-            self.assertIn(f'echo "{output_name}=${output_name}"', create_job)
-        self.assertIn("Draft release title does not match the release tag", create_job)
+        audit = workflow.split("  audit-release-assets:\n", 1)[1].split(
+            "  publish-release:\n", 1
+        )[0]
+        self.assertLess(
+            audit.index("release_handoff.py manifest"),
+            audit.index("actions/attest-build-provenance@"),
+        )
+        self.assertLess(
+            audit.index("actions/attest-build-provenance@"),
+            audit.rindex("actions/upload-artifact@"),
+        )
         self.assertIn(
-            "Draft release body does not exactly match the current signing policy and changelog",
-            create_job,
+            "subject-path: ${{ runner.temp }}/quotabot-final-assets/release-handoff.json",
+            audit,
         )
-        self.assertIn("jq -erj '.name | strings'", create_job)
-        self.assertIn("jq -erj '.body | strings'", create_job)
-        self.assertEqual(create_job.count("cmp -s"), 2)
-        self.assertNotIn('release_title="$(gh api', create_job)
-        self.assertNotIn('release_body="$(gh api', create_job)
-
-        self.assertIn("EXPECTED_RELEASE_TITLE_SHA256", publish_job)
-        self.assertIn("EXPECTED_RELEASE_BODY_SHA256", publish_job)
-        self.assertIn("jq -erj '.name | strings'", publish_job)
-        self.assertIn("jq -erj '.body | strings'", publish_job)
-        self.assertNotIn('release_title="$(gh api', publish_job)
-        self.assertNotIn('release_body="$(gh api', publish_job)
-        title_check = publish_job.index(
-            "The draft release title changed after creation"
+        publication = (ROOT / "tools" / "publish_release.py").read_text(
+            encoding="utf-8"
         )
-        body_check = publish_job.index("The draft release body changed after creation")
-        asset_check = publish_job.index(
-            "The draft release asset set changed after final audit"
+        self.assertIn('"body": metadata["body"]', publication)
+        self.assertIn('"name": metadata["title"]', publication)
+        self.assertIn("verify_provenance(manifest_path, metadata)", publication)
+        self.assertIn(
+            "inventory_identity(final_assets) != audited_identity", publication
         )
-        publish = publish_job.index("gh api --method PATCH")
-        self.assertLess(title_check, asset_check)
-        self.assertLess(body_check, asset_check)
-        self.assertLess(asset_check, publish)
+        self.assertLess(
+            publication.index("Draft asset set changed after final audit"),
+            publication.index('payload={"draft": False'),
+        )
 
     def test_release_runs_exact_tag_quality_and_security_gates(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
@@ -267,59 +239,37 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertNotIn("git merge-base --is-ancestor", preflight)
         self.assertIn("current protected main tip", preflight)
 
-        main_check_at = create_job.index('main_commit="$(gh api')
-        draft_at = create_job.index('if gh release view "$GITHUB_REF_NAME"')
-        create_at = create_job.index('gh release create "$GITHUB_REF_NAME"')
-        self.assertLess(main_check_at, draft_at)
-        self.assertLess(draft_at, create_at)
-        self.assertIn('"repos/$GITHUB_REPOSITORY/commits/main"', create_job)
-        self.assertIn('if [ "$GITHUB_SHA" != "$main_commit" ]', create_job)
-        self.assertIn("Releases must target the current protected main tip", create_job)
+        self.assertIn("tools/release_handoff.py prepare", create_job)
+        helper = (ROOT / "tools" / "release_handoff.py").read_text(encoding="utf-8")
+        self.assertIn(
+            'api(f"repos/{repository}/commits/main")["sha"] != source', helper
+        )
+        self.assertIn('tag_commit(repository, metadata["tag"]) != source', helper)
+        self.assertIn("require_current_source(metadata)", helper)
 
     def test_release_repeels_remote_tag_before_create_and_publish(self) -> None:
-        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+        publication = (ROOT / "tools" / "publish_release.py").read_text(
             encoding="utf-8"
         )
-        create_job = release.split("  create-release:\n", 1)[1].split("  build:\n", 1)[
-            0
-        ]
-        publish_job = release.split("  publish-release:\n", 1)[1]
-
-        for job in (create_job, publish_job):
-            self.assertIn(
-                '"repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME"', job
-            )
-            self.assertIn('"repos/$GITHUB_REPOSITORY/git/tags/$object_sha"', job)
-            self.assertIn('remote_tag_commit="$(resolve_remote_tag_commit)"', job)
-            self.assertIn('if [ "$remote_tag_commit" != "$GITHUB_SHA" ]', job)
-            self.assertIn("Release tag indirection is unexpectedly deep", job)
-
-        create_at = create_job.index('gh release create "$GITHUB_REF_NAME"')
-        create_peel_at = create_job.rindex(
-            'remote_tag_commit="$(resolve_remote_tag_commit)"', 0, create_at
+        helper = (ROOT / "tools" / "release_handoff.py").read_text(encoding="utf-8")
+        self.assertIn("for _ in range(8):", helper)
+        self.assertIn("git/ref/tags/{tag}", helper)
+        self.assertIn("git/tags/{obj['sha']}", helper)
+        self.assertGreaterEqual(
+            publication.count("require_current_source(metadata)"), 3
         )
-        create_compare_at = create_job.index(
-            'if [ "$remote_tag_commit" != "$GITHUB_SHA" ]', create_peel_at
+        self.assertIn('"--verify-tag"', publication)
+        self.assertLess(
+            publication.rindex("require_current_source(metadata)"),
+            publication.index('payload={"draft": False'),
         )
-        self.assertLess(create_peel_at, create_compare_at)
-        self.assertLess(create_compare_at, create_at)
-        self.assertIn("--verify-tag", create_job[create_at:])
-
-        publish_at = publish_job.index("gh api --method PATCH")
-        publish_peel_at = publish_job.rindex(
-            'remote_tag_commit="$(resolve_remote_tag_commit)"', 0, publish_at
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
         )
-        publish_compare_at = publish_job.index(
-            'if [ "$remote_tag_commit" != "$GITHUB_SHA" ]', publish_peel_at
-        )
-        self.assertLess(publish_peel_at, publish_compare_at)
-        self.assertLess(publish_compare_at, publish_at)
-        self.assertIn('"repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"', publish_job)
-        self.assertIn("AUDITED_ASSET_MANIFEST_SHA256", publish_job)
-        self.assertIn(
-            "The draft release asset set changed after final audit", publish_job
-        )
-        self.assertNotIn('gh release edit "$GITHUB_REF_NAME"', publish_job)
+        self.assertNotIn("gh release create", workflow)
+        self.assertNotIn("gh release upload", workflow)
+        self.assertNotIn("gh api --method PATCH", workflow)
+        self.assertNotIn("contents: write", workflow)
 
     def test_write_jobs_do_not_persist_checkout_credentials(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
@@ -371,7 +321,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
                 else len(release)
             )
             job = release[start:end]
-            self.assertIn("contents: write", job, name)
+            self.assertIn("contents: read", job, name)
             self.assertEqual(job.count("uses: actions/checkout@"), 1, name)
             self.assertEqual(job.count("persist-credentials: false"), 1, name)
 
@@ -411,7 +361,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         verify_at = desktop_job.index("python tools/verify_desktop_archive.py")
         attest_at = desktop_job.index("actions/attest-build-provenance@")
-        upload_at = desktop_job.index("gh release upload")
+        upload_at = desktop_job.rindex("actions/upload-artifact@")
         self.assertLess(verify_at, attest_at)
         self.assertLess(attest_at, upload_at)
 
@@ -423,7 +373,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             "  publish-release:\n", 1
         )[0]
 
-        download_at = verify_job.index("Accept: application/octet-stream")
+        download_at = verify_job.index("name: release-archive-desktop-")
         checksum_at = verify_job.index("verify_desktop_archive.py")
         attestation_at = verify_job.index("gh attestation verify")
         apt_at = verify_job.index("Install Linux desktop runtime prerequisites")
@@ -450,17 +400,15 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("tools/install-linux-desktop-prereqs.sh", desktop_build)
         self.assertIn("if: runner.os == 'macOS'", verify_job)
         self.assertIn("plutil -lint", verify_job)
-        self.assertIn("contents: write", verify_job)
+        self.assertIn("contents: read", verify_job)
         self.assertIn("release-sentinel", verify_job)
         self.assertIn("quotabot-desktop-current", verify_job)
         self.assertIn("quotabot-desktop-previous", verify_job)
-        self.assertIn("releases/latest", verify_job)
+        self.assertIn("needs.create-release.outputs.previous_tag", verify_job)
         self.assertIn('gh release download "$previous_tag"', verify_job)
         self.assertIn("quotabot-previous-release", verify_job)
-        self.assertIn("Previous stable release must differ", verify_job)
-        self.assertIn(
-            'previous_digest="$(resolve_tag_commit "$previous_tag")"', verify_job
-        )
+        self.assertIn("No prior remote stable release", verify_job)
+        self.assertIn('previous_digest="$PREVIOUS_DIGEST"', verify_job)
         self.assertIn('--source-digest "$previous_digest"', verify_job)
         self.assertGreaterEqual(
             verify_job.count("python tools/verify_desktop_archive.py"),
@@ -893,7 +841,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             self.assertIn("--before-root $baselineCandidate", package)
             self.assertIn("--after-root $candidate", package)
             self.assertIn("actions/attest-build-provenance@", package)
-            self.assertIn("gh release upload", package)
+            self.assertIn("name: release-archive-", package)
             self.assertNotIn("environment: release-signing", package)
             self.assertNotIn("azure/login@", package)
             self.assertNotIn("Azure/artifact-signing-action@", package)
@@ -909,7 +857,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             archive_inventory_at = package.rindex("native_code_inventory.py")
             preserve_at = package.index("actions/upload-artifact@")
             attest_at = package.index("actions/attest-build-provenance@")
-            upload_at = package.index("gh release upload")
+            upload_at = package.rindex("actions/upload-artifact@")
             self.assertLess(package_delta_at, package_at)
             self.assertLess(package_delta_at, native_verify_at)
             self.assertLess(native_verify_at, package_at)
@@ -976,10 +924,11 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             "QUOTABOT_MACOS_SIGNING_MODE must be unsigned or developer-id.",
             release,
         )
-        self.assertIn("Developer ID signed, hardened, notarized", release)
-        self.assertIn("Native signing status:", release)
-        self.assertIn("Do not bypass SmartScreen or Gatekeeper.", release)
-        self.assertIn("Draft release body does not exactly match", release)
+        helper = (ROOT / "tools" / "release_handoff.py").read_text(encoding="utf-8")
+        self.assertIn("Developer ID signed, hardened, notarized", helper)
+        self.assertIn("Native signing status:", helper)
+        self.assertIn("Do not bypass SmartScreen or Gatekeeper.", helper)
+        self.assertIn("Native signing modes must be explicitly validated", helper)
         self.assertNotIn("QUOTABOT_WINDOWS_PFX", release)
         for repository_variable in (
             "QUOTABOT_WINDOWS_SIGNING_BACKEND",
@@ -1224,7 +1173,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             self.assertIn("--expect-manifest", package)
             self.assertIn("verify_macos_signatures.py", package)
             self.assertIn("actions/attest-build-provenance@", package)
-            self.assertIn("gh release upload", package)
+            self.assertIn("name: release-archive-", package)
             self.assertNotIn("secrets.QUOTABOT_MACOS", package)
             self.assertNotIn("environment: release-signing-macos", package)
 
@@ -1261,19 +1210,20 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
         )
-        create_release = release.split("  create-release:\n", 1)[1].split(
-            "  build:\n", 1
-        )[0]
-
-        self.assertNotIn("--generate-notes", release)
-        self.assertIn("changelog_notes=", release)
-        self.assertIn("CHANGELOG.md has no release section", release)
-        self.assertIn('--notes "$release_notes"', release)
-        checkout_at = create_release.index("actions/checkout@")
-        changelog_at = create_release.index("changelog_notes=")
-        self.assertLess(checkout_at, changelog_at)
-        checkout_context = create_release[checkout_at : checkout_at + 300]
-        self.assertIn("persist-credentials: false", checkout_context)
+        helper = (ROOT / "tools" / "release_handoff.py").read_text(encoding="utf-8")
+        publication = (ROOT / "tools" / "publish_release.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("--generate-notes", release + publication)
+        self.assertIn('ROOT / "CHANGELOG.md"', helper)
+        self.assertIn("message_violations(body)", helper)
+        self.assertIn('"--notes-file"', publication)
+        create = release.split("  create-release:\n", 1)[1].split("  build:\n", 1)[0]
+        self.assertLess(
+            create.index("actions/checkout@"),
+            create.index("tools/release_handoff.py prepare"),
+        )
+        self.assertIn("persist-credentials: false", create)
 
     def test_release_signing_docs_require_azure_action_allowlist(self) -> None:
         signing = (ROOT / "docs" / "RELEASE-SIGNING.md").read_text(encoding="utf-8")

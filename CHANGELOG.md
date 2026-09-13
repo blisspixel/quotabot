@@ -24,6 +24,13 @@ Catalog evidence correctness and current integration guidance.
 
 ### Changed
 
+- Enforce approved human commit and tag identities for active branches and new
+  tags, while pinning preserved historical tags to their exact original objects.
+  Disable automated dependency update PRs while retaining security alerts and
+  first-party updates. Publish reviewed release assets under the owner's
+  account. Preserve existing releases, download URLs, and their original
+  provenance. See [repository history](docs/REPOSITORY-HISTORY.md) for the active
+  history cleanup and historical tag baseline.
 - Refresh provider, runtime, MCP, Agent Plugins, and signing research and the
   roadmap's acceptance criteria. Keep editing guidance in `CLAUDE.md`, remove
   conflicting quality-gate prose, and distinguish current research from tested

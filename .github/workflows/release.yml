@@ -1,9 +1,9 @@
 name: Release
 
-# Cuts a GitHub release when a v* tag is pushed, building native CLI and desktop
-# archives plus matching .sha256 sidecars. The release is created as a draft and
-# published only after every platform asset has been validated, attested, and
-# uploaded, so `releases/latest` never points at a partial release.
+# Builds and verifies native CLI and desktop archives when a v* tag is pushed.
+# CI preserves an attested handoff after every platform gate. The repository
+# owner publishes its exact bytes locally with tools/publish_release.py; no
+# owner token is stored in CI and no workflow creates or uploads release assets.
 
 on:
   push:
@@ -173,9 +173,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      release_id: ${{ steps.ensure_release.outputs.release_id }}
-      release_title_sha256: ${{ steps.ensure_release.outputs.release_title_sha256 }}
-      release_body_sha256: ${{ steps.ensure_release.outputs.release_body_sha256 }}
+      previous_tag: ${{ steps.ensure_release.outputs.previous_tag }}
+      previous_digest: ${{ steps.ensure_release.outputs.previous_digest }}
       windows_signing_backend: ${{ steps.ensure_release.outputs.windows_signing_backend }}
       windows_subscriber_eku: ${{ steps.ensure_release.outputs.windows_subscriber_eku }}
       macos_signing_mode: ${{ steps.ensure_release.outputs.macos_signing_mode }}
@@ -184,12 +183,15 @@ jobs:
       macos_notary_issuer_id: ${{ steps.ensure_release.outputs.macos_notary_issuer_id }}
       macos_notary_key_id: ${{ steps.ensure_release.outputs.macos_notary_key_id }}
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - name: Create the release as a draft if it does not exist
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Prepare the owner publication metadata
         id: ensure_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -200,144 +202,17 @@ jobs:
           MACOS_TEAM_ID: ${{ needs.preflight.outputs.macos_team_id }}
           MACOS_NOTARY_ISSUER_ID: ${{ needs.preflight.outputs.macos_notary_issuer_id }}
           MACOS_NOTARY_KEY_ID: ${{ needs.preflight.outputs.macos_notary_key_id }}
-        run: |
-          resolve_remote_tag_commit() {
-            local object_type object_sha
-            read -r object_type object_sha < <(gh api \
-              "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" \
-              --jq '[.object.type, .object.sha] | @tsv')
-            for _ in 1 2 3 4 5 6 7 8; do
-              case "$object_type" in
-                commit)
-                  printf '%s\n' "$object_sha"
-                  return 0
-                  ;;
-                tag)
-                  read -r object_type object_sha < <(gh api \
-                    "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" \
-                    --jq '[.object.type, .object.sha] | @tsv')
-                  ;;
-                *)
-                  echo "Release tag resolves to unsupported object type: $object_type" >&2
-                  return 1
-                  ;;
-              esac
-            done
-            echo 'Release tag indirection is unexpectedly deep.' >&2
-            return 1
-          }
-
-          expected_prerelease=false
-          prerelease_args=()
-          case "$GITHUB_REF_NAME" in
-            *-*) expected_prerelease=true; prerelease_args+=(--prerelease --latest=false) ;;
-          esac
-          if [ "$WINDOWS_SIGNING_BACKEND" = azure-artifact-signing ]; then
-            windows_status='Windows: Azure Artifact Signing Public Trust with RFC 3161 SHA-256 timestamping.'
-          else
-            windows_status='Windows: unsigned transition artifact. SmartScreen publisher identity is not established.'
-          fi
-          if [ "$MACOS_SIGNING_MODE" = developer-id ]; then
-            macos_status='macOS: Developer ID signed, hardened, notarized, stapled where supported, and Gatekeeper verified.'
-          else
-            macos_status='macOS: unsigned transition artifact. Developer ID and notarization are not established.'
-          fi
-          signing_note="Native signing status: $windows_status $macos_status Checksums and GitHub build provenance remain required. Do not bypass SmartScreen or Gatekeeper."
-          release_version="${GITHUB_REF_NAME#v}"
-          changelog_notes="$(awk -v version="$release_version" '
-            index($0, "## " version " - ") == 1 { found = 1; next }
-            found && /^## / { exit }
-            found { print }
-          ' CHANGELOG.md)"
-          if [ -z "$changelog_notes" ]; then
-            echo "CHANGELOG.md has no release section for $release_version." >&2
-            exit 1
-          fi
-          release_notes="$(printf '%s\n\n%s\n' "$signing_note" "$changelog_notes")"
-          main_commit="$(gh api \
-            "repos/$GITHUB_REPOSITORY/commits/main" \
-            --jq '.sha')"
-          if [ "$GITHUB_SHA" != "$main_commit" ]; then
-            echo 'Releases must target the current protected main tip.' >&2
-            exit 1
-          fi
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            read -r is_draft is_prerelease < <(gh release view "$GITHUB_REF_NAME" \
-              --repo "$GITHUB_REPOSITORY" \
-              --json isDraft,isPrerelease \
-              --jq '[.isDraft, .isPrerelease] | @tsv')
-            if [ "$is_draft" != true ]; then
-              echo "Refusing to replace assets on published release $GITHUB_REF_NAME." >&2
-              exit 1
-            fi
-            if [ "$is_prerelease" != "$expected_prerelease" ]; then
-              echo "Draft prerelease classification does not match $GITHUB_REF_NAME." >&2
-              exit 1
-            fi
-            remote_tag_commit="$(resolve_remote_tag_commit)"
-            if [ "$remote_tag_commit" != "$GITHUB_SHA" ]; then
-              echo 'Remote release tag no longer points to the workflow commit.' >&2
-              exit 1
-            fi
-            echo "Resuming draft release $GITHUB_REF_NAME."
-          else
-            remote_tag_commit="$(resolve_remote_tag_commit)"
-            if [ "$remote_tag_commit" != "$GITHUB_SHA" ]; then
-              echo 'Remote release tag no longer points to the workflow commit.' >&2
-              exit 1
-            fi
-            gh release create "$GITHUB_REF_NAME" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "$GITHUB_REF_NAME" \
-              --draft \
-              --verify-tag \
-              "${prerelease_args[@]}" \
-              --notes "$release_notes"
-          fi
-          release_id="$(gh release view "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json databaseId \
-            --jq '.databaseId')"
-          case "$release_id" in
-            ''|*[!0-9]*) echo 'Draft release id is invalid.' >&2; exit 1 ;;
-          esac
-          release_metadata="$RUNNER_TEMP/quotabot-release-metadata.json"
-          expected_release_title="$RUNNER_TEMP/quotabot-expected-release-title.txt"
-          expected_release_body="$RUNNER_TEMP/quotabot-expected-release-body.txt"
-          actual_release_title="$RUNNER_TEMP/quotabot-actual-release-title.txt"
-          actual_release_body="$RUNNER_TEMP/quotabot-actual-release-body.txt"
-          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" > "$release_metadata"
-          printf '%s' "$GITHUB_REF_NAME" > "$expected_release_title"
-          printf '%s' "$release_notes" > "$expected_release_body"
-          jq -erj '.name | strings' "$release_metadata" > "$actual_release_title"
-          jq -erj '.body | strings' "$release_metadata" > "$actual_release_body"
-          if ! cmp -s "$actual_release_title" "$expected_release_title"; then
-            echo 'Draft release title does not match the release tag.' >&2
-            exit 1
-          fi
-          if ! cmp -s "$actual_release_body" "$expected_release_body"; then
-            echo 'Draft release body does not exactly match the current signing policy and changelog.' >&2
-            exit 1
-          fi
-          release_title_sha256="$(sha256sum "$actual_release_title" | awk '{print $1}')"
-          release_body_sha256="$(sha256sum "$actual_release_body" | awk '{print $1}')"
-          if [[ ! "$release_title_sha256" =~ ^[0-9a-f]{64}$ ]] || \
-             [[ ! "$release_body_sha256" =~ ^[0-9a-f]{64}$ ]]; then
-            echo 'Draft release metadata digest is invalid.' >&2
-            exit 1
-          fi
-          {
-            echo "release_id=$release_id"
-            echo "release_title_sha256=$release_title_sha256"
-            echo "release_body_sha256=$release_body_sha256"
-            echo "windows_signing_backend=$WINDOWS_SIGNING_BACKEND"
-            echo "windows_subscriber_eku=$WINDOWS_SUBSCRIBER_EKU"
-            echo "macos_signing_mode=$MACOS_SIGNING_MODE"
-            echo "macos_developer_identity=$MACOS_DEVELOPER_IDENTITY"
-            echo "macos_team_id=$MACOS_TEAM_ID"
-            echo "macos_notary_issuer_id=$MACOS_NOTARY_ISSUER_ID"
-            echo "macos_notary_key_id=$MACOS_NOTARY_KEY_ID"
-          } >> "$GITHUB_OUTPUT"
+          ALLOW_INITIAL_RELEASE: ${{ vars.ALLOW_INITIAL_RELEASE }}
+        run: >
+          python tools/release_handoff.py prepare
+          --output "$RUNNER_TEMP/quotabot-release-metadata.json"
+      - name: Preserve the publication metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-metadata
+          path: ${{ runner.temp }}/quotabot-release-metadata.json
+          if-no-files-found: error
+          retention-days: 14
 
   build:
     needs: create-release
@@ -358,7 +233,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
-      contents: write # upload the asset to the release
+      contents: read
       id-token: write # mint the provenance signing certificate
       attestations: write # record the attestation
     steps:
@@ -382,16 +257,15 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: ${{ matrix.archive }}
-      - name: Upload the asset to the release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "$GITHUB_REF_NAME" \
-            "${{ matrix.archive }}" \
-            "${{ matrix.archive }}.sha256" \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
+      - name: Preserve the verified cli release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-archive-cli-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            ${{ matrix.archive }}
+            ${{ matrix.archive }}.sha256
+          if-no-files-found: error
+          retention-days: 14
 
   build-macos-cli-unsigned:
     needs: create-release
@@ -623,7 +497,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     timeout-minutes: 20
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
     steps:
@@ -719,14 +593,15 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: release/quotabot-darwin-arm64.tar.gz
-      - name: Upload the macOS CLI asset to the release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "$GITHUB_REF_NAME" \
-            release/quotabot-darwin-arm64.tar.gz \
-            release/quotabot-darwin-arm64.tar.gz.sha256 \
-            --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Preserve the verified cli release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-archive-cli-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            release/quotabot-darwin-arm64.tar.gz
+            release/quotabot-darwin-arm64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
 
   build-windows-cli-unsigned:
     needs: create-release
@@ -899,7 +774,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
     steps:
@@ -1000,16 +875,15 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: release/quotabot-windows-x64.zip
-      - name: Upload the Windows CLI asset to the release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "$GITHUB_REF_NAME" \
-            release/quotabot-windows-x64.zip \
-            release/quotabot-windows-x64.zip.sha256 \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
+      - name: Preserve the verified cli release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-archive-cli-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            release/quotabot-windows-x64.zip
+            release/quotabot-windows-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
 
   verify-cli-release:
     needs: [create-release, build, package-macos-cli, package-windows-cli]
@@ -1036,9 +910,7 @@ jobs:
     env:
       QUOTABOT_DEMO: '1'
     permissions:
-      # GitHub exposes draft releases only to push-capable identities. This job
-      # performs reads only, but contents: write is required to see the draft.
-      contents: write
+      contents: read
       attestations: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -1060,30 +932,11 @@ jobs:
         with:
           name: macos-cli-native-signing-inventory
           path: ${{ runner.temp }}/quotabot-macos-cli-draft-evidence
-      - name: Download the draft CLI asset and checksum
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
-        run: |
-          case "$RELEASE_ID" in
-            ''|*[!0-9]*) echo 'Draft release id is invalid.' >&2; exit 1 ;;
-          esac
-          destination="$RUNNER_TEMP/quotabot-cli-release"
-          mkdir -p "$destination"
-          for name in "${{ matrix.archive }}" "${{ matrix.archive }}.sha256"; do
-            asset_id="$(gh api \
-              "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
-              --paginate \
-              --jq ".[] | select(.name == \"$name\") | .id")"
-            case "$asset_id" in
-              ''|*[!0-9]*) echo "Draft asset id is invalid for $name." >&2; exit 1 ;;
-            esac
-            gh api \
-              -H 'Accept: application/octet-stream' \
-              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
-              > "$destination/$name"
-          done
+      - name: Download the verified CLI archive and checksum
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-archive-cli-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/quotabot-cli-release
       - name: Reverify downloaded CLI archive and provenance
         shell: bash
         env:
@@ -1456,7 +1309,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     timeout-minutes: 20
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
     steps:
@@ -1555,14 +1408,15 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: release/quotabot-darwin-arm64-desktop.zip
-      - name: Upload the macOS desktop asset to the release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "$GITHUB_REF_NAME" \
-            release/quotabot-darwin-arm64-desktop.zip \
-            release/quotabot-darwin-arm64-desktop.zip.sha256 \
-            --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Preserve the verified desktop release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-archive-desktop-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            release/quotabot-darwin-arm64-desktop.zip
+            release/quotabot-darwin-arm64-desktop.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
 
   build-desktop:
     needs: create-release
@@ -1576,7 +1430,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
     steps:
@@ -1609,16 +1463,15 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: ${{ matrix.archive }}
-      - name: Upload the desktop asset to the release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "$GITHUB_REF_NAME" \
-            "${{ matrix.archive }}" \
-            "${{ matrix.archive }}.sha256" \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
+      - name: Preserve the verified desktop release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-archive-desktop-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            ${{ matrix.archive }}
+            ${{ matrix.archive }}.sha256
+          if-no-files-found: error
+          retention-days: 14
 
   build-windows-desktop-unsigned:
     needs: create-release
@@ -1791,7 +1644,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
     steps:
@@ -1892,16 +1745,15 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: release/quotabot-windows-x64-desktop.zip
-      - name: Upload the Windows desktop asset to the release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "$GITHUB_REF_NAME" \
-            release/quotabot-windows-x64-desktop.zip \
-            release/quotabot-windows-x64-desktop.zip.sha256 \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
+      - name: Preserve the verified desktop release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-archive-desktop-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            release/quotabot-windows-x64-desktop.zip
+            release/quotabot-windows-x64-desktop.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
 
   verify-desktop-release:
     needs: [create-release, build-desktop, package-macos-desktop, package-windows-desktop]
@@ -1924,9 +1776,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
-      # GitHub exposes draft releases only to push-capable identities. This job
-      # performs reads only, but contents: write is required to see the draft.
-      contents: write
+      contents: read
       attestations: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -1948,30 +1798,11 @@ jobs:
         with:
           name: macos-desktop-native-signing-inventory
           path: ${{ runner.temp }}/quotabot-macos-desktop-draft-evidence
-      - name: Download the draft desktop asset and checksum
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
-        run: |
-          case "$RELEASE_ID" in
-            ''|*[!0-9]*) echo 'Draft release id is invalid.' >&2; exit 1 ;;
-          esac
-          destination="$RUNNER_TEMP/quotabot-release"
-          mkdir -p "$destination"
-          for name in "${{ matrix.archive }}" "${{ matrix.archive }}.sha256"; do
-            asset_id="$(gh api \
-              "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
-              --paginate \
-              --jq ".[] | select(.name == \"$name\") | .id")"
-            case "$asset_id" in
-              ''|*[!0-9]*) echo "Draft asset id is invalid for $name." >&2; exit 1 ;;
-            esac
-            gh api \
-              -H 'Accept: application/octet-stream' \
-              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
-              > "$destination/$name"
-          done
+      - name: Download the verified desktop archive and checksum
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-archive-desktop-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/quotabot-release
       - name: Reverify downloaded archive shape and checksum
         shell: bash
         run: python tools/verify_desktop_archive.py "$RUNNER_TEMP/quotabot-release/${{ matrix.archive }}"
@@ -2069,46 +1900,15 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREVIOUS_TAG: ${{ needs.create-release.outputs.previous_tag }}
+          PREVIOUS_DIGEST: ${{ needs.create-release.outputs.previous_digest }}
         run: |
-          resolve_tag_commit() {
-            local tag="$1"
-            local object_type object_sha
-            read -r object_type object_sha < <(gh api \
-              "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" \
-              --jq '[.object.type, .object.sha] | @tsv')
-            for _ in 1 2 3 4 5 6 7 8; do
-              case "$object_type" in
-                commit)
-                  [[ "$object_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
-                  printf '%s\n' "$object_sha"
-                  return 0
-                  ;;
-                tag)
-                  read -r object_type object_sha < <(gh api \
-                    "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" \
-                    --jq '[.object.type, .object.sha] | @tsv')
-                  ;;
-                *) return 1 ;;
-              esac
-            done
-            return 1
-          }
-
-          previous_tag="$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases/latest" \
-            --jq '.tag_name')"
-          if [[ ! "$previous_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo 'Previous stable release tag is invalid.' >&2
-            exit 1
+          previous_tag="$PREVIOUS_TAG"
+          previous_digest="$PREVIOUS_DIGEST"
+          if [ -z "$previous_tag" ]; then
+            echo 'No prior remote stable release. Fresh-install lifecycle only; upgrade and rollback were not exercised.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
-          if [ "$previous_tag" = "$GITHUB_REF_NAME" ]; then
-            echo 'Previous stable release must differ from the candidate.' >&2
-            exit 1
-          fi
-          previous_digest="$(resolve_tag_commit "$previous_tag")" || {
-            echo 'Previous stable release tag does not resolve to one commit.' >&2
-            exit 1
-          }
           destination="$RUNNER_TEMP/quotabot-previous-release"
           mkdir -p "$destination"
           gh release download "$previous_tag" \
@@ -2136,6 +1936,7 @@ jobs:
         env:
           GH_TOKEN: ''
           GITHUB_TOKEN: ''
+          PREVIOUS_TAG: ${{ needs.create-release.outputs.previous_tag }}
         run: |
           $archive = Join-Path $env:RUNNER_TEMP 'quotabot-release\${{ matrix.archive }}'
           $previousArchive = Join-Path $env:RUNNER_TEMP 'quotabot-previous-release\${{ matrix.archive }}'
@@ -2147,7 +1948,9 @@ jobs:
           New-Item -ItemType File -Force -Path $sentinel | Out-Null
           $env:LOCALAPPDATA = $config
 
-          Expand-Archive -LiteralPath $previousArchive -DestinationPath $previous
+          if ($env:PREVIOUS_TAG) {
+            Expand-Archive -LiteralPath $previousArchive -DestinationPath $previous
+          }
           Expand-Archive -LiteralPath $archive -DestinationPath $current
           $readinessReport = Join-Path $env:RUNNER_TEMP 'quotabot-windows-current-readiness.json'
           $previousReadinessReport = Join-Path $env:RUNNER_TEMP 'quotabot-windows-previous-readiness.json'
@@ -2155,14 +1958,21 @@ jobs:
             --executable (Join-Path $current 'quotabot.exe') `
             --report $readinessReport
           if ($LASTEXITCODE -ne 0) { throw 'Current desktop archive did not start.' }
-          python tools/desktop_readiness_smoke.py `
-            --executable (Join-Path $previous 'quotabot.exe') `
-            --report $previousReadinessReport
-          if ($LASTEXITCODE -ne 0) { throw 'Desktop rollback archive did not start.' }
+          if ($env:PREVIOUS_TAG) {
+            python tools/desktop_readiness_smoke.py `
+              --executable (Join-Path $previous 'quotabot.exe') `
+              --report $previousReadinessReport
+            if ($LASTEXITCODE -ne 0) { throw 'Desktop rollback archive did not start.' }
+          }
 
           function Remove-PortableTree {
             param([Parameter(Mandatory = $true)][string]$LiteralPath)
 
+            $resolved = [IO.Path]::GetFullPath($LiteralPath)
+            $workspace = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
+            if (-not $resolved.StartsWith($workspace, [StringComparison]::OrdinalIgnoreCase)) {
+              throw 'Portable cleanup path escapes the runner workspace.'
+            }
             for ($attempt = 1; $attempt -le 10; $attempt++) {
               try {
                 Remove-Item -LiteralPath $LiteralPath -Recurse -Force -ErrorAction Stop
@@ -2175,7 +1985,7 @@ jobs:
           }
 
           Remove-PortableTree -LiteralPath $current
-          Remove-PortableTree -LiteralPath $previous
+          if ($env:PREVIOUS_TAG) { Remove-PortableTree -LiteralPath $previous }
           if (-not (Test-Path -LiteralPath $sentinel -PathType Leaf)) {
             throw 'Portable uninstall removed the persistent-state sentinel.'
           }
@@ -2184,6 +1994,7 @@ jobs:
         env:
           GH_TOKEN: ''
           GITHUB_TOKEN: ''
+          PREVIOUS_TAG: ${{ needs.create-release.outputs.previous_tag }}
         run: |
           archive="$RUNNER_TEMP/quotabot-release/${{ matrix.archive }}"
           previous_archive="$RUNNER_TEMP/quotabot-previous-release/${{ matrix.archive }}"
@@ -2194,14 +2005,16 @@ jobs:
           mkdir -p "$(dirname "$sentinel")" "$current" "$previous"
           : > "$sentinel"
 
-          tar -xzf "$previous_archive" -C "$previous"
+          if [ -n "$PREVIOUS_TAG" ]; then tar -xzf "$previous_archive" -C "$previous"; fi
           tar -xzf "$archive" -C "$current"
           python tools/desktop_readiness_smoke.py \
             --executable "$current/quotabot" \
             --report "$RUNNER_TEMP/quotabot-linux-current-readiness.json"
-          python tools/desktop_readiness_smoke.py \
-            --executable "$previous/quotabot" \
-            --report "$RUNNER_TEMP/quotabot-linux-previous-readiness.json"
+          if [ -n "$PREVIOUS_TAG" ]; then
+            python tools/desktop_readiness_smoke.py \
+              --executable "$previous/quotabot" \
+              --report "$RUNNER_TEMP/quotabot-linux-previous-readiness.json"
+          fi
 
           rm -rf "$current" "$previous"
           test -f "$sentinel"
@@ -2218,6 +2031,7 @@ jobs:
         env:
           GH_TOKEN: ''
           GITHUB_TOKEN: ''
+          PREVIOUS_TAG: ${{ needs.create-release.outputs.previous_tag }}
         run: |
           archive="$RUNNER_TEMP/quotabot-release/${{ matrix.archive }}"
           previous_archive="$RUNNER_TEMP/quotabot-previous-release/${{ matrix.archive }}"
@@ -2228,9 +2042,11 @@ jobs:
           mkdir -p "$(dirname "$sentinel")" "$current" "$previous"
           : > "$sentinel"
 
-          ditto -x -k "$previous_archive" "$previous"
+          if [ -n "$PREVIOUS_TAG" ]; then ditto -x -k "$previous_archive" "$previous"; fi
           ditto -x -k "$archive" "$current"
-          for bundle in "$current/quotabot.app" "$previous/quotabot.app"; do
+          bundles=("$current/quotabot.app")
+          if [ -n "$PREVIOUS_TAG" ]; then bundles+=("$previous/quotabot.app"); fi
+          for bundle in "${bundles[@]}"; do
             test -x "$bundle/Contents/MacOS/quotabot"
             plutil -lint "$bundle/Contents/Info.plist"
           done
@@ -2248,11 +2064,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      # Draft asset listings require a push-capable token.
-      contents: write
-      attestations: read
-    outputs:
-      asset_manifest_sha256: ${{ steps.asset_manifest.outputs.asset_manifest_sha256 }}
+      contents: read
+      attestations: write
+      id-token: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -2284,79 +2098,25 @@ jobs:
         with:
           name: windows-desktop-draft-signature-verification
           path: ${{ runner.temp }}/quotabot-final-windows-evidence/desktop
-      - name: Require the exact complete release asset set
-        id: asset_manifest
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
-        run: |
-          case "$RELEASE_ID" in
-            ''|*[!0-9]*) echo 'Draft release id is invalid.' >&2; exit 1 ;;
-          esac
-          expected="$(printf '%s\n' \
-            quotabot-darwin-arm64-desktop.zip \
-            quotabot-darwin-arm64-desktop.zip.sha256 \
-            quotabot-darwin-arm64.tar.gz \
-            quotabot-darwin-arm64.tar.gz.sha256 \
-            quotabot-linux-arm64.tar.gz \
-            quotabot-linux-arm64.tar.gz.sha256 \
-            quotabot-linux-x64-desktop.tar.gz \
-            quotabot-linux-x64-desktop.tar.gz.sha256 \
-            quotabot-linux-x64.tar.gz \
-            quotabot-linux-x64.tar.gz.sha256 \
-            quotabot-windows-x64-desktop.zip \
-            quotabot-windows-x64-desktop.zip.sha256 \
-            quotabot-windows-x64.zip \
-            quotabot-windows-x64.zip.sha256 | sort)"
-          actual="$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
-            --paginate \
-            --jq '.[].name' | sort)"
-          if [ "$actual" != "$expected" ]; then
-            echo 'Draft release asset set is incomplete or unexpected.' >&2
-            diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true
-            exit 1
-          fi
-          invalid="$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
-            --paginate \
-            --jq '.[] | select(.state != "uploaded") | .name')"
-          if [ -n "$invalid" ]; then
-            echo "Draft release has assets that are not uploaded: $invalid" >&2
-            exit 1
-          fi
-          manifest="$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
-            --jq 'sort_by(.name) | .[] | [.id, .name, .size, .state, .updated_at] | @tsv')"
-          manifest_sha256="$(printf '%s\n' "$manifest" | sha256sum | awk '{print $1}')"
-          echo "asset_manifest_sha256=$manifest_sha256" >> "$GITHUB_OUTPUT"
+      - name: Download the exact complete release asset set
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-archive-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/quotabot-final-assets
+      - name: Download publication metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-metadata
+          path: ${{ runner.temp }}/quotabot-final-metadata
       - name: Reverify every final archive, checksum, and attestation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
           MACOS_SIGNING_MODE: ${{ needs.create-release.outputs.macos_signing_mode }}
           WINDOWS_SIGNING_BACKEND: ${{ needs.create-release.outputs.windows_signing_backend }}
         run: |
           destination="$RUNNER_TEMP/quotabot-final-assets"
           mkdir -p "$destination"
-          names="$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
-            --paginate \
-            --jq '.[].name')"
-          while IFS= read -r name; do
-            asset_id="$(gh api \
-              "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
-              --paginate \
-              --jq ".[] | select(.name == \"$name\") | .id")"
-            case "$asset_id" in
-              ''|*[!0-9]*) echo "Draft asset id is invalid for $name." >&2; exit 1 ;;
-            esac
-            gh api \
-              -H 'Accept: application/octet-stream' \
-              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
-              > "$destination/$name"
-          done <<< "$names"
-
           (cd "$destination" && sha256sum --check ./*.sha256)
           if [ "$MACOS_SIGNING_MODE" = developer-id ]; then
             evidence="$RUNNER_TEMP/quotabot-final-macos-evidence"
@@ -2415,9 +2175,27 @@ jobs:
               --deny-self-hosted-runners
           done
 
+      - name: Bind the verified handoff to this exact workflow attempt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          python tools/release_handoff.py manifest
+          --metadata "$RUNNER_TEMP/quotabot-final-metadata/quotabot-release-metadata.json"
+          --directory "$RUNNER_TEMP/quotabot-final-assets"
+      - name: Attest the complete verified release handoff
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: ${{ runner.temp }}/quotabot-final-assets/release-handoff.json
+      - name: Preserve the owner publication handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-handoff
+          path: ${{ runner.temp }}/quotabot-final-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
   publish-release:
-    # Runs only if every build leg succeeded, so the release is published only
-    # after all platform assets are present. Prereleases do not replace latest.
+    name: Owner publication handoff
     needs:
       - create-release
       - audit-release-assets
@@ -2432,131 +2210,13 @@ jobs:
           needs.codeql-gate.result == 'success' &&
           needs.secret-scan-gate.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
-      contents: write
+      contents: read
     steps:
-      - name: Publish the drafted release
+      - name: Report the verified local publication command
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
-          EXPECTED_RELEASE_TITLE_SHA256: ${{ needs.create-release.outputs.release_title_sha256 }}
-          EXPECTED_RELEASE_BODY_SHA256: ${{ needs.create-release.outputs.release_body_sha256 }}
-          AUDITED_ASSET_MANIFEST_SHA256: ${{ needs.audit-release-assets.outputs.asset_manifest_sha256 }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
         run: |
-          resolve_remote_tag_commit() {
-            local object_type object_sha
-            read -r object_type object_sha < <(gh api \
-              "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" \
-              --jq '[.object.type, .object.sha] | @tsv')
-            for _ in 1 2 3 4 5 6 7 8; do
-              case "$object_type" in
-                commit)
-                  printf '%s\n' "$object_sha"
-                  return 0
-                  ;;
-                tag)
-                  read -r object_type object_sha < <(gh api \
-                    "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" \
-                    --jq '[.object.type, .object.sha] | @tsv')
-                  ;;
-                *)
-                  echo "Release tag resolves to unsupported object type: $object_type" >&2
-                  return 1
-                  ;;
-              esac
-            done
-            echo 'Release tag indirection is unexpectedly deep.' >&2
-            return 1
-          }
-
-          remote_tag_commit="$(resolve_remote_tag_commit)"
-          if [ "$remote_tag_commit" != "$GITHUB_SHA" ]; then
-            echo 'Remote release tag no longer points to the workflow commit.' >&2
-            exit 1
-          fi
-          main_commit="$(gh api \
-            "repos/$GITHUB_REPOSITORY/commits/main" \
-            --jq '.sha')"
-          if [ "$GITHUB_SHA" != "$main_commit" ]; then
-            echo 'The protected main tip changed before release publication.' >&2
-            exit 1
-          fi
-          case "$RELEASE_ID" in
-            ''|*[!0-9]*) echo 'Draft release id is invalid.' >&2; exit 1 ;;
-          esac
-          if [[ ! "$AUDITED_ASSET_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
-            echo 'Audited asset manifest digest is invalid.' >&2
-            exit 1
-          fi
-          if [[ ! "$EXPECTED_RELEASE_TITLE_SHA256" =~ ^[0-9a-f]{64}$ ]] || \
-             [[ ! "$EXPECTED_RELEASE_BODY_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
-            echo 'Expected release metadata digest is invalid.' >&2
-            exit 1
-          fi
-          expected_prerelease=false
-          expected_make_latest=true
-          case "$GITHUB_REF_NAME" in
-            *-*) expected_prerelease=true; expected_make_latest=false ;;
-          esac
-          read -r release_tag is_draft is_prerelease < <(gh api \
-            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
-            --jq '[.tag_name, .draft, .prerelease] | @tsv')
-          if [ "$release_tag" != "$GITHUB_REF_NAME" ] || [ "$is_draft" != true ]; then
-            echo 'The audited release object is missing, replaced, or no longer a draft.' >&2
-            exit 1
-          fi
-          if [ "$is_prerelease" != "$expected_prerelease" ]; then
-            echo 'The draft prerelease classification changed after creation.' >&2
-            exit 1
-          fi
-          release_metadata="$RUNNER_TEMP/quotabot-final-release-metadata.json"
-          release_title="$RUNNER_TEMP/quotabot-final-release-title.txt"
-          release_body="$RUNNER_TEMP/quotabot-final-release-body.txt"
-          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > "$release_metadata"
-          jq -erj '.name | strings' "$release_metadata" > "$release_title"
-          jq -erj '.body | strings' "$release_metadata" > "$release_body"
-          release_title_sha256="$(sha256sum "$release_title" | awk '{print $1}')"
-          release_body_sha256="$(sha256sum "$release_body" | awk '{print $1}')"
-          if [ "$release_title_sha256" != "$EXPECTED_RELEASE_TITLE_SHA256" ]; then
-            echo 'The draft release title changed after creation.' >&2
-            exit 1
-          fi
-          if [ "$release_body_sha256" != "$EXPECTED_RELEASE_BODY_SHA256" ]; then
-            echo 'The draft release body changed after creation.' >&2
-            exit 1
-          fi
-          manifest="$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
-            --jq 'sort_by(.name) | .[] | [.id, .name, .size, .state, .updated_at] | @tsv')"
-          manifest_sha256="$(printf '%s\n' "$manifest" | sha256sum | awk '{print $1}')"
-          if [ "$manifest_sha256" != "$AUDITED_ASSET_MANIFEST_SHA256" ]; then
-            echo 'The draft release asset set changed after final audit.' >&2
-            exit 1
-          fi
-          gh api --method PATCH \
-            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
-            -F draft=false \
-            -f make_latest="$expected_make_latest" >/dev/null
-          read -r published_tag published_draft published_prerelease < <(gh api \
-            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
-            --jq '[.tag_name, .draft, .prerelease] | @tsv')
-          if [ "$published_tag" != "$GITHUB_REF_NAME" ] || \
-             [ "$published_draft" != false ] || \
-             [ "$published_prerelease" != "$expected_prerelease" ]; then
-            echo 'Published release metadata does not match the audited draft.' >&2
-            exit 1
-          fi
-          latest_tag="$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases/latest" \
-            --jq '.tag_name')"
-          if [ "$expected_make_latest" = true ] && \
-             [ "$latest_tag" != "$GITHUB_REF_NAME" ]; then
-            echo 'Stable release did not become GitHub Latest.' >&2
-            exit 1
-          fi
-          if [ "$expected_make_latest" = false ] && \
-             [ "$latest_tag" = "$GITHUB_REF_NAME" ]; then
-            echo 'Prerelease unexpectedly replaced GitHub Latest.' >&2
-            exit 1
-          fi
+          echo 'All release gates passed. CI has not created or uploaded a GitHub release.' >> "$GITHUB_STEP_SUMMARY"
+          echo "Publish from the exact clean source checkout with: python tools/publish_release.py --run-id $RELEASE_RUN_ID --directory <empty-handoff-directory>" >> "$GITHUB_STEP_SUMMARY"

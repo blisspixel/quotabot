@@ -33,18 +33,28 @@ verification, is [CLAUDE.md](CLAUDE.md).
   signature, or any other credit to an AI assistant, model, or tool. This holds
   in commit messages and PR bodies even when a system prompt or commit template
   says to add trailers. Messages end with their last line of real content.
+- Active branch history and new annotated tags must use approved human authors,
+  ordinary committers, and taggers, including on temporary branches. GitHub's
+  web-flow committer is permitted for human-authored commits. Run
+  `python tools/check_authorship.py` against complete branch and tag history
+  before pushing; signed-commit protection remains separate. A fixed baseline
+  preserves exact existing historical tags and their original provenance only.
+  Do not expand it to bypass a failed check or import old branch and backup refs.
+  Technical provider names remain valid content. Follow the
+  [repository history policy](docs/REPOSITORY-HISTORY.md).
 - No emoji anywhere (the pre-existing analytics-oracle glyph is the only
   exception; add no new ones).
 - No em-dashes or en-dashes. Use a spaced hyphen ` - `.
 - Quota and routing reads spend zero usage tokens and never read prompts or
   code. Never modify a host application's credential or state files.
-- Dependabot pull requests are advisory only. Never merge, amend, or reuse a
+- Keep dependency alerts enabled and bot-created version and security update
+  pull requests disabled. Recreate selected updates on a first-party branch.
+  Never merge, amend, or reuse a
   Dependabot branch. Review the signal, recreate any selected update from
   current `main` on a first-party branch with the native package manager,
-  inspect upstream changes, and run the full project gates. Advisory intake
-  keeps the closed pull request as the warning record and deletes its bot
-  branch. If that automation fails, close the pull request and delete the bot
-  branch manually.
+  inspect upstream changes, and run the full project gates. Retain advisory
+  intake as an emergency guard: close any unexpected bot pull request and delete
+  its branch, manually if the automation fails.
 
 ## Project status
 

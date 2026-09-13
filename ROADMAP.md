@@ -94,6 +94,13 @@ same evidence in the app and their agent harnesses.** Useful product work
 continues while publisher identities are unavailable. Signing remains a native
 distribution gate before 1.0; store admission is not a product-development gate.
 
+The 0.11.6 maintenance work corrects NVIDIA catalog-only evidence, updates the
+MCP examples' security dependency, and adds four native legacy-protocol launch
+checks. It also establishes human-authored active branch, new tag, and release
+publication gates while preserving exact historical tags and released assets
+with their original provenance. These changes do not close the provider or
+modern-protocol gaps below.
+
 The 0.11.5 release reads the live Claude weekly pool when the session row omits
 a reset, keeps glance and doctor honest about leftover versus spent, retires the
 shared HTTP client on MCP shutdown, and keeps OAuth token ownership through
