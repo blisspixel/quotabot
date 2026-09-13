@@ -65,6 +65,19 @@ def require_run(metadata: dict, run_id: int) -> None:
         raise ValueError("Release workflow run does not match the successful handoff")
 
 
+def find_release(repository: str, tag: str) -> dict | None:
+    # Tag lookup is published-only; authenticated listings also include drafts.
+    pages = json.loads(
+        gh("api", "--paginate", "--slurp", f"repos/{repository}/releases?per_page=100")
+    )
+    matching = [
+        release for page in pages for release in page if release["tag_name"] == tag
+    ]
+    if len(matching) > 1:
+        raise ValueError("Multiple releases match the tag")
+    return matching[0] if matching else None
+
+
 def verify_provenance(path: Path, metadata: dict) -> None:
     repository = metadata["repository"]
     gh(
@@ -182,24 +195,11 @@ def publish(repository: str, run_id: int, directory: Path) -> str:
     for name in ARCHIVES:
         verify_provenance(directory / name, metadata)
 
-    releases = json.loads(
-        gh("api", "--paginate", "--slurp", f"repos/{repository}/releases?per_page=100")
-    )
-    matching = [
-        release
-        for page in releases
-        for release in page
-        if release["tag_name"] == metadata["tag"]
-    ]
-    if len(matching) > 1:
-        raise ValueError("Multiple releases match the tag")
-    if matching:
-        release = matching[0]
-        require_draft(release, metadata, owner)
-    else:
+    release = find_release(repository, metadata["tag"])
+    if release is None:
         with tempfile.TemporaryDirectory(prefix="quotabot-release-notes-") as temporary:
             notes = Path(temporary) / "notes.md"
-            notes.write_text(metadata["body"], encoding="utf-8")
+            notes.write_text(metadata["body"], encoding="utf-8", newline="\n")
             arguments = [
                 "release",
                 "create",
@@ -217,8 +217,10 @@ def publish(repository: str, run_id: int, directory: Path) -> str:
                 arguments.extend(["--prerelease", "--latest=false"])
             require_current_source(metadata)
             gh(*arguments)
-        release = api(f"repos/{repository}/releases/tags/{metadata['tag']}")
-        require_draft(release, metadata, owner)
+        release = find_release(repository, metadata["tag"])
+        if release is None:
+            raise ValueError("Created release draft was not found")
+    require_draft(release, metadata, owner)
     endpoint = f"repos/{repository}/releases/{release['id']}"
     assets = api(endpoint + "/assets?per_page=100")
     require_assets(assets, metadata, owner, complete=False)
@@ -269,13 +271,23 @@ def publish(repository: str, run_id: int, directory: Path) -> str:
     prerelease = "-" in metadata["tag"]
     api(
         endpoint,
-        payload={"draft": False, "make_latest": "false" if prerelease else "true"},
+        payload={
+            "tag_name": metadata["tag"],
+            "target_commitish": metadata["source_digest"],
+            "name": metadata["title"],
+            "body": metadata["body"],
+            "draft": False,
+            "prerelease": prerelease,
+            "make_latest": "false" if prerelease else "true",
+        },
     )
     published = api(endpoint)
     if (
         published.get("draft") is not False
         or published.get("immutable") is not True
         or published.get("tag_name") != metadata["tag"]
+        or published.get("name") != metadata["title"]
+        or published.get("body") != metadata["body"]
         or published.get("prerelease") is not prerelease
         or published.get("author", {}).get("login") != owner
     ):

@@ -4,6 +4,13 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- Find newly created owner release drafts through authenticated, paginated
+  release listings. GitHub's tag lookup returns published releases only. Reuse
+  the same exact-tag lookup when creating or resuming publication, preserving
+  duplicate, owner, asset, and provenance checks. Preserve attested note line
+  endings on Windows and include the exact tag, source, and notes in the final
+  publication update to guard against the observed untagged draft behavior.
+
 ## 0.11.6 - 2026-09-13
 
 Catalog evidence correctness and current integration guidance.

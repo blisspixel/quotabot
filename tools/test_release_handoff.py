@@ -22,7 +22,7 @@ def metadata() -> dict:
         "run_id": 123,
         "run_attempt": 1,
         "title": "v0.11.6",
-        "body": "Claude and Codex quota reads remain metadata only.",
+        "body": "Claude and Codex quota reads remain metadata only.\n\nQuota fixes.\n",
         "previous_tag": None,
         "previous_digest": None,
         "initial_release": True,
@@ -197,6 +197,7 @@ class PublicationTests(unittest.TestCase):
             for name, data in self.contents.items()
         }
         self.release = None
+        self.created = 0
         self.assets = []
         self.published = False
         self.run = {
@@ -219,10 +220,22 @@ class PublicationTests(unittest.TestCase):
             return self.run
         if endpoint.endswith("/assets?per_page=100"):
             return copy.deepcopy(self.assets)
-        if "/releases/" in endpoint:
+        if endpoint == "repos/blisspixel/quotabot/releases/tags/v0.11.6":
+            if self.release is None or self.release["draft"]:
+                raise subprocess.CalledProcessError(1, ["gh", "api", endpoint])
+            return copy.deepcopy(self.release)
+        if endpoint == "repos/blisspixel/quotabot/releases/latest":
+            self.assertTrue(self.published)
+            return copy.deepcopy(self.release)
+        if endpoint == "repos/blisspixel/quotabot/releases/9":
             if payload:
-                self.published = True
-                self.release.update(draft=False, immutable=True)
+                # Draft updates without a tag can acquire an untagged identity.
+                self.release["tag_name"] = payload.get("tag_name", "untagged-draft")
+                for key in ("name", "body", "draft", "prerelease", "target_commitish"):
+                    if key in payload:
+                        self.release[key] = payload[key]
+                self.published = not self.release["draft"]
+                self.release["immutable"] = self.published
             return copy.deepcopy(self.release)
         raise AssertionError(endpoint)
 
@@ -233,11 +246,20 @@ class PublicationTests(unittest.TestCase):
                 (directory / name).write_bytes(data)
             (directory / "release-handoff.json").write_text(json.dumps(self.record))
         elif arguments[:2] == ("release", "create"):
+            self.assertIsNone(self.release)
+            self.created += 1
+            notes = self.record["body"]
+            if "--notes-file" in arguments:
+                notes = (
+                    Path(arguments[arguments.index("--notes-file") + 1])
+                    .read_bytes()
+                    .decode("utf-8")
+                )
             self.release = {
                 "id": 9,
                 "tag_name": self.record["tag"],
                 "name": self.record["title"],
-                "body": self.record["body"],
+                "body": notes,
                 "draft": True,
                 "prerelease": False,
                 "author": {"login": "blisspixel"},
@@ -257,8 +279,13 @@ class PublicationTests(unittest.TestCase):
                     "updated_at": "fixed",
                 }
             )
-        elif arguments[:1] == ("api",):
-            return "[[]]"
+        elif arguments == (
+            "api",
+            "--paginate",
+            "--slurp",
+            "repos/blisspixel/quotabot/releases?per_page=100",
+        ):
+            return json.dumps([[] if self.release is None else [self.release]])
         else:
             raise AssertionError(arguments)
         return ""
@@ -295,6 +322,61 @@ class PublicationTests(unittest.TestCase):
             self.assertTrue(self.publish(Path(temporary)).endswith("/v0.11.6"))
         self.assertTrue(self.published)
         self.assertEqual(len(self.assets), 14)
+        self.assertEqual(self.created, 1)
+        self.assertEqual(self.release["tag_name"], self.record["tag"])
+        self.assertEqual(self.release["body"], self.record["body"])
+        self.assertEqual(self.release["target_commitish"], self.record["source_digest"])
+
+    def test_existing_owner_draft_resumes_without_duplicate_creation_or_uploads(self):
+        self.gh("release", "create")
+        self.gh("release", "upload", "v0.11.6", handoff.ARCHIVES[0])
+        original_asset = copy.deepcopy(self.assets[0])
+        with tempfile.TemporaryDirectory() as temporary:
+            self.publish(Path(temporary))
+        self.assertTrue(self.published)
+        self.assertEqual(self.created, 1)
+        self.assertEqual(len(self.assets), 14)
+        self.assertEqual(self.assets[0], original_asset)
+
+    def test_release_lookup_finds_exact_tag_on_later_pages(self):
+        self.gh("release", "create")
+        other = {**self.release, "tag_name": "v0.11.60"}
+        with patch.object(
+            publisher, "gh", return_value=json.dumps([[other], [self.release]])
+        ) as command:
+            self.assertEqual(
+                publisher.find_release("blisspixel/quotabot", "v0.11.6"),
+                self.release,
+            )
+        command.assert_called_once_with(
+            "api",
+            "--paginate",
+            "--slurp",
+            "repos/blisspixel/quotabot/releases?per_page=100",
+        )
+
+    def test_duplicate_release_matches_across_pages_are_rejected(self):
+        self.gh("release", "create")
+        with (
+            patch.object(
+                publisher,
+                "gh",
+                return_value=json.dumps([[self.release], [{**self.release, "id": 10}]]),
+            ),
+            self.assertRaisesRegex(ValueError, "Multiple releases"),
+        ):
+            publisher.find_release("blisspixel/quotabot", "v0.11.6")
+
+    def test_missing_created_draft_stops_before_upload_or_publication(self):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.object(publisher, "find_release", return_value=None),
+            self.assertRaisesRegex(ValueError, "Created release draft was not found"),
+        ):
+            self.publish(Path(temporary))
+        self.assertEqual(self.created, 1)
+        self.assertEqual(self.assets, [])
+        self.assertFalse(self.published)
 
     def test_wrong_workflow_attempt_never_creates_a_release(self):
         self.run["run_attempt"] = 2

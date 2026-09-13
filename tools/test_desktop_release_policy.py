@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import os
 import shutil
@@ -17,6 +18,33 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DesktopReleasePolicyTests(unittest.TestCase):
+    def publication_offset(self, source: str) -> int:
+        # Identify publication structurally so payload formatting cannot hide it.
+        calls = []
+        for node in ast.walk(ast.parse(source)):
+            if (
+                not isinstance(node, ast.Call)
+                or not isinstance(node.func, ast.Name)
+                or node.func.id != "api"
+            ):
+                continue
+            payload = next(
+                (item.value for item in node.keywords if item.arg == "payload"), None
+            )
+            if isinstance(payload, ast.Dict) and any(
+                isinstance(key, ast.Constant)
+                and key.value == "draft"
+                and isinstance(value, ast.Constant)
+                and value.value is False
+                for key, value in zip(payload.keys, payload.values, strict=True)
+            ):
+                calls.append(node)
+        self.assertEqual(len(calls), 1, "Expected exactly one release publication")
+        return sum(
+            len(line)
+            for line in source.splitlines(keepends=True)[: calls[0].lineno - 1]
+        )
+
     def test_release_serializes_same_tag_without_cancelling(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
@@ -153,7 +181,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         )
         self.assertLess(
             publication.rindex("require_draft("),
-            publication.index('payload={"draft": False'),
+            self.publication_offset(publication),
         )
 
     def test_release_metadata_is_bound_through_final_publication(self) -> None:
@@ -186,7 +214,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         )
         self.assertLess(
             publication.index("Draft asset set changed after final audit"),
-            publication.index('payload={"draft": False'),
+            self.publication_offset(publication),
         )
 
     def test_release_runs_exact_tag_quality_and_security_gates(self) -> None:
@@ -261,7 +289,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn('"--verify-tag"', publication)
         self.assertLess(
             publication.rindex("require_current_source(metadata)"),
-            publication.index('payload={"draft": False'),
+            self.publication_offset(publication),
         )
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
