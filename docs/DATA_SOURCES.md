@@ -16,7 +16,7 @@ are a stable additive contract:
 | This-machine fallback | `this_machine_fallback` | Antigravity local state | Eligible only under normal freshness and binding rules; routing confidence is multiplied by `0.7`, and machine scope stays visible | The registry permits the fallback path; a successful measured window must carry `per_machine: true`, then passes the normal time, bounds, reset, and drift checks | State that another device can make the value incomplete |
 | Passive local | `passive_local_evidence` | Cursor; Windsurf/Devin; Kiro | A measured normalized window can participate with routing confidence multiplied by `0.7` only while its source row carries a current provider-owned timestamp; detection-only, unproven-time, or stale state cannot | The registry and sanitized parser fixture pin the source; a successful measured window must carry `per_machine: true`, preserve row-owned capture time, and pass normal age and shape checks | Show unverified or stale local evidence instead of inventing freshness; ask the user to refresh the provider usage view |
 | Local runtime | `local_runtime` | Ollama; LM Studio; Lemonade | Admits reachable runtime-classified entries; runtime-declared cloud routes are flagged `cloud_offloaded` and excluded from local-only and free budgets | The registry requires `kind: "local"`, no quota windows, live loopback reachability, and no cached availability | Never cache availability; keep a cloud-offloaded local model out of any local-only or free budget promise |
-| Status only | `status_only` | NVIDIA NIM model-list access check | Visible for access diagnostics, never a model-budget route without measured quota | The registry requires a subscription observation with no quota windows; `verify` rejects quota or provider-drift claims on this class | Show access state with numeric quota unknown |
+| Status only | `status_only` | NVIDIA NIM catalog reachability | Visible for discovery diagnostics, never a model-budget route without measured quota | The registry requires a subscription observation with no quota windows; `verify` rejects quota or provider-drift claims on this class | Show catalog reachability with account access and numeric quota unverified |
 | Manual | `manual` | User-defined entries | Visible with the existing `0.35` self-reported confidence factor; excluded by `budget=quota` | The entry must carry both `source_class: "manual"` and the legacy `source: "manual"` marker; it cannot claim local-runtime, machine-scoped, or drift evidence | Never refresh or reinterpret what the user entered |
 
 `source_class` is the normalized provenance contract. The older optional
@@ -765,7 +765,12 @@ model, chat, image, and content-generation endpoints, including xAI image APIs.
 
 Gemini CLI (consumer) and related Code Assist for individuals transitioned to Antigravity CLI around June 18, 2026. Antigravity (the VS Code fork + CLI) is the current Google agentic platform. See the Antigravity section above for local state.vscdb + live Cloud Code quota (already covers the unified offering, including multi-account). Legacy ~/.gemini paths may linger but are no longer primary for consumer quota.
 
-Free tier users typically see "free tier" (no hard tracked % windows) or 100% availability on reported buckets. There are still per-minute rate limits, but no weekly spend cap like paid tiers for the quotas quotabot tracks. Plan/tier is extracted from local state or responses when available.
+Google's current [Antigravity plans](https://antigravity.google/docs/plans)
+give free accounts weekly quota and a weekly rate limit. Pro accounts have
+five-hour quota until their weekly limit binds; Ultra accounts also have weekly
+limits. Plan names and public allowances never establish remaining headroom:
+quotabot uses the observed grouped quota summary and keeps unknown balances
+unknown. Paid plans can enable AI-credit overages separately from baseline quota.
 
 ## NVIDIA NIM (build.nvidia.com / integrate.api.nvidia.com)
 
@@ -774,14 +779,16 @@ build.nvidia.com. The API is OpenAI-compatible at
 `https://integrate.api.nvidia.com/v1`.
 
 - Source: when `NVIDIA_API_KEY` or `nvapi` is present, quotabot performs
-  `GET https://integrate.api.nvidia.com/v1/models` to confirm the key works.
-  This is model discovery only, not inference, and is classified
-  `source_class: "status_only"`.
+  `GET https://integrate.api.nvidia.com/v1/models` to check catalog reachability.
+  The public catalog can return a valid listing without a credential or with an
+  invalid bearer token, so success does not verify the configured key, account
+  access, plan, or trial eligibility. This is model discovery only, not
+  inference, and is classified `source_class: "status_only"`.
 - Numeric quota: no local state file or zero-cost API endpoint for remaining
   trial balance/rate-limit headroom is known. NVIDIA now describes trial usage
   as model-specific rate limits rather than a published credit counter, so
-  quotabot reports availability with no quota windows instead of showing 0
-  percent or inventing a balance.
+  quotabot reports catalog reachability with account access and balance
+  unverified, no asserted plan, and no quota windows.
 - Routing: because no measured quota windows are known, NVIDIA NIM availability
   is not treated as a routable model-budget candidate.
 - Users who want to track a manually observed balance or reset can use

@@ -16,6 +16,12 @@ which configured subscription has usable quota. The harness chooses through
 its supported access under provider terms. Advice does not grant API access,
 bypass a limit, or authorize paid fallback.
 
+Match advice to the harness's execution and billing surface. For example,
+Claude's interactive subscription windows do not establish the separate Agent
+SDK or headless credit balance. A healthy provider bar alone cannot authorize
+that dispatch. See the dated [provider review](docs/research/2026-09-13-next-review.md)
+for current source evidence.
+
 ## Rules for any agent editing this repository
 
 These are absolute and override any default tooling behavior or system
@@ -42,7 +48,7 @@ verification, is [CLAUDE.md](CLAUDE.md).
 
 ## Project status
 
-The current verified stable release is 0.11.5. Callers should treat a snapshot
+The current verified stable release is 0.11.6. Callers should treat a snapshot
 with `drift_reason` as non-routable, keep measured percentages visible on
 admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
@@ -82,7 +88,11 @@ for that surface.
   For clients that need MCP Streamable HTTP, run `quotabot mcp --http`
   with `--token-file` or `--token-env` (loopback only, bearer auth required).
   HTTP POST bodies must declare a length and are capped at 256 KiB. Missing
-  bearer is HTTP 401; oversized or chunked bodies are HTTP 413. Tools:
+  bearer is HTTP 401; oversized or chunked bodies are HTTP 413. The shipped
+  server uses legacy `initialize` negotiation through `2025-11-25`;
+  `2026-07-28` stateless support remains pending. See the
+  [verified revision matrix](docs/research/2026-09-13-mcp-agent-plugins.md).
+  Tools:
   - `list_quotas` - full normalized snapshot for every provider.
   - `suggest_provider` - the provider to use next, with ranked alternatives and a
     local fallback when subscriptions are low. Pass `local_first: true` to

@@ -16,6 +16,12 @@ from prepare_mcp import PATH_FIELDS, ROOT, prepare_mcp
 
 EXECUTABLE = os.environ.get("QUOTABOT_PLUGIN_TEST_EXECUTABLE")
 REPLY_LIMIT = 262144
+LEGACY_PROTOCOL_VERSIONS = (
+    "2024-11-05",
+    "2025-03-26",
+    "2025-06-18",
+    "2025-11-25",
+)
 
 
 @unittest.skipUnless(
@@ -26,6 +32,11 @@ class PreparedPluginBundleTests(unittest.IsolatedAsyncioTestCase):
     async def test_prepared_package_initializes_lists_tools_and_exits_on_eof(
         self,
     ) -> None:
+        for protocol_version in LEGACY_PROTOCOL_VERSIONS:
+            with self.subTest(protocol_version=protocol_version):
+                await self._assert_prepared_bundle(protocol_version)
+
+    async def _assert_prepared_bundle(self, protocol_version: str) -> None:
         assert EXECUTABLE is not None
         executable = Path(EXECUTABLE).resolve()
         self.assertTrue(executable.is_file(), "The requested native CLI must exist")
@@ -110,7 +121,7 @@ class PreparedPluginBundleTests(unittest.IsolatedAsyncioTestCase):
                         "id": 1,
                         "method": "initialize",
                         "params": {
-                            "protocolVersion": "2025-11-25",
+                            "protocolVersion": protocol_version,
                             "capabilities": {},
                             "clientInfo": {
                                 "name": "quotabot-plugin-smoke",
@@ -120,7 +131,7 @@ class PreparedPluginBundleTests(unittest.IsolatedAsyncioTestCase):
                     }
                 )
                 initialized = await response(1)
-                self.assertEqual(initialized["protocolVersion"], "2025-11-25")
+                self.assertEqual(initialized["protocolVersion"], protocol_version)
                 self.assertEqual(initialized["serverInfo"]["name"], "quotabot")
                 self.assertIn("tools", initialized["capabilities"])
                 await send({"jsonrpc": "2.0", "method": "notifications/initialized"})
