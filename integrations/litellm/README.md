@@ -39,6 +39,14 @@ completion callback; its bounded TTL is the fallback if a callback never runs.
 Binding-window and local-fallback rules stay in the Dart collector, keeping the
 proxy consistent with the desktop widget and MCP server.
 
+Map each remote deployment to the exact opaque `account` key reported by your
+authenticated quotabot snapshot. If several accounts exist, an omitted mapping
+is unavailable for reservation. A provider with exactly one observed account
+retains the convenience default, but the hook reserves that exact key and
+rejects a different returned account. This does not verify deployment
+credentials: the operator must bind the configured credentials to the same
+account. Quota advice cannot switch a fixed deployment's credential.
+
 ## Setup
 
 1. Start the quotabot local server so the proxy can read quota:
@@ -71,13 +79,13 @@ proxy consistent with the desktop widget and MCP server.
 2. Install LiteLLM and copy the example files:
 
    ```
-   pip install -r requirements.txt
+   python -m pip install --require-hashes -r requirements.txt
    cp config.example.yaml config.yaml
    cp quotabot-routing.example.yaml quotabot-routing.yaml
    ```
 
-   Use Python 3.10 through 3.13; the currently tested LiteLLM proxy release does
-   not support Python 3.14. The requirements file locks the proxy dependency and
+   Use Python 3.10 through 3.13; Python 3.14 is outside this integration's
+   supported and tested range. The requirements file locks the proxy dependency and
    its transitive packages with hashes. Dependabot reports available updates;
    selected versions are regenerated and tested on a first-party branch.
    `pyproject.toml` declares that supported range for package tooling and for
@@ -90,7 +98,7 @@ proxy consistent with the desktop widget and MCP server.
 
    ```bash
    uv pip compile --universal --generate-hashes --python-version 3.10 \
-     -o requirements.txt requirements.in
+     --no-header -o requirements.txt requirements.in
    ```
 
    Keep `config.yaml` in the same folder as `quotabot_router.py`; current
@@ -102,6 +110,10 @@ proxy consistent with the desktop widget and MCP server.
    `quota_plan` for included quota with overages disabled, `paid_api` for
    request-metered API keys. Quota-plan candidates also need
    `overages_disabled: true` or `overages: disabled`.
+
+   Set `account` whenever a provider has multiple accounts. Review LiteLLM's
+   own retries and fallback deployments separately; they must preserve the
+   same account and spend controls after this pre-call selection.
 
 3. Generate a local bearer key, then launch the proxy explicitly on loopback.
    The example config reads `LITELLM_MASTER_KEY` and refuses unauthenticated
@@ -167,9 +179,10 @@ cost is bounded by that quota plan and has overages disabled, then mark that
 candidate `spend: quota_plan` plus `overages_disabled: true`.
 When quotabot reports multiple accounts for the same provider, add
 `account: <quotabot account label>` to a candidate to bind that LiteLLM
-deployment to the matching account. Without an account binding, the atomic
-reservation can select any eligible account for that provider and records the
-account it actually reserved in local routing metadata.
+deployment to the matching account. An omitted binding is eligible only when
+exactly one account is observed; the reservation still targets that exact key.
+Missing or ambiguous account evidence cannot reserve a remote route. The
+deployment's configured credentials must match that account.
 
 Two bounded lease settings are available:
 

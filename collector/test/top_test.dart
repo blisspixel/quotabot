@@ -1407,6 +1407,24 @@ void main() {
     expect(plain.last, contains('models:on'));
   });
 
+  test('inspecting a non-text model explains its generation exclusion', () {
+    final plain = _frame([
+      _q(
+        'lemonade',
+        const [],
+        kind: ProviderQuotaKind.local,
+        models: const [
+          ModelInfo(id: 'image-model', local: true, textGeneration: false),
+        ],
+      ),
+    ], width: 120, selected: 'lemonade', inspectModels: true)
+        .map(_plain)
+        .join('\n');
+    expect(plain, contains('image-model'));
+    expect(plain, contains('non-text deployment; excluded from generation'));
+    expect(plain, isNot(contains('embedding; excluded from generation')));
+  });
+
   test('inspecting models on a cloud row tells you to select a local runtime',
       () {
     final lines = _frame([

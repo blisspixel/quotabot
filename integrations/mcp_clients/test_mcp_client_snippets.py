@@ -57,7 +57,7 @@ class McpClientSnippetTest(unittest.TestCase):
         )
         self.assertIn("@modelcontextprotocol/sdk/client/stdio.js", ts_stdio)
         self.assertIn("requestInit", ts_http)
-        self.assertIn('"mcp>=1.29,<2"', readme)
+        self.assertIn('"mcp>=1.30,<2"', readme)
 
     def test_http_snippets_validate_before_token_or_transport(self) -> None:
         python_http = (ROOT / "quotabot_mcp_http.py").read_text(encoding="utf-8")
@@ -162,6 +162,21 @@ class McpClientCommonTest(unittest.TestCase):
         self.assertEqual(structured_content(snake_case), {"source": "snake"})
         self.assertEqual(structured_content(text_content), {"source": "text"})
         self.assertEqual(structured_content(SimpleNamespace()), {})
+
+    def test_structured_content_rejects_malformed_content_containers(self) -> None:
+        for content in (1, True, "text", {"text": "{}"}, object()):
+            with self.subTest(content=content):
+                self.assertEqual(
+                    structured_content(SimpleNamespace(content=content)), {}
+                )
+                self.assertEqual(
+                    structured_content(
+                        SimpleNamespace(
+                            structuredContent={"source": "direct"}, content=content
+                        )
+                    ),
+                    {"source": "direct"},
+                )
 
     def test_routing_summary_rejects_invalid_numeric_values(self) -> None:
         for invalid in (True, False, math.nan, math.inf, -math.inf, "75"):

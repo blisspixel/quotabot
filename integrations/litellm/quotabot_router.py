@@ -441,6 +441,8 @@ class Candidate:
         self.deployment = deployment
         self.provider = _optional_text(provider)
         self.account = _optional_text(account)
+        if account is not None and self.account is None:
+            raise ValueError("candidate account must be a nonempty account label")
         normalized_spend = "local" if local else _normalize_spend(spend)
         self.local = local or normalized_spend == "local"
         self.spend = "local" if self.local else normalized_spend
@@ -499,7 +501,7 @@ def _bounded_float(
         raise ValueError(
             f"{name} must be a number from {minimum} through {maximum}"
         ) from exc
-    if parsed < minimum or parsed > maximum:
+    if not math.isfinite(parsed) or parsed < minimum or parsed > maximum:
         raise ValueError(f"{name} must be {minimum} through {maximum}")
     return parsed
 
@@ -1045,9 +1047,10 @@ class QuotabotRouter(CustomLogger):
         lease ledger lock. A cached ``/suggest`` result can therefore provide
         display metadata without letting parallel requests dogpile its winner.
         """
+        bound_candidates = _reservation_candidates(candidates, ranked)
         targets: list[dict[str, str]] = []
         seen: set[tuple[str, Optional[str]]] = set()
-        for candidate in candidates:
+        for candidate in bound_candidates:
             provider = candidate.provider
             if not provider:
                 continue
@@ -1059,8 +1062,10 @@ class QuotabotRouter(CustomLogger):
             if candidate.account:
                 target["account"] = candidate.account
             targets.append(target)
+        if not targets:
+            return None
         token = _load_local_http_token()
-        if not targets or token is None:
+        if token is None:
             return None
         idempotency_key = secrets.token_urlsafe(18)
         payload = {
@@ -1106,6 +1111,7 @@ class QuotabotRouter(CustomLogger):
         provider = _string_field(lease, "provider")
         account = _string_field(lease, "account")
         if not owns_lease or not provider or not account:
+            await reject_reserved_lease()
             return None
         reused = response.get("reused")
         created_at = _non_negative_int(lease.get("created_at"))
@@ -1140,7 +1146,7 @@ class QuotabotRouter(CustomLogger):
         if headroom is None or headroom < floor:
             await reject_reserved_lease()
             return None
-        candidate = _candidate_for_reserved_target(candidates, provider, account)
+        candidate = _candidate_for_reserved_target(bound_candidates, provider, account)
         if candidate is None:
             await reject_reserved_lease()
             return None
@@ -1346,27 +1352,59 @@ def _candidate_matches_info(candidate: Candidate, info: dict[str, Any]) -> bool:
     return candidate.account is None or candidate.account == account
 
 
+def _reservation_candidates(
+    candidates: list[Candidate],
+    ranked: list[dict[str, Any]],
+) -> list[Candidate]:
+    """Bind implicit single-account deployments before asking for a lease.
+
+    A lease cannot change the credentials of a fixed LiteLLM deployment. When
+    more than one account is observed, the policy must explicitly map it. Even
+    the single-account convenience sends an exact account target so a newer
+    server snapshot cannot silently reserve another account.
+    """
+    explicit: list[Candidate] = []
+    inferred: list[Candidate] = []
+    for candidate in candidates:
+        if candidate.local or not candidate.provider:
+            continue
+        if candidate.account is not None:
+            explicit.append(candidate)
+            continue
+        accounts = {
+            _string_field(info, "account")
+            for info in ranked
+            if _string_field(info, "provider") == candidate.provider
+        }
+        if None in accounts or len(accounts) != 1:
+            continue
+        account = next(iter(accounts))
+        if account is None:
+            continue
+        inferred.append(
+            Candidate(
+                deployment=candidate.deployment,
+                provider=candidate.provider,
+                account=account,
+                spend=candidate.spend,
+                overages_disabled=candidate.overages_disabled,
+            )
+        )
+    # An explicit deployment mapping wins over a single-account convenience.
+    return explicit + inferred
+
+
 def _candidate_for_reserved_target(
     candidates: list[Candidate],
     provider: str,
     account: str,
 ) -> Optional[Candidate]:
-    # An explicit account binding is more specific than a provider wildcard.
-    # Prefer it even when a wildcard candidate appears earlier in policy order,
-    # otherwise the lease can discount one account while LiteLLM dispatches a
-    # different deployment.
+    # Reservation targets must already bind one deployment to one account.
     for candidate in candidates:
         if (
             not candidate.local
             and candidate.provider == provider
             and candidate.account == account
-        ):
-            return candidate
-    for candidate in candidates:
-        if (
-            not candidate.local
-            and candidate.provider == provider
-            and candidate.account is None
         ):
             return candidate
     return None

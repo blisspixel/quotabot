@@ -1,4 +1,44 @@
+import 'dart:async';
+
 import 'package:http/http.dart' as http;
+
+/// Cancels one metadata request, including its response body, at its deadline.
+///
+/// The caller retains ownership of [client]. Track this original future when a
+/// guard must remain held until settlement; a caller timeout alone cannot cancel
+/// a custom client that ignores the abort trigger.
+Future<http.Response> sendMetadataRequest(
+  http.Client client,
+  Uri uri, {
+  String method = 'GET',
+  Map<String, String> headers = const {},
+  String? body,
+  required Duration timeout,
+}) async {
+  if (timeout.inMicroseconds <= 0) {
+    throw ArgumentError.value(timeout, 'timeout', 'must be positive');
+  }
+  final abort = Completer<void>();
+  var expired = false;
+  final timer = Timer(timeout, () {
+    expired = true;
+    abort.complete();
+  });
+  try {
+    final request =
+        http.AbortableRequest(method, uri, abortTrigger: abort.future)
+          ..headers.addAll(headers);
+    if (body != null) request.body = body;
+    final response = await client.send(request).then(http.Response.fromStream);
+    if (expired) throw TimeoutException('provider metadata deadline');
+    return response;
+  } on http.RequestAbortedException {
+    if (expired) throw TimeoutException('provider metadata deadline');
+    rethrow;
+  } finally {
+    timer.cancel();
+  }
+}
 
 /// A single process-wide HTTP client for provider-metadata reads.
 ///

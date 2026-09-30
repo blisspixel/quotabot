@@ -4,15 +4,17 @@ Runnable adoption snippets for using quotabot as a routing MCP server from
 Python or TypeScript. They call quota metadata tools only. They do not send
 prompts, code, or model requests.
 
-## SDK guidance checked August 20, 2026
+## SDK guidance checked September 30, 2026
 
 - Python: these snippets remain on the maintained MCP Python SDK v1
-  compatibility line and pin `mcp>=1.29,<2`. PyPI stable is now 2.0.0, while
-  1.29.0 is the current v1 release. Migrating the examples to the breaking v2
+  compatibility line and require `mcp>=1.30,<2`. The 1.30.0 release fixes
+  [external schema-reference fetching](https://github.com/modelcontextprotocol/python-sdk/security/advisories/GHSA-rwrf-2pqf-9j8j)
+  and [OAuth issuer confusion](https://github.com/modelcontextprotocol/python-sdk/security/advisories/GHSA-qx49-fqc8-xw99).
+  Stable v2 is now 2.2.0. Migrating the examples to the breaking v2
   API belongs in a separately reviewed change.
 - TypeScript: use `@modelcontextprotocol/sdk` and the high-level `Client` with
   `StreamableHTTPClientTransport` or `StdioClientTransport`. npm latest was
-  `1.30.0` when checked.
+  `1.31.0` when checked; this checkout retains the verified `1.30.0` pin.
 - TypeScript snippets require Node.js 20 or later. The lock overrides the MCP
   SDK's transitive Hono Node adapter to patched version 2.0.11 because versions
   below 2.0.5 are affected by the Windows path traversal in
@@ -70,7 +72,7 @@ owner-only permissions, not under the repository.
 Install the maintained v1 compatibility line used by these snippets:
 
 ```bash
-python -m pip install "mcp>=1.29,<2" httpx
+python -m pip install "mcp>=1.30,<2" httpx
 ```
 
 Run:

@@ -10,7 +10,7 @@ and recommends where to send the next request. It also shows supported local
 models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
-> **Current stable:** 0.11.6. quotabot remains under active 0.x development.
+> **Current stable:** 0.11.7. quotabot remains under active 0.x development.
 > **Next:** support Claude discovery for macOS Keychain sign-ins and prove
 > account-wide quota refresh on idle machines, then strengthen execution-scope
 > evidence for local-only advice. Native signing proceeds alongside product
@@ -118,6 +118,12 @@ Reported cloud and upstream routes are excluded from local budgets. Positive
 execution-scope validation remains [planned work](ROADMAP.md#next): localhost
 alone cannot prove that a runtime executes on this machine.
 
+Capability hints describe what a model declares, not measured quality. A model
+catalog also cannot establish access through a particular account or harness.
+The [September 30 review](docs/research/2026-09-30-review.md) checks current
+models, quota/reset policies, local status sources, and routing integrations;
+it records the research and verification behind 0.11.7 and remaining gaps.
+
 See the [usage guide](docs/USAGE.md) for profiles, accounts, model capability
 filters, alerts, analytics, drift recovery, routing receipts, and every command.
 
@@ -201,10 +207,16 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Stable 0.11.6 corrects NVIDIA catalog evidence across collection, setup, and
+Stable 0.11.7 refreshes the curated model catalog, cancels stalled local
+metadata requests, preserves explicit Lemonade deployment kinds and current
+context, and binds LiteLLM reservations to exact accounts. Its Python integration
+dependencies include current security fixes, and five boundary helpers gain
+enforced strict checking. See the [changelog](CHANGELOG.md) and
+[September 30 review](docs/research/2026-09-30-review.md) for verification scope.
+The preceding 0.11.6 corrects NVIDIA catalog evidence across collection, setup, and
 the read manifest, and expands native legacy MCP launch checks. The September
-review updates provider and protocol priorities without claiming modern MCP
-support. Version 0.11.5 reads the live Claude weekly pool when the current session row
+reviews update provider, runtime, and engineering priorities without claiming
+modern MCP support. Version 0.11.5 reads the live Claude weekly pool when the current session row
 omits a reset, so a spent weekly cap is no longer hidden behind last-known 5h
 leftover. Glance and doctor hide hashed account labels, keep Fable on the
 default view, and hide Codex Spark until detail. MCP shutdown stops late

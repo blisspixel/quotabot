@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-const String quotabotAppVersion = '0.11.6';
-const String quotabotAppBuild = '0.11.6+61';
+const String quotabotAppVersion = '0.11.7';
+const String quotabotAppBuild = '0.11.7+62';
 const String quotabotReleasesUrl =
     'https://github.com/blisspixel/quotabot/releases';
 const String quotabotReleasesApi =

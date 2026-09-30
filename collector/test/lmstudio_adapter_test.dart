@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/lmstudio.dart';
+import 'package:quotabot_collector/http_client.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
 
@@ -106,6 +109,59 @@ void main() {
       expect(q.error, contains('non-loopback'));
       expect(q.models, isEmpty);
     });
+  });
+
+  test('a stalled v1 socket closes while the native v0 fallback recovers',
+      () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final sockets = <Socket>[];
+    final paths = <String>[];
+    final stalledDisconnected = Completer<void>();
+    final subscription = server.listen((socket) {
+      sockets.add(socket);
+      final bytes = <int>[];
+      String? path;
+      socket.listen((chunk) {
+        if (path != null) return;
+        bytes.addAll(chunk);
+        final text = utf8.decode(bytes, allowMalformed: true);
+        if (!text.contains('\r\n\r\n')) return;
+        path = text.split(' ')[1];
+        paths.add(path!);
+        if (path == '/api/v1/models') return;
+        final body = jsonEncode({
+          'data': [
+            {'id': 'metadata-only', 'state': 'loaded'}
+          ]
+        });
+        socket.add(utf8.encode(
+          'HTTP/1.1 200 OK\r\nContent-Length: ${utf8.encode(body).length}\r\n'
+          'Connection: close\r\n\r\n$body',
+        ));
+        unawaited(socket.close());
+      }, onDone: () {
+        if (path == '/api/v1/models' && !stalledDisconnected.isCompleted) {
+          stalledDisconnected.complete();
+        }
+      });
+    });
+    try {
+      final quota = await LmStudioAdapter(environment: {
+        'LMSTUDIO_HOST': 'http://127.0.0.1:${server.port}',
+      }).collect();
+      await stalledDisconnected.future.timeout(const Duration(seconds: 2));
+      expect(quota.ok, isTrue);
+      expect(quota.models.single.id, 'metadata-only');
+      expect(quota.models.single.loaded, isTrue);
+      expect(paths, ['/api/v1/models', '/api/v0/models']);
+    } finally {
+      closeSharedHttpClient();
+      for (final socket in sockets) {
+        socket.destroy();
+      }
+      await server.close();
+      await subscription.cancel();
+    }
   });
 
   test('malformed optional v1 fields do not prove loaded state or abort', () {

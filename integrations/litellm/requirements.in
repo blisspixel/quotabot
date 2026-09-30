@@ -1,3 +1,9 @@
 # Python compatibility is declared in pyproject.toml: Python 3.10 through 3.13.
-litellm[proxy]==1.92.2
+# Regenerate from this directory:
+# uv pip compile --universal --generate-hashes --python-version 3.10 --no-header -o requirements.txt requirements.in
+litellm[proxy]==1.102.2
+mcp==1.30.0
+anyio==4.14.2
+PyJWT==2.14.0
+oauthlib==4.0.0
 PyYAML==6.0.3

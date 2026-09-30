@@ -160,12 +160,22 @@ List<LocalModel>? lemonadeModelsFromJson(dynamic data) {
     if (raw['downloaded'] == false && !cloud) continue;
 
     final rawLabels = raw['labels'];
+    if (raw.containsKey('labels') &&
+        (rawLabels is! List ||
+            rawLabels
+                .any((label) => label is! String || label.trim().isEmpty))) {
+      continue;
+    }
     final labels = rawLabels is List
         ? <String>{
             for (final label in rawLabels)
-              if (label is String) label.trim().toLowerCase(),
+              (label as String).trim().toLowerCase()
           }
         : null;
+    final deployment = _deploymentFromLabels(labels);
+    // Current servers reject conflicting modes; a drifted response must not
+    // repair such a declaration into a text-generation route.
+    if (deployment.conflicting) continue;
     models.add((
       name: id,
       bytes: null,
@@ -173,21 +183,54 @@ List<LocalModel>? lemonadeModelsFromJson(dynamic data) {
       quant: null,
       vramBytes: null,
       expiresAt: null,
-      context: boundedIntFromWire(
-        raw['max_context_window'],
-        min: 1,
-        max: 100000000,
-      ),
+      // A present but invalid current limit must not become a larger model
+      // maximum. Current servers omit this field when no positive limit is
+      // known; null is not a documented unloaded-state signal.
+      context: raw.containsKey('context_length')
+          ? boundedIntFromWire(raw['context_length'], min: 1, max: 100000000)
+          : boundedIntFromWire(raw['max_context_window'],
+              min: 1, max: 100000000),
       cloud: cloud,
       upstreamRouting: UpstreamRouting.notReported,
       tools: labels?.contains('tool-calling'),
       vision: labels?.contains('vision'),
       reasoning: null,
-      embedding: labels?.contains('embeddings') == true ? true : null,
+      embedding: deployment.embedding ? true : null,
+      textGeneration: deployment.textGeneration,
       digest: null,
     ));
   }
   return models;
+}
+
+/// Deployment labels are distinct from characteristic labels such as coding,
+/// reasoning, vision, and tool-calling. Older servers may report only those
+/// characteristics, so an absent deployment declaration remains unknown.
+({bool conflicting, bool embedding, bool? textGeneration})
+    _deploymentFromLabels(
+  Set<String>? labels,
+) {
+  final modes = <String>{
+    for (final label in labels ?? const <String>{})
+      switch (label) {
+        'embedding' || 'embeddings' => 'embedding',
+        'classifier' || 'classification' => 'classification',
+        'chat' ||
+        'transcription' ||
+        'reranking' ||
+        'image' ||
+        'tts' ||
+        'audio-generation' ||
+        '3d' =>
+          label,
+        _ => '',
+      },
+  }..remove('');
+  return (
+    conflicting: modes.length > 1,
+    embedding: modes.contains('embedding'),
+    textGeneration: modes.isEmpty ? null : modes.contains('chat'),
+  );
 }
 
 /// Parses Lemonade's health response into the models currently loaded by its
@@ -217,8 +260,27 @@ LocalModel? _lemonadeLoadedModel(Map<dynamic, dynamic> raw) {
   final rawName = raw['model_name'];
   if (rawName is! String || rawName.trim().isEmpty) return null;
   final options = raw['recipe_options'];
+  final type = raw['type'] is String
+      ? (raw['type'] as String).trim().toLowerCase()
+      : null;
   return _localModel(
     name: rawName.trim(),
+    embedding: type == 'embedding' || type == 'embeddings' ? true : null,
+    textGeneration: switch (type) {
+      'llm' => true,
+      'embedding' ||
+      'embeddings' ||
+      'reranking' ||
+      'transcription' ||
+      'image' ||
+      'tts' ||
+      'audio-generation' ||
+      'classification' ||
+      'classifier' ||
+      '3d' =>
+        false,
+      _ => null,
+    },
     context: options is Map
         ? boundedIntFromWire(
             options['ctx_size'],
@@ -229,7 +291,13 @@ LocalModel? _lemonadeLoadedModel(Map<dynamic, dynamic> raw) {
   );
 }
 
-LocalModel _localModel({required String name, int? context}) => (
+LocalModel _localModel({
+  required String name,
+  int? context,
+  bool? embedding,
+  bool? textGeneration,
+}) =>
+    (
       name: name,
       bytes: null,
       param: null,
@@ -242,6 +310,7 @@ LocalModel _localModel({required String name, int? context}) => (
       tools: null,
       vision: null,
       reasoning: null,
-      embedding: null,
+      embedding: embedding,
+      textGeneration: textGeneration,
       digest: null,
     );

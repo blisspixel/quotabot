@@ -1260,6 +1260,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
           tools: m.tools,
           vision: m.vision,
           embedding: m.embedding,
+          textGeneration: m.textGeneration,
           reasoning: m.reasoning == null ? null : t(m.reasoning!),
           tier: m.tier == null ? null : t(m.tier!),
           quotaIncludedUntil: m.quotaIncludedUntil,
@@ -1442,12 +1443,17 @@ class ModelInfo {
   /// treated as non-generative.
   final bool? embedding;
 
+  /// Whether the runtime declares a text-generation deployment. Explicit false
+  /// keeps non-chat models inspectable without admitting a generation route.
+  /// Missing evidence preserves older inventory compatibility.
+  final bool? textGeneration;
+
   /// Reasoning-tier hint (e.g. "reasoning"), when known.
   final String? reasoning;
 
-  /// The provider's own product tier: "light", "standard", or "flagship" (e.g.
-  /// Haiku/Flash, Sonnet/Pro, Opus/Heavy). A neutral, sourced fact for ordering
-  /// cheap-to-capable, never a quotabot quality judgement. Null when unknown.
+  /// Curated tier for capability-profile ordering: light, standard, or flagship.
+  /// This is a catalog heuristic, not account entitlement or measured model
+  /// quality. Null when no tier has been curated.
   final String? tier;
 
   /// Last epoch second when this model is known to be included in the
@@ -1475,8 +1481,9 @@ class ModelInfo {
         upstreamRouting: upstreamRouting,
       );
 
-  /// Generation routing also excludes explicitly declared embedding models.
-  bool get hasLocalGenerationVeto => hasLocalExecutionVeto || embedding == true;
+  /// Generation routing excludes explicitly declared non-text deployments.
+  bool get hasLocalGenerationVeto =>
+      hasLocalExecutionVeto || embedding == true || textGeneration == false;
 
   /// Local only: currently loaded into memory.
   final bool loaded;
@@ -1499,6 +1506,7 @@ class ModelInfo {
     this.tools,
     this.vision,
     this.embedding,
+    this.textGeneration,
     this.reasoning,
     this.tier,
     this.quotaIncludedUntil,
@@ -1519,6 +1527,7 @@ class ModelInfo {
         if (tools != null) 'tools': tools,
         if (vision != null) 'vision': vision,
         if (embedding != null) 'embedding': embedding,
+        if (textGeneration != null) 'text_generation': textGeneration,
         if (reasoning != null) 'reasoning': reasoning,
         if (tier != null) 'tier': tier,
         if (quotaIncludedUntil != null)
@@ -1541,6 +1550,7 @@ class ModelInfo {
         tools: j['tools'] as bool?,
         vision: j['vision'] as bool?,
         embedding: j['embedding'] as bool?,
+        textGeneration: j['text_generation'] as bool?,
         reasoning: j['reasoning'] as String?,
         tier: j['tier'] as String?,
         quotaIncludedUntil: (j['quota_included_until'] as num?)?.toInt(),

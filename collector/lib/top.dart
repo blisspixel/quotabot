@@ -1178,6 +1178,9 @@ String _modelInspectWhy(ModelEntry entry, bool inventoryCurrent) {
     return 'upstream unresolved; excluded';
   }
   if (model.embedding == true) return 'embedding; excluded from generation';
+  if (model.textGeneration == false) {
+    return 'non-text deployment; excluded from generation';
+  }
   if (entry.stale) return 'stale inventory; excluded';
   if (entry.driftReason != null) return 'untrusted inventory; excluded';
   if (!inventoryCurrent) return 'runtime unavailable; excluded';

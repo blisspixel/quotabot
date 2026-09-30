@@ -32,6 +32,7 @@ LocalModel _m(
       vision: vision,
       reasoning: null,
       embedding: embedding,
+      textGeneration: null,
       digest: digest,
     );
 

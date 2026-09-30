@@ -16,11 +16,13 @@ which configured subscription has usable quota. The harness chooses through
 its supported access under provider terms. Advice does not grant API access,
 bypass a limit, or authorize paid fallback.
 
-Match advice to the harness's execution and billing surface. For example,
-Claude's interactive subscription windows do not establish the separate Agent
-SDK or headless credit balance. A healthy provider bar alone cannot authorize
-that dispatch. See the dated [provider review](docs/research/2026-09-13-next-review.md)
-for current source evidence.
+Match advice to the harness's supported access, authentication, account, and
+billing surface. Anthropic's current notice pauses the announced separate SDK
+credits: subscription-authenticated SDK and print-mode use still draws
+subscription limits, while API-key use has separate billing. A healthy provider
+bar does not establish credentials, model access, or disabled paid continuation.
+See the dated [provider review](docs/research/2026-09-30-subscription-quotas.md)
+for current source evidence. Print mode remains forbidden for quota collection.
 
 ## Rules for any agent editing this repository
 
@@ -58,7 +60,7 @@ verification, is [CLAUDE.md](CLAUDE.md).
 
 ## Project status
 
-The current verified stable release is 0.11.6. Callers should treat a snapshot
+The current verified stable release is 0.11.7. Callers should treat a snapshot
 with `drift_reason` as non-routable, keep measured percentages visible on
 admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
@@ -135,6 +137,9 @@ for that surface.
     Listing defaults to `budget: "any"` for inspection.
     `budget: "quota"` means measured built-in quota plans plus local runtimes;
     it excludes self-reported manual quota and entries catalogued as paid API.
+    Explicit `text_generation: false` identifies a non-text deployment; it stays
+    inspectable but never qualifies generation advice or local provider fallback.
+    A true or missing value does not prove execution location or account access.
     Eligible local-runtime model entries include `local_readiness` (`loaded` or `cold`);
     on-device entries also carry an advisory metadata-only `hardware_fit`
     (`loaded`, `comfortable`, `tight`, `constrained`, or `unknown`) with the

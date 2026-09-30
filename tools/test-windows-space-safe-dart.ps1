@@ -3,6 +3,27 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'windows-space-safe-dart.ps1')
 . (Join-Path $PSScriptRoot 'windows-build-prereqs.ps1')
 
+Assert-QuotabotGateVersions `
+  -FlutterVersion '3.44.6' -DartVersion '3.12.2' -PythonVersion '3.13.15'
+foreach ($versions in @(
+    @('3.44.5', '3.12.2', '3.13.15'),
+    @('3.44.6', '3.12.1', '3.13.15'),
+    @('3.44.6', '3.12.2', '3.14.0'),
+    @('3.44.6', '3.12.2', '3.13.0rc1'))) {
+  $rejected = $false
+  try {
+    Assert-QuotabotGateVersions `
+      -FlutterVersion $versions[0] `
+      -DartVersion $versions[1] `
+      -PythonVersion $versions[2]
+  } catch {
+    $rejected = $true
+  }
+  if (-not $rejected) {
+    throw "Contributor gate accepted unsupported versions: $($versions -join ', ')"
+  }
+}
+
 $atl = Test-WindowsDesktopAtlAvailable
 if ($atl -ne $true -and $atl -ne $false) {
   throw 'Test-WindowsDesktopAtlAvailable did not return a boolean.'

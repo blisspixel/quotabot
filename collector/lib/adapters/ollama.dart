@@ -37,6 +37,7 @@ typedef LocalModel = ({
   // generator. Null stays routable: only a stated non-generative kind removes a
   // model from routing, never the absence of a statement.
   bool? embedding,
+  bool? textGeneration,
   // The runtime's content identity for the model blob, when it reports one.
   // Used only as a capability-cache key, never shown or stored.
   String? digest,
@@ -154,8 +155,10 @@ class OllamaAdapter {
     Duration timeout = detailRequestTimeout,
   }) async {
     try {
-      final resp = await (_http?.get ?? sharedHttpClient.get)(
+      final resp = await sendMetadataRequest(
+        _http ?? sharedHttpClient,
         Uri.parse('${baseUrl(environment: _environment)}$path'),
+        timeout: timeout,
       ).timeout(timeout);
       if (resp.statusCode != 200) return null;
       return ollamaModelsFromJson(jsonDecode(resp.body));
@@ -226,10 +229,13 @@ class OllamaAdapter {
     LocalModel model,
   ) async {
     try {
-      final resp = await (_http?.post ?? sharedHttpClient.post)(
+      final resp = await sendMetadataRequest(
+        _http ?? sharedHttpClient,
         Uri.parse('${baseUrl(environment: _environment)}/api/show'),
+        method: 'POST',
         headers: const {'Content-Type': 'application/json'},
         body: jsonEncode({'model': model.name}),
+        timeout: detailRequestTimeout,
       ).timeout(detailRequestTimeout);
       if (resp.statusCode != 200) return null;
       final data = jsonDecode(resp.body);
@@ -443,6 +449,7 @@ LocalModel _declaring(LocalModel model, _OllamaModelMetadata metadata) {
     vision: capabilities?.vision ?? model.vision,
     reasoning: capabilities?.reasoning ?? model.reasoning,
     embedding: capabilities?.embedding ?? model.embedding,
+    textGeneration: model.textGeneration,
     digest: model.digest,
   );
 }
@@ -489,6 +496,7 @@ List<LocalModel> ollamaModelsFromJson(dynamic data) {
       vision: null,
       reasoning: null,
       embedding: null,
+      textGeneration: null,
       digest: _digest(m['digest']),
     ));
   }
@@ -545,9 +553,13 @@ ProviderQuota localRuntimeQuota({
     var upstream = model.upstreamRouting;
     var cloud = model.cloud;
     var identityConflict = false;
+    var textGeneration = model.textGeneration;
+    var embedding = model.embedding;
     for (final running in matches) {
       upstream = upstream.combine(running.upstreamRouting);
       cloud = cloud || running.cloud;
+      if (running.textGeneration == false) textGeneration = false;
+      if (running.embedding == true) embedding = true;
       if (model.digest != null &&
           running.digest != null &&
           model.digest != running.digest) {
@@ -574,7 +586,8 @@ ProviderQuota localRuntimeQuota({
       tools: model.tools,
       vision: model.vision,
       reasoning: model.reasoning == true ? 'reasoning' : null,
-      embedding: model.embedding,
+      embedding: embedding,
+      textGeneration: textGeneration,
     ));
   }
   final localInstalled =

@@ -67,6 +67,13 @@ Keychain-only host sign-in without a usable independent grant.
 
 ## Provider policy and evidence refresh
 
+Correction 2026-09-30: the Claude SDK billing conclusion below read preserved
+historical content instead of the article's pause notice. Separate SDK monthly
+credits are unavailable; subscription-authenticated SDK and print-mode use still
+draws subscription limits. API-key billing remains separate. See the
+[current quota review](2026-09-30-subscription-quotas.md#claude-billing-correction).
+The original table is retained as superseded billing evidence, not current advice.
+
 All sources below were reviewed on September 13. Public policy is not an
 account's remaining balance. Source observations and metadata experiments are
 identified separately from implemented behavior.
