@@ -4,7 +4,7 @@ import json
 import math
 import re
 from collections.abc import Iterable
-from typing import Any
+from typing import TypedDict
 from urllib.parse import urlsplit
 
 
@@ -58,34 +58,48 @@ def require_mcp_bearer_token(value: str | None) -> str:
     return token
 
 
-def structured_content(result: Any) -> dict[str, Any]:
+def structured_content(result: object) -> dict[str, object]:
     """Return structured MCP tool content, falling back to JSON text content."""
-    direct = getattr(result, "structuredContent", None)
+    direct: object = getattr(result, "structuredContent", None)
     if isinstance(direct, dict):
-        return direct
+        return _object_value(direct)
 
-    snake_case = getattr(result, "structured_content", None)
+    snake_case: object = getattr(result, "structured_content", None)
     if isinstance(snake_case, dict):
-        return snake_case
+        return _object_value(snake_case)
 
-    for item in getattr(result, "content", ()) or ():
-        text = getattr(item, "text", None)
+    content: object = getattr(result, "content", None)
+    if not isinstance(content, (list, tuple)):
+        return {}
+    for item in content:
+        text: object = getattr(item, "text", None)
         if not isinstance(text, str):
             continue
         try:
-            decoded = json.loads(text)
+            decoded: object = json.loads(text)
         except json.JSONDecodeError:
             continue
         if isinstance(decoded, dict):
-            return decoded
+            return _object_value(decoded)
 
     return {}
 
 
+class RoutingSummary(TypedDict):
+    suggest_schema: str | None
+    recommended_provider: str | None
+    headroom_percent: int | float | None
+    using_local_fallback: bool
+    fallback_provider: str | None
+    model_schema: str | None
+    recommended_model: str | None
+    model_provider: str | None
+
+
 def routing_summary(
-    suggestion: dict[str, Any],
-    model_suggestion: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+    suggestion: dict[str, object],
+    model_suggestion: dict[str, object] | None = None,
+) -> RoutingSummary:
     recommended = _object_value(suggestion.get("recommended"))
     fallback = _object_value(suggestion.get("fallback"))
     model = _object_value((model_suggestion or {}).get("recommended"))
@@ -102,7 +116,7 @@ def routing_summary(
     }
 
 
-def as_pretty_json(value: dict[str, Any]) -> str:
+def as_pretty_json(value: object) -> str:
     return json.dumps(value, indent=2, sort_keys=False, allow_nan=False)
 
 
@@ -114,15 +128,17 @@ def require_routing_tools(tool_names: Iterable[str]) -> None:
         raise RuntimeError(f"quotabot MCP tools missing: {', '.join(missing)}")
 
 
-def _object_value(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+def _object_value(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str)}
 
 
-def _string_value(value: Any) -> str | None:
+def _string_value(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _number_value(value: Any) -> int | float | None:
+def _number_value(value: object) -> int | float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     if isinstance(value, float) and not math.isfinite(value):

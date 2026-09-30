@@ -281,6 +281,7 @@ const quotabotV1JsonSchema = <String, Object?>{
         'tools': {'type': 'boolean'},
         'vision': {'type': 'boolean'},
         'embedding': {'type': 'boolean'},
+        'text_generation': {'type': 'boolean'},
         'reasoning': {'type': 'string'},
         'tier': {'type': 'string'},
         'quota_included_until': {'type': 'integer', 'minimum': 0},
@@ -899,6 +900,7 @@ void _validateModel(
   _checkBool(model, 'tools', path, errors, required: false);
   _checkBool(model, 'vision', path, errors, required: false);
   _checkBool(model, 'embedding', path, errors, required: false);
+  _checkBool(model, 'text_generation', path, errors, required: false);
   _checkOptionalString(model, 'display_name', path, errors);
   _checkOptionalString(model, 'reasoning', path, errors);
   _checkOptionalString(model, 'tier', path, errors);

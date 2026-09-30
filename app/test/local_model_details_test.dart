@@ -237,7 +237,7 @@ void main() {
     },
   );
 
-  testWidgets('cloud and embedding exclusions remain visible in inventory', (
+  testWidgets('cloud and non-text exclusions remain visible in inventory', (
     tester,
   ) async {
     await _open(
@@ -245,6 +245,7 @@ void main() {
       _quota(
         models: const [
           ModelInfo(id: 'embedding-model', local: true, embedding: true),
+          ModelInfo(id: 'image-model', local: true, textGeneration: false),
           ModelInfo(id: 'remote-cloud', local: true, cloudOffloaded: true),
         ],
       ),
@@ -252,6 +253,11 @@ void main() {
 
     expect(
       find.text('Embedding model. Excluded from generation routing.'),
+      findsOneWidget,
+    );
+    await _scrollTo(tester, _model('image-model'));
+    expect(
+      find.text('Non-text deployment. Excluded from generation routing.'),
       findsOneWidget,
     );
     await _scrollTo(tester, _model('remote-cloud'));

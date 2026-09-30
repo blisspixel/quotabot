@@ -17,7 +17,7 @@ import 'provider_ids.dart';
 
 /// The date the catalog was last refreshed (YYYY-MM-DD). Surfaced so consumers
 /// can see how fresh the capability hints are.
-const String kCatalogUpdated = '2026-09-02';
+const String kCatalogUpdated = '2026-09-30';
 
 /// Providers whose windows are true rolling included-quota plans. Only these
 /// can ever mark a model quota-backed for the no-surprise `--budget=quota`
@@ -46,8 +46,8 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tier: 'flagship',
     ),
     ModelInfo(
-      id: 'claude-opus-5',
-      displayName: 'Claude Opus 5',
+      id: 'claude-opus-5-5',
+      displayName: 'Claude Opus 5.5',
       contextTokens: 1000000,
       maxOutputTokens: 128000,
       tools: true,
@@ -56,8 +56,8 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tier: 'flagship',
     ),
     ModelInfo(
-      id: 'claude-sonnet-5',
-      displayName: 'Claude Sonnet 5',
+      id: 'claude-sonnet-5-5',
+      displayName: 'Claude Sonnet 5.5',
       contextTokens: 1000000,
       maxOutputTokens: 128000,
       tools: true,
@@ -76,6 +76,46 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
     ),
   ],
   'codex': [
+    ModelInfo(
+      id: 'gpt-6.1-sol',
+      displayName: 'GPT-6.1 Sol',
+      contextTokens: 1050000,
+      maxOutputTokens: 128000,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'flagship',
+    ),
+    ModelInfo(
+      id: 'gpt-6-astra',
+      displayName: 'GPT-6 Astra',
+      contextTokens: 1050000,
+      maxOutputTokens: 128000,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'flagship',
+    ),
+    ModelInfo(
+      id: 'gpt-6-sol',
+      displayName: 'GPT-6 Sol',
+      contextTokens: 1050000,
+      maxOutputTokens: 128000,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'flagship',
+    ),
+    ModelInfo(
+      id: 'gpt-6-luna',
+      displayName: 'GPT-6 Luna',
+      contextTokens: 1050000,
+      maxOutputTokens: 128000,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'light',
+    ),
     ModelInfo(
       id: 'gpt-5.6-sol',
       displayName: 'GPT-5.6 Sol',
@@ -107,10 +147,6 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tier: 'light',
     ),
     ModelInfo(
-      id: 'gpt-5.3-codex-spark',
-      displayName: 'GPT-5.3-Codex-Spark',
-    ),
-    ModelInfo(
       id: 'gpt-5.5',
       displayName: 'GPT-5.5',
       contextTokens: 1000000,
@@ -121,6 +157,15 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
     ),
   ],
   'grok': [
+    ModelInfo(
+      id: 'grok-4.7',
+      displayName: 'Grok 4.7',
+      contextTokens: 500000,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'flagship',
+    ),
     ModelInfo(
       id: 'grok-4.6',
       displayName: 'Grok 4.6',
@@ -142,6 +187,14 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
   ],
   'antigravity': [
     ModelInfo(
+      id: 'gemini-3.8-flash',
+      displayName: 'Gemini 3.8 Flash',
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'standard',
+    ),
+    ModelInfo(
       id: 'gemini-3.7-flash',
       displayName: 'Gemini 3.7 Flash',
       tools: true,
@@ -151,13 +204,6 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
     ModelInfo(
       id: 'gemini-3.6-flash',
       displayName: 'Gemini 3.6 Flash',
-      tools: true,
-      vision: true,
-      tier: 'standard',
-    ),
-    ModelInfo(
-      id: 'gemini-3.5-flash',
-      displayName: 'Gemini 3.5 Flash',
       tools: true,
       vision: true,
       tier: 'standard',

@@ -1228,15 +1228,17 @@ ModelSuggestion suggestModel(
           b,
           expiringQuotaByProvider: expiringQuotaByProvider,
         ));
-  // A model the source declares as an embedding model cannot serve a generation
+  // A model the source declares as non-text cannot serve a generation
   // request, so it is never a routing candidate. It stays visible in listings,
   // which are inspection rather than a recommendation. An undeclared kind is
   // never treated as non-generative.
   final ranked = [
     for (final e in matched)
-      if (e.model.embedding != true) e
+      if (e.model.embedding != true && e.model.textGeneration != false) e
   ];
-  final embeddingOnly = ranked.isEmpty && matched.isNotEmpty;
+  final nonGenerationOnly = ranked.isEmpty && matched.isNotEmpty;
+  final embeddingOnly = nonGenerationOnly &&
+      matched.every((entry) => entry.model.embedding == true);
   ModelEntry? pick;
   for (final e in ranked) {
     if (e.available) {
@@ -1246,8 +1248,8 @@ ModelSuggestion suggestModel(
   }
   final reason = pick == null
       ? (ranked.isEmpty
-          ? embeddingOnly
-              ? 'The only models that match are embedding models, which cannot '
+          ? nonGenerationOnly
+              ? 'The only models that match are ${embeddingOnly ? 'embedding models' : 'non-text deployments'}, which cannot '
                   'serve a generation request.'
               : snapshot.any((quota) => quota.driftReason != null)
                   ? 'Provider drift leaves no trusted model-budget evidence; run '

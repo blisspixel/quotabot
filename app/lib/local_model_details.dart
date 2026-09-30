@@ -283,6 +283,8 @@ class _ModelDetail extends StatelessWidget {
         'Upstream configuration is unresolved. Excluded from routing.',
       if (model.embedding == true)
         'Embedding model. Excluded from generation routing.',
+      if (model.textGeneration == false && model.embedding != true)
+        'Non-text deployment. Excluded from generation routing.',
       if (entry.stale)
         'Stale inventory. Excluded from routing.'
       else if (entry.driftReason != null)

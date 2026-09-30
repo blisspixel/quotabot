@@ -48,7 +48,7 @@ models:
     candidates:
       - deployment: claude-sonnet   # API-key deployments are skipped by default
         provider: claude
-        # account: work@example.com # Optional: match one quotabot account.
+        # account: credential:EXACT_SNAPSHOT_KEY # Required with multiple accounts.
         spend: paid_api
       - deployment: codex-gpt
         provider: codex

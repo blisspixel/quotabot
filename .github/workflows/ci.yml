@@ -24,6 +24,13 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Strict Python boundary helpers
+        run: |
+          python -m pip install --require-hashes -r tools/requirements-dev.txt
+          python -m mypy
       - name: Human authorship and attribution policy
         run: python tools/check_authorship.py
       - name: Ruff lint

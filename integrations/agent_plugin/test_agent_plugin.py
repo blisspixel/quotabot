@@ -191,6 +191,19 @@ class AgentPluginTests(unittest.TestCase):
             self.assertEqual(marker.read_text(encoding="utf-8"), "unchanged")
         self.assertEqual((ROOT / "mcp.json").read_bytes(), before)
 
+    def test_preparation_rejects_malformed_template_objects(self) -> None:
+        for template in (
+            "[]",
+            "{}",
+            '{"mcpServers": []}',
+            '{"mcpServers": {"quotabot": null}}',
+        ):
+            with self.subTest(template=template):
+                with tempfile.TemporaryDirectory() as directory:
+                    with patch.object(Path, "read_text", return_value=template):
+                        with self.assertRaisesRegex(ValueError, "JSON object"):
+                            prepare_mcp.prepare_mcp(home=directory)
+
     def test_preparation_rejects_an_escaping_template_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

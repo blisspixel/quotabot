@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-09-13. This file is the forward plan. It records brief shipped
+Updated 2026-09-30. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -124,6 +124,19 @@ reports are dated evidence; this section owns the execution order.
 The [September 13 review](docs/research/2026-09-13-next-review.md) refreshes
 provider, runtime, platform, and harness evidence and records verification limits.
 
+The [September 30 review](docs/research/2026-09-30-review.md) refreshes
+[subscription quota](docs/research/2026-09-30-subscription-quotas.md),
+[other provider policies](docs/research/2026-09-30-provider-policy-updates.md),
+[local-runtime status](docs/research/2026-09-30-local-runtime-status.md),
+[model routing](docs/research/2026-09-30-model-routing.md), and
+[code quality](docs/research/2026-09-30-code-quality.md). Version 0.11.7
+updates the curated models, removes retired Spark, and excludes explicitly
+non-text Lemonade deployments from generation advice. These changes were not
+part of 0.11.6. Anthropic's current notice pauses the previously announced
+separate SDK credits; the September 13 billing conclusion is superseded.
+Preserve the priority on measured provider truth and bounded execution evidence
+rather than treating every newly announced model or router as an adapter task.
+
 **Immediate compatibility maintenance:** the September 13
 [MCP and Agent Plugins review](docs/research/2026-09-13-mcp-agent-plugins.md)
 confirms that stable `mcp_dart` now implements the final July protocol and its
@@ -158,6 +171,9 @@ support. This maintenance does not wait for post-1.0 stabilization.
    storage shapes, missing or locked Keychain, malformed data, credential
    replacement, and account mismatch, and without writing any host credential
    file. A Keychain read alone does not prove current plan entitlement.
+   Claude's optional weekly refill can preserve the scheduled reset time.
+   Capture sanitized before/after usage metadata and a reliable reset marker
+   before admitting that transition; keep unexplained gains quarantined.
 2. **Finish credential and shutdown recovery.** Reset confirmation, coalesced
    return/pause recovery, usage-read ownership, admission, accurate recovery
    labels, original OAuth request settlement, nested grant-transaction drain,
@@ -174,6 +190,12 @@ support. This maintenance does not wait for post-1.0 stabilization.
    on-device execution, active generation, or per-model utilization. Account for
    LM Studio LM Link, WSL and tunnel forwarding, and Lemonade composites before
    admitting those cases to a stronger local-only policy.
+   Keep explicit non-text deployment kinds out of text generation while still
+   showing their inventory. Verify Ollama's new list-level capabilities against
+   the existing upstream-veto discovery before replacing detail reads. For
+   Lemonade composites, require complete component scope rather than assuming
+   `collection.router` is local. No routing-classifier or validation inference
+   belongs in a metadata probe.
 4. **Polish one consistent desktop language.** Build on the existing typography,
    theme and controls. Make the recommendation prominent, distinguish remaining
    included quota from price, and make focus, disabled, busy and warning states
@@ -192,6 +214,10 @@ support. This maintenance does not wait for post-1.0 stabilization.
    at larger text sizes. Answer remains: what is eligible, what is loaded, which
    context and capabilities are known, why a model is eligible or excluded, and
    what to do when evidence is missing.
+   Distinguish authentication required, unreachable, reachable but unloaded,
+   malformed optional detail, and multiple loaded instances. A missing running
+   context must not be relabeled as the advertised model maximum. Keep loaded
+   state, observed activity, and host memory pressure separate.
 6. **Make everyday native use dependable.** Prioritize honest GPU evidence and
    runtime reachability, Linux behavior when a tray host is absent, coalesced
    freshness recovery after sleep or foregrounding, and Windows/WSL/host scope.
@@ -217,8 +243,10 @@ support. This maintenance does not wait for post-1.0 stabilization.
    it, with a shipped `quotabot mcp` entrypoint and explicit credential and
    environment prerequisites. The primary integration job is account and plan
    availability advice through supported access under provider terms. Record
-   execution-surface billing separately: Claude's interactive windows cannot
-   establish Agent SDK or headless credit availability. MCP
+   execution-surface billing separately: current subscription-authenticated
+   Claude SDK use shares subscription limits, while API-key use has separate
+   billing. Verify exact account, authentication, client/model access, and
+   disabled paid continuation rather than inferring them from a green bar. MCP
    access does not establish automatic dispatch or permission to bypass a
    limit. Any future explicit model-selection command is secondary and must
    use a documented harness API without inspecting a task or silently rewriting
@@ -234,6 +262,12 @@ support. This maintenance does not wait for post-1.0 stabilization.
    readiness histories need a declared user question, bounded retention, and
    explicit source/scope. Keep inferred fit separate from observed behavior;
    do not manufacture throughput, quality rankings, or future prompt counts.
+   Integrate with caller-owned routers through capability and capacity evidence,
+   exact account/model mapping, cache age, receipts, and leases. Leave task
+   classification and quality evaluation with the caller. Compare routing
+   changes on sanitized replay histories, including expired evidence, pool
+   resets, concurrent reservations, and fail-soft recovery before changing a
+   shipped policy. New local decision models still perform inference.
 
 Correctness, credential-lifecycle defects, and broken CI take precedence within
 each step. Deliver one reviewable behavior change at a time with its docs and
@@ -463,14 +497,14 @@ runtimes have no provider credit balance, and manual entries remain
 self-reported rather than authoritative.
 
 Current provider admission record, researched from first-party documentation on
-2026-09-02:
+2026-09-30; public policy and client source are not real-account validation:
 
 | Provider | Authoritative or supported evidence | Roadmap decision |
 |---|---|---|
 | Codex | The supported [App Server](https://learn.chatgpt.com/docs/app-server) rate-limit snapshot can include provider-native `credits`, separately from `rateLimitResetCredits`; public API administration exposes historical spend and configured limits, not a documented remaining prepaid balance | First field-validation candidate. Preserve the native unit and ship display-only before any paid policy; never confuse purchased credits with banked resets |
 | Claude | Individual [Usage Credits](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans) and Usage Bundles expose balance and controls in Settings, but no supported individual balance API is documented; the Enterprise [Spend Limits API](https://platform.claude.com/docs/en/manage-claude/spend-limits-api) returns an effective limit and informational period-to-date spend, not prepaid balance | Keep additive live response fields optional and display-only. Do not scrape the UI or turn enterprise spend-to-limit into a balance |
 | Antigravity | The interactive [`/credits` panel](https://antigravity.google/docs/cli/credits?hl=en) and status line can show AI credits; no documented machine-readable balance API exists, and the host `useG1Credits` setting controls continuation after baseline exhaustion | Never invoke or scrape the TUI and never change the host setting. Require a future stable signed-in metadata field plus explicit quotabot paid opt-in |
-| Grok and xAI API | Consumer [Extra Usage Credits](https://docs.x.ai/grok/faq) are documented in Settings only. The separate [xAI Management API](https://docs.x.ai/developers/rest-api-reference/management/billing) has prepaid-balance and postpaid-limit reads, but requires a broad Management key and has unresolved sign, auto-top-up, and overage semantics | Keep consumer credits out until a stable provider field is validated. Defer the management integration until least-privilege read authority and fail-closed billing semantics are proven |
+| Grok and xAI API | Consumer [Extra Usage Credits](https://docs.x.ai/grok/faq) have first-party [client fields](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/extensions/billing.rs) for `prepaidBalance` and `onDemandEnabled`. The separate [Management API](https://docs.x.ai/developers/rest-api-reference/management/billing) uses broader authority and different accounting semantics | Validate signed-in consumer balance units, account scope, expiry, top-up, and enforced continuation controls before display-only support. Defer management integration until least-privilege reads and bounded spend are proven |
 | Cursor | The team [Admin API](https://cursor.com/docs/account/teams/admin-api) reports current-cycle on-demand spend and effective per-user limits, but not the current enabled state; enforcement can lag and Enterprise pooled limits have different meaning | Admit only as display-only `metered_overage` spend-to-cap evidence after explicit admin setup, never as funded balance or default routing |
 | Devin and Windsurf | Self-serve [prepaid balance, sharing, and auto-reload](https://docs.devin.ai/admin/billing/self-serve) are documented in Settings; public billing APIs cover different Enterprise ACU surfaces | No collector until a documented self-serve endpoint or stable provider-owned metadata row exists; do not scrape UI or private calls |
 | Kiro | Individual client displays can combine plan and [prepaid add-on credits](https://kiro.dev/docs/billing/add-on-credits/); Enterprise exports delayed overage enabled, cap, and used fields | Capture and validate add-on and no-add-on accounts before decomposing local rows. Keep delayed Enterprise export analytical, not live routing evidence |
@@ -494,7 +528,7 @@ plan semantics remain uneven.
 
 ## Current state
 
-The current line, **0.11.6**, is the stable release version and carries
+The current line, **0.11.7**, is the stable release version and carries
 the latest hardening inventory described in [Next](#next). The stable line
 contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
@@ -1147,9 +1181,10 @@ mutation testing exposes test-suite holes that ordinary coverage misses; see
 
 ### P1. Make local verification reproducible and bounded
 
-Provide one documented local gate entry point that discovers or clearly rejects
-the wrong Flutter, Dart, and Python versions, mirrors CI coverage and integration
-commands, and emits a concise evidence summary. Split slow platform and
+The Windows gate now rejects mismatched Flutter, Dart, and Python versions and
+runs the scoped strict Python baseline. Extend that reproducibility to POSIX,
+grow type coverage from the maintained boundary helpers into the router, and
+emit a concise evidence summary. Split slow platform and
 process-level tests into balanced shards with declared time budgets while keeping
 the full three-OS matrix authoritative.
 

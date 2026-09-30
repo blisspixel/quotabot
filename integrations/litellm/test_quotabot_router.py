@@ -27,6 +27,7 @@ from quotabot_router import (
     _load_local_http_token,
     _local_server_proof,
     _metric_info_for_candidate,
+    _reservation_candidates,
 )
 
 
@@ -249,7 +250,7 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(chosen, "codex-high")
         self.assertEqual(data["metadata"]["quotabot_provider"], "codex")
 
-    def test_ambiguous_provider_accounts_are_not_guessed_for_metrics(self):
+    def test_ambiguous_provider_accounts_require_explicit_deployment_mapping(self):
         router = QuotabotRouter()
         router.policy = Policy(
             models={
@@ -280,12 +281,14 @@ class RouterTests(unittest.TestCase):
                 },
             ]
 
+        self.reserve_patch.stop()
         data = {}
         router._availability = availability  # type: ignore[method-assign]
-        chosen = asyncio.run(router._route("frontier", data, None))
-        self.assertEqual(chosen, "claude-sonnet")
-        self.assertEqual(data["metadata"]["quotabot_provider"], "claude")
-        self.assertNotIn("quotabot_account", data["metadata"])
+        with unittest.mock.patch.object(router, "_post_mutation") as mutation:
+            with self.assertRaises(UnsafeRouteError):
+                asyncio.run(router._route("frontier", data, None))
+        mutation.assert_not_called()
+        self.assertNotIn("metadata", data)
 
     def test_candidate_account_matches_ranked_account(self):
         router = QuotabotRouter()
@@ -1185,6 +1188,10 @@ agents:
             Policy(lease_weight_percent=0.5)
         with self.assertRaisesRegex(ValueError, "lease_weight_percent"):
             Policy(lease_weight_percent=99)
+        for invalid in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(lease_weight_percent=invalid):
+                with self.assertRaisesRegex(ValueError, "lease_weight_percent"):
+                    Policy(lease_weight_percent=invalid)
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "policy.yaml"
@@ -1444,6 +1451,128 @@ models:
 
 
 class LeaseHttpTests(unittest.TestCase):
+    def test_explicit_blank_account_cannot_become_a_wildcard(self):
+        for account in ("", " ", "\t"):
+            with self.subTest(account=account):
+                with self.assertRaisesRegex(ValueError, "nonempty account label"):
+                    Candidate("claude-work", provider="claude", account=account)
+
+    def test_implicit_deployment_requires_one_known_account(self):
+        candidate = Candidate(
+            deployment="claude-default",
+            provider="claude",
+            spend="quota_plan",
+            overages_disabled=True,
+        )
+        for ranked in (
+            [],
+            [{"provider": "claude"}],
+            [
+                {"provider": "claude", "account": "account-a"},
+                {"provider": "claude", "account": "account-b"},
+            ],
+            [
+                {"provider": "claude", "account": "account-a"},
+                {"provider": "claude"},
+            ],
+        ):
+            with self.subTest(ranked=ranked):
+                router = QuotabotRouter()
+                with (
+                    unittest.mock.patch(
+                        "quotabot_router._load_local_http_token"
+                    ) as token,
+                    unittest.mock.patch.object(router, "_post_mutation") as mutation,
+                ):
+                    selected = asyncio.run(
+                        router._reserve_remote([candidate], ranked, 15, None)
+                    )
+                self.assertIsNone(selected)
+                token.assert_not_called()
+                mutation.assert_not_called()
+
+    def test_explicit_mapping_wins_over_single_account_convenience(self):
+        wildcard = Candidate("claude-default", provider="claude")
+        exact = Candidate("claude-work", provider="claude", account="account-a")
+        bound = _reservation_candidates(
+            [wildcard, exact],
+            [{"provider": "claude", "account": "account-a"}],
+        )
+        self.assertIs(
+            _candidate_for_reserved_target(bound, "claude", "account-a"), exact
+        )
+        self.assertIsNone(
+            _candidate_for_reserved_target([wildcard], "claude", "account-b")
+        )
+
+    def test_implicit_target_cannot_retarget_a_changed_account(self):
+        token = "local-test-mutation-token-0123456789"
+        candidate = Candidate(
+            deployment="claude-default",
+            provider="claude",
+            spend="quota_plan",
+            overages_disabled=True,
+        )
+        for returned_account in ("account-a", "account-b", None):
+            with self.subTest(returned_account=returned_account):
+                router = QuotabotRouter()
+                releases = []
+
+                def mutation(path, payload, supplied_token):
+                    self.assertEqual(supplied_token, token)
+                    if path == "/leases/release":
+                        releases.append(payload["lease_id"])
+                        return {"schema": "quotabot.release.v1", "released": True}
+                    self.assertEqual(
+                        payload["targets"],
+                        [{"provider": "claude", "account": "account-a"}],
+                    )
+                    return {
+                        "schema": "quotabot.reserve.v1",
+                        "reserved": True,
+                        "reused": False,
+                        "lease": {
+                            "id": "account-test-lease-0001",
+                            "provider": "claude",
+                            "account": returned_account,
+                            "created_at": 100,
+                            "expires_at": 220,
+                            "weight_percent": 15,
+                            "client": "litellm",
+                            "idempotency_key": payload["idempotency_key"],
+                        },
+                        "selected": {
+                            "provider": "claude",
+                            "account": returned_account,
+                            "available": True,
+                            "effective_headroom_percent": 80,
+                        },
+                        "decision_id": "qb-1782000000-0123456789abcdef",
+                    }
+
+                with (
+                    unittest.mock.patch.dict(
+                        os.environ, {"QUOTABOT_HTTP_TOKEN": token}
+                    ),
+                    unittest.mock.patch.object(router, "_post_mutation", mutation),
+                ):
+                    selected = asyncio.run(
+                        router._reserve_remote(
+                            [candidate],
+                            [{"provider": "claude", "account": "account-a"}],
+                            15,
+                            None,
+                        )
+                    )
+                if returned_account == "account-a":
+                    self.assertIsNotNone(selected)
+                    self.assertEqual(selected.candidate.deployment, "claude-default")
+                    self.assertEqual(selected.candidate.account, "account-a")
+                    self.assertEqual(releases, [])
+                else:
+                    self.assertIsNone(selected)
+                    self.assertEqual(releases, ["account-test-lease-0001"])
+
     def test_malformed_reserved_candidate_is_released_and_rejected(self):
         token = "local-test-mutation-token-0123456789"
         releases = []

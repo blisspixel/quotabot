@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 
 import 'credential_identity.dart';
 import 'file_guard.dart';
+import 'http_client.dart';
 import 'provider_ids.dart';
 import 'util.dart';
 
@@ -103,32 +104,9 @@ class ProviderReadOperation {
     Uri uri, {
     required Map<String, String> headers,
     required Duration timeout,
-  }) async {
-    if (timeout.inMicroseconds <= 0) {
-      throw ArgumentError.value(timeout, 'timeout', 'must be positive');
-    }
-    final abort = Completer<void>();
-    var expired = false;
-    final timer = Timer(timeout, () {
-      expired = true;
-      abort.complete();
-    });
-    try {
-      final request =
-          http.AbortableRequest('GET', uri, abortTrigger: abort.future)
-            ..headers.addAll(headers);
-      final response = await track(
-        client.send(request).then(http.Response.fromStream),
-      );
-      if (expired) throw TimeoutException('provider metadata deadline');
-      return response;
-    } on http.RequestAbortedException {
-      if (expired) throw TimeoutException('provider metadata deadline');
-      rethrow;
-    } finally {
-      timer.cancel();
-    }
-  }
+  }) =>
+      track(
+          sendMetadataRequest(client, uri, headers: headers, timeout: timeout));
 }
 
 /// Serializes one provider / exact credential generation / metadata purpose.

@@ -637,7 +637,8 @@ format overhead can differ from the estimate.
 - Lemonade: the AMD/lemonade-sdk OpenAI-compatible server. `GET /api/v1/models`
   (falling back to `/v1/models`) lists downloaded local models by default and
   can also list configured cloud-provider routes. quotabot reads
-  `max_context_window` and the `tool-calling`, `vision`, and `embeddings` labels,
+  `context_length` when declared, otherwise legacy `max_context_window`, and
+  validates the deployment and `tool-calling`/`vision` capability labels,
   omits an explicitly non-downloaded local catalog row, and marks
   `recipe: "cloud"` or `cloud_provider` entries `cloud_offloaded`. The optional
   matching `GET /api/v1/health` or `/v1/health` read supplies loaded model names
@@ -649,9 +650,13 @@ format overhead can differ from the estimate.
 A runtime also states each model's kind, and quotabot uses it in the opposite
 direction from a capability. Ollama declares `completion` for every model that
 can generate text, LM Studio types a model `embedding`, and Lemonade labels
-embedding-only entries `embeddings`. A model declared that way stays listed for
-inspection but is never recommended as a generation route, including a provider
-fallback whose only models are embeddings. Here an absent
+embedding-only entries `embedding` or `embeddings`. quotabot normalizes Lemonade's
+explicit chat deployment to `text_generation: true`; transcription, reranking,
+image, speech, classification, and 3d deployments become `text_generation: false`.
+Malformed or conflicting deployment declarations cannot become capacity.
+A model declared non-text stays listed for inspection but is never recommended
+as a generation route, including a provider fallback whose only models are
+non-text. Here an absent
 statement is never read as a denial: a runtime that says nothing about kind keeps
 its models routable, so a listing that publishes only names loses nothing. That
 asymmetry is deliberate. Requiring a capability must fail closed, because acting
@@ -663,12 +668,12 @@ Declared capabilities are what let a local model satisfy `--require-tools`,
 name: a capability the runtime did not declare fails a requirement for it, so a
 generic compatibility endpoint that lists only names cannot satisfy a capability
 filter. Lemonade's extended OpenAI-compatible fields are an explicit exception:
-its labels and `max_context_window` are provider-declared metadata. Where a
+its labels, `context_length`, and `max_context_window` are declared metadata. Where a
 runtime states an exhaustive list, an entry missing from it is real evidence of
-absence and is recorded as such. For a model that is not loaded, the reported
-context window is the maximum the model supports, not a promise about the context
-the runtime will choose when it loads it; a loaded model reports its actual
-running context instead, and that always wins.
+absence and is recorded as such. An unloaded model can report a configured
+context or an advertised maximum; neither proves an active instance's context.
+Valid running context wins when the runtime declares it. An explicitly malformed
+current context remains unknown rather than falling back to the maximum.
 
 Ollama's per-model capability read is bounded on purpose. Results are cached for
 the process by the runtime's own content digest, so a refresh loop re-probes
@@ -708,7 +713,12 @@ Current compatibility limits:
 - Lemonade can expose configured cloud-provider models through its loopback
   daemon. `recipe: "cloud"` or a non-empty `cloud_provider` is preserved as
   `cloud_offloaded`, with the same local and free budget exclusions as Ollama.
-  Explicitly non-downloaded local catalog rows are omitted.
+  Explicitly non-downloaded local catalog rows are omitted. Current deployment
+  labels are validated against the [stable API contract](https://github.com/lemonade-sdk/lemonade/blob/v2026.39.1/docs/api/openai.md#model-labels),
+  accessed 2026-09-30. Non-text models remain inspectable but cannot satisfy
+  model suggestions or provider fallback. Missing old declarations remain
+  unknown. Neither text eligibility nor a missing cloud field proves composite
+  or on-device execution scope.
 - LM Studio's native `GET /api/v1/models` (0.4.0+) is now the preferred read,
   with `/api/v0/models` and the OpenAI-compatible `/v1/models` as fallbacks. The
   v1 shape is pinned by a fixture captured from a real 0.4.0+ server. Both
@@ -785,8 +795,10 @@ build.nvidia.com. The API is OpenAI-compatible at
   access, plan, or trial eligibility. This is model discovery only, not
   inference, and is classified `source_class: "status_only"`.
 - Numeric quota: no local state file or zero-cost API endpoint for remaining
-  trial balance/rate-limit headroom is known. NVIDIA now describes trial usage
-  as model-specific rate limits rather than a published credit counter, so
+  trial balance/rate-limit headroom is known. Current NVIDIA FAQ and staff
+  guidance disagree about legacy trial credits versus model-specific limits;
+  neither establishes a usable numeric balance read. See the
+  [September 30 source review](research/2026-09-30-provider-policy-updates.md#nvidia-nim).
   quotabot reports catalog reachability with account access and balance
   unverified, no asserted plan, and no quota windows.
 - Routing: because no measured quota windows are known, NVIDIA NIM availability

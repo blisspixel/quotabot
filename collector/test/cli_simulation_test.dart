@@ -784,9 +784,13 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out,
-        contains('on grok [live, authoritative, quota plan, you@example.com'));
-    expect(out, contains('captured'));
+    expect(
+      out,
+      matches(RegExp(
+        r'^  -> \S+ on \S+ \[live, authoritative, quota plan, you@example\.com, captured ',
+        multiLine: true,
+      )),
+    );
   });
 
   test('provider-route suggest keeps provider schema with task context',

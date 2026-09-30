@@ -1,5 +1,20 @@
 $ErrorActionPreference = 'Stop'
 
+function Assert-QuotabotGateVersions {
+  param(
+    [Parameter(Mandatory)][string]$FlutterVersion,
+    [Parameter(Mandatory)][string]$DartVersion,
+    [Parameter(Mandatory)][string]$PythonVersion
+  )
+
+  if ($FlutterVersion -ne '3.44.6' -or $DartVersion -ne '3.12.2') {
+    throw "Contributor gate requires Flutter 3.44.6 and Dart 3.12.2; resolved Flutter $FlutterVersion and Dart $DartVersion. Correct PATH before retrying."
+  }
+  if ($PythonVersion -notmatch '^3\.13\.\d+$') {
+    throw "Contributor gate requires Python 3.13, matching CI; resolved Python $PythonVersion. Correct PATH before retrying."
+  }
+}
+
 # Dart's Windows native-asset hooks invoke cmd.exe without quoting. A toolchain
 # path such as C:\Users\Nick Seal\...\dart.exe then fails with
 # "'C:\Users\Nick' is not recognized". Junctions, subst drives, and 8.3 names

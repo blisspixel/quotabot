@@ -39,9 +39,10 @@ class LmStudioAdapter {
     return localBaseUrl(env['LMSTUDIO_HOST'], lmStudioDefaultPort);
   }
 
-  Future<http.Response> _get(String path) =>
-      (_http?.get ?? sharedHttpClient.get)(
+  Future<http.Response> _get(String path) => sendMetadataRequest(
+        _http ?? sharedHttpClient,
         Uri.parse('${baseUrl(environment: _environment)}$path'),
+        timeout: const Duration(seconds: 2),
       ).timeout(const Duration(seconds: 2));
 
   Future<ProviderQuota> collect() async {
@@ -202,6 +203,7 @@ class LmStudioAdapter {
       // broaden local reasoning routing from its reasoning configuration yet.
       reasoning: null,
       embedding: _declaredEmbedding(type),
+      textGeneration: null,
       digest: null,
     );
     installed.add(model);
@@ -267,6 +269,7 @@ class LmStudioAdapter {
       },
       reasoning: null,
       embedding: _declaredEmbedding(type),
+      textGeneration: null,
       digest: null,
     );
     installed.add(model);
@@ -300,6 +303,7 @@ List<LocalModel>? lmStudioCompatFromJson(dynamic data) {
           vision: null,
           reasoning: null,
           embedding: null,
+          textGeneration: null,
           digest: null,
         ),
   ];

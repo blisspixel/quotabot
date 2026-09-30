@@ -7,7 +7,6 @@ import json
 import shutil
 import sys
 from pathlib import Path
-from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,7 +34,7 @@ def existing_file(value: str | Path, label: str) -> Path:
     return path
 
 
-def source_launch(collector: Path, dart: str | None) -> dict[str, Any]:
+def source_launch(collector: Path, dart: str | None) -> dict[str, object]:
     directory = collector.expanduser().resolve()
     existing_file(directory / "bin" / "mcp_server.dart", "MCP source")
     existing_file(directory / "pubspec.yaml", "Collector package")
@@ -60,7 +59,7 @@ def render_config(
     dart: str | None = None,
     executable: str | None = None,
     quotabot: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     if harness not in HARNESS_IDS:
         raise ValueError("Unsupported harness configuration")
     if transport not in {"stdio", "http"}:
@@ -77,13 +76,16 @@ def render_config(
             if harness == "opencode-1"
             else "${" + TOKEN_ENV + "}"
         )
-        server: dict[str, Any] = {
+        server: dict[str, object] = {
             "url": MCP_URL,
             "headers": {"Authorization": "Bearer " + substitution},
         }
     elif executable is not None or quotabot is not None:
+        selected_path = quotabot if quotabot is not None else executable
+        if selected_path is None:
+            raise ValueError("A native executable path is required")
         selected = existing_file(
-            quotabot if quotabot is not None else executable,
+            selected_path,
             "quotabot CLI" if quotabot is not None else "Compiled MCP executable",
         )
         if selected.suffix.lower() in {".bat", ".cmd", ".ps1"}:
@@ -100,7 +102,11 @@ def render_config(
         server["enabled"] = True
         server["timeout"] = 30000
         if transport == "stdio":
-            server["command"] = [server["command"], *server.pop("args")]
+            command = server["command"]
+            arguments = server.pop("args")
+            if not isinstance(command, str) or not isinstance(arguments, list):
+                raise ValueError("A native launch requires a command and arguments")
+            server["command"] = [command, *arguments]
         else:
             server["oauth"] = False
         return {

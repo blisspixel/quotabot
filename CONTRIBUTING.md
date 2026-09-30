@@ -35,12 +35,16 @@ Flutter native-asset command runs:
 # Build and install from source.
 pwsh tools/setup.ps1
 
-# Run the complete contributor gate.
+# Run the portable contributor gate.
 pwsh tools/check.ps1
 ```
 
 On macOS and Linux, `tools/setup.sh` and the desktop packagers remap a Flutter
 or Dart SDK whose path contains spaces before native-asset commands run.
+
+The Windows gate checks Flutter 3.44.6, Dart 3.12.2, and Python 3.13 before
+running checks, and installs the hash-locked development tools into the selected
+Python environment. A virtual environment is recommended.
 
 The complete desktop gate requires Windows symlink support for Flutter plugins,
 normally enabled through Windows Developer Mode. Source setup remains fail-soft:
@@ -72,14 +76,18 @@ cannot find ShellCheck silently omits embedded shell analysis and does not
 reproduce the complete static CI gate.
 The exact platform package and readiness commands are in
 [Building from source](docs/BUILDING.md#build-a-release-binary).
-On Windows, `pwsh tools/check.ps1` is the equivalent complete gate and is the
-supported invocation when the Flutter SDK path may contain spaces. The command
-block below uses Bash syntax for macOS and Linux.
+On Windows, `pwsh tools/check.ps1` runs the complete portable contributor gate
+and is the supported invocation when the Flutter SDK path may contain spaces.
+Workflow lint, native packaging/readiness, signing, installed-client checks,
+and hosted CI require their separate evidence. The command block below uses
+Bash syntax for macOS and Linux.
 
 ```bash
 # repository policy and release consistency
-ruff check .
-ruff format --check .
+python -m pip install --require-hashes -r tools/requirements-dev.txt
+python -m mypy
+python -m ruff check .
+python -m ruff format --check .
 python -m unittest discover -s tools -p "test_*.py"
 python tools/check_release_version.py
 
@@ -130,6 +138,12 @@ tool-list smoke. CI runs that check on Windows, macOS, and Linux. It uses
 isolated empty profile paths and makes no quota or inference request.
 
 Guidelines:
+
+The strict Python gate initially covers the five maintained metadata/config
+helpers in `mypy.ini`; the router, other tooling, and tests are not yet in that
+scope. Expand it with precise boundary types and regression evidence. Ruff
+success does not prove type safety. To regenerate development tools, use
+`uv pip compile --universal --generate-hashes --python-version 3.10 --no-header -o tools/requirements-dev.txt tools/requirements-dev.in`.
 
 - Keep changes focused and the diff small. One concern per pull request.
 - Put logic in pure functions (parsing, analysis) with unit tests; keep adapters

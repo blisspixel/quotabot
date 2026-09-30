@@ -34,6 +34,26 @@ $toolchain = Enable-QuotabotSpaceSafeDart `
   -PreferredRoot $root `
   -IncludeFlutter
 try {
+  Write-Gate 'Pinned toolchain preflight'
+  $flutterVersion = (Invoke-QuotabotFlutter `
+    -State $toolchain `
+    -Arguments @('--version', '--machine')) -join "`n" | ConvertFrom-Json
+  $dartVersionOutput = (Invoke-QuotabotDart `
+    -State $toolchain `
+    -Arguments @('--version')) -join "`n"
+  if ($dartVersionOutput -notmatch '^Dart SDK version: (\S+)') {
+    throw 'Dart did not return a recognizable SDK version.'
+  }
+  $dartVersion = $Matches[1]
+  $pythonVersionOutput = (& python --version) -join "`n"
+  if ($LASTEXITCODE -ne 0 -or $pythonVersionOutput -notmatch '^Python (\S+)$') {
+    throw 'Python did not return a recognizable version.'
+  }
+  Assert-QuotabotGateVersions `
+    -FlutterVersion $flutterVersion.frameworkVersion `
+    -DartVersion $dartVersion `
+    -PythonVersion $Matches[1]
+
   if ($toolchain.Kind -ne 'verbatim') {
     Write-Host "Using space-free Dart path $($toolchain.DartExecutable) ($($toolchain.Kind))."
   }
@@ -41,6 +61,10 @@ try {
   Write-Gate 'Repository policy and release consistency'
   Push-Location $root
   try {
+    Invoke-CheckedCommand `
+      -Command 'python' `
+      -Arguments @('-m', 'pip', 'install', '--require-hashes', '-r', 'tools/requirements-dev.txt')
+    Invoke-CheckedCommand -Command 'python' -Arguments @('-m', 'mypy')
     Invoke-CheckedCommand `
       -Command 'python' `
       -Arguments @('tools/check_authorship.py')

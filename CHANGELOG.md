@@ -4,6 +4,46 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.7 - 2026-09-30
+
+Current model evidence, defensive metadata collection, account-safe routing,
+and integration security maintenance.
+
+- Update the hash-locked LiteLLM integration from 1.92.2 to patched stable 1.102.2,
+  addressing GHSA-7hp6-4w63-5g45's proxy privilege escalation. Preserve the
+  declared Python and MCP v1 compatibility; defer the newer MCP v2 dependency
+  line and require installed fake-proxy evidence.
+- Pin the existing Python MCP dependency to patched 1.30.0 and raise the client
+  snippets' minimum to 1.30, covering upstream schema-reference and OAuth issuer
+  advisories while retaining v1 transports.
+- Update selected existing AnyIO, PyJWT, OAuthLib, and RestrictedPython
+  dependencies to patched releases. Regenerate hashes and preserve unrelated
+  pins; provider-side OAuth features require their own integration evidence.
+- Refresh the curated model catalog from September 30 primary sources: Claude
+  Opus/Sonnet 5.5, GPT-6/6.1, Grok 4.7, and Gemini 3.8 Flash. Remove retired
+  Codex Spark and the withdrawn Antigravity Gemini 3.5 listing. Catalog hints
+  remain separate from live account/model access and subscription quota.
+- Keep explicitly non-text Lemonade deployments visible but exclude them from
+  generation suggestions and local fallbacks. Recognize singular embedding
+  labels, validate conflicting deployments, and preserve current context without
+  replacing malformed values with an advertised maximum. Add the optional
+  `text_generation` metadata flag and explain exclusions in terminal and desktop.
+- Bind LiteLLM reservations to exact accounts. Provider-only mappings are usable
+  only with one observed account; ambiguous mappings fail closed. Reject and
+  release mismatched reservations rather than dispatching a fixed deployment
+  against another account's quota.
+- Cancel stalled Ollama and LM Studio metadata requests at their deadline,
+  including partial response bodies, while retaining shared and injected client
+  ownership. Reuse the cloud read's abortable request implementation.
+- Reject explicit blank LiteLLM account mappings and non-finite lease weights
+  instead of interpreting malformed policy values as safe routing controls.
+- Add hash-locked strict Python checking for five maintained boundary helpers to
+  local and CI gates, and reject unsupported SDK/Python versions before the
+  Windows contributor gate. Preserve the established Dart/TypeScript checks.
+- Refresh provider, reset, local-runtime, routing, and engineering evidence.
+  Correct the paused Claude SDK-credit proposal and refine the standing editing
+  guidance around current notices, validated boundaries, and scoped evidence.
+
 - Find newly created owner release drafts through authenticated, paginated
   release listings. GitHub's tag lookup returns published releases only. Reuse
   the same exact-tag lookup when creating or resuming publication, preserving

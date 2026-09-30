@@ -846,52 +846,65 @@ void main() {
     expect(registry.single.quotaBacked, isFalse);
   });
 
-  test('Codex production catalog lists Spark without invented capabilities',
-      () {
-    final spark = kModelCatalog[codexProviderId]!.singleWhere(
-      (model) => model.id == 'gpt-5.3-codex-spark',
+  test('retired Spark is absent even when an old scoped pool remains', () {
+    final registry = buildModelRegistry(
+      [
+        _cloud(
+          codexProviderId,
+          20,
+          modelQuotas: [
+            ModelQuota(
+              model: 'GPT-5.3-Codex-Spark',
+              usedPercent: 0,
+              resetsAt: _now + 3600,
+            ),
+          ],
+        ),
+      ],
+      _now,
+      catalog: kModelCatalog,
     );
-
-    expect(spark.displayName, 'GPT-5.3-Codex-Spark');
-    expect(spark.contextTokens, isNull);
-    expect(spark.maxOutputTokens, isNull);
-    expect(spark.tools, isNull);
-    expect(spark.vision, isNull);
-    expect(spark.reasoning, isNull);
-    expect(spark.tier, isNull);
+    expect(registry, isNotEmpty);
+    expect(
+      registry.map((entry) => entry.model.id),
+      isNot(contains('gpt-5.3-codex-spark')),
+    );
   });
 
   test('production catalog matches the dated supported provider lineups', () {
-    expect(kCatalogUpdated, '2026-09-02');
+    expect(kCatalogUpdated, '2026-09-30');
     expect(
       kModelCatalog[claudeProviderId]!.map((model) => model.id),
       [
         'claude-fable-5-1',
-        'claude-opus-5',
-        'claude-sonnet-5',
+        'claude-opus-5-5',
+        'claude-sonnet-5-5',
         'claude-haiku-4-5',
       ],
     );
     expect(
       kModelCatalog[codexProviderId]!.map((model) => model.id),
       [
+        'gpt-6.1-sol',
+        'gpt-6-astra',
+        'gpt-6-sol',
+        'gpt-6-luna',
         'gpt-5.6-sol',
         'gpt-5.6-terra',
         'gpt-5.6-luna',
-        'gpt-5.3-codex-spark',
         'gpt-5.5',
       ],
     );
     expect(
       kModelCatalog[grokProviderId]!.map((model) => model.id),
-      ['grok-4.6', 'grok-4.5'],
+      ['grok-4.7', 'grok-4.6', 'grok-4.5'],
     );
     expect(
       kModelCatalog[antigravityProviderId]!.map((model) => model.id),
       [
+        'gemini-3.8-flash',
         'gemini-3.7-flash',
         'gemini-3.6-flash',
-        'gemini-3.5-flash',
         'gemini-3.1-pro',
         'claude-sonnet-4.6-thinking',
         'claude-opus-4.6-thinking',
@@ -1148,7 +1161,7 @@ void main() {
     );
     expect(
       withoutScopedQuota.map((entry) => entry.model.id),
-      contains('claude-sonnet-5'),
+      contains('claude-sonnet-5-5'),
     );
 
     final fableWithoutEvidence = buildModelRegistry(

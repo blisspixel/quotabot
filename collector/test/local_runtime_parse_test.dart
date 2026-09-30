@@ -385,6 +385,7 @@ void main() {
             vision: null,
             reasoning: null,
             embedding: null,
+            textGeneration: null,
             digest: null,
           ),
         ],
@@ -412,6 +413,7 @@ void main() {
           vision: null,
           reasoning: null,
           embedding: null,
+          textGeneration: null,
           digest: null,
         ),
         (
@@ -428,6 +430,7 @@ void main() {
           vision: null,
           reasoning: null,
           embedding: null,
+          textGeneration: null,
           digest: null,
         ),
       ];
@@ -446,6 +449,7 @@ void main() {
           vision: null,
           reasoning: null,
           embedding: null,
+          textGeneration: null,
           digest: null,
         ),
         installed[1],
@@ -487,6 +491,7 @@ void main() {
             vision: null,
             reasoning: null,
             embedding: null,
+            textGeneration: null,
             digest: null,
           ),
           (
@@ -503,6 +508,7 @@ void main() {
             vision: null,
             reasoning: null,
             embedding: null,
+            textGeneration: null,
             digest: null,
           ),
         ],

@@ -29,7 +29,13 @@ def directory_value(value: str | Path) -> str:
     return str(path)
 
 
-def prepare_mcp(*, home: str | Path, **paths: str | Path | None) -> dict:
+def _object_value(value: object, label: str) -> dict[str, object]:
+    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+        raise ValueError(f"{label} must be a JSON object")
+    return {key: item for key, item in value.items() if isinstance(key, str)}
+
+
+def prepare_mcp(*, home: str | Path, **paths: str | Path | None) -> dict[str, object]:
     unknown = paths.keys() - PATH_FIELDS.keys()
     if unknown:
         raise ValueError("Only documented nonsecret directory fields are accepted")
@@ -43,8 +49,13 @@ def prepare_mcp(*, home: str | Path, **paths: str | Path | None) -> dict:
     template = (ROOT / "mcp.json").resolve()
     if not template.is_relative_to(ROOT):
         raise ValueError("MCP template must remain inside the plugin package")
-    config = json.loads(template.read_text(encoding="utf-8"))
-    config["mcpServers"]["quotabot"]["env"] = environment
+    decoded: object = json.loads(template.read_text(encoding="utf-8"))
+    config = _object_value(decoded, "MCP template")
+    servers = _object_value(config.get("mcpServers"), "MCP servers")
+    server = _object_value(servers.get("quotabot"), "quotabot MCP server")
+    server["env"] = environment
+    servers["quotabot"] = server
+    config["mcpServers"] = servers
     return config
 
 

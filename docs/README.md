@@ -4,7 +4,11 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.11.6. It corrects NVIDIA catalog
+The current verified stable release is 0.11.7. It refreshes model evidence,
+hardens local metadata deadlines and deployment parsing, binds routing leases
+to exact accounts, and updates security dependencies. The
+[September 30 review](research/2026-09-30-review.md) records its evidence and
+remaining validation gaps. The preceding 0.11.6 corrects NVIDIA catalog
 evidence and expands native legacy MCP launch checks. The September 13 review
 refreshes provider, runtime, and protocol priorities. Version 0.11.5 reads the live Claude weekly
 pool when the session row omits a reset, keeps Fable on glance while hiding
@@ -29,6 +33,11 @@ desktop payloads were installed on Windows and verified against fresh downloads.
 Each new release repeats those gates. Current Windows and macOS artifacts remain
 unsigned; protected signing and notarization need provisioned publisher
 identities and fresh signed native evidence before 1.0.
+
+The [September 30 review](research/2026-09-30-review.md) records current primary
+sources and development corrections separately from that release: model catalog
+currency, Claude billing/reset notices, local text-deployment eligibility,
+account-bound reservations, cancellation, and the scoped Python typing baseline.
 
 Next work addresses independent OAuth and MCP shutdown lifetimes, shared desktop
 controls and identity, stronger execution-scope evidence, and installed harness
@@ -76,7 +85,14 @@ Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
   external evidence, including the reason behind the roadmap order.
 - [../ROADMAP.md](../ROADMAP.md): the sole immediate priority, ordered work, and
   release gates.
-- September 2026 research: [local models](research/2026-09-local-models.md),
+- September 30 evidence: [review and validation](research/2026-09-30-review.md),
+  [subscription quota](research/2026-09-30-subscription-quotas.md),
+  [provider policies](research/2026-09-30-provider-policy-updates.md),
+  [local status](research/2026-09-30-local-runtime-status.md),
+  [routing](research/2026-09-30-model-routing.md), and
+  [code quality](research/2026-09-30-code-quality.md). These reports are evidence;
+  ROADMAP Next owns the selected work and its acceptance criteria.
+  Earlier September research: [local models](research/2026-09-local-models.md),
   [native platform quality](research/2026-09-platform-quality.md),
   [provider reliability](research/2026-09-provider-reliability.md), and
   [agent harness compatibility](research/2026-09-harnesses.md). Each records
