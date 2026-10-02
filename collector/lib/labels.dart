@@ -156,6 +156,23 @@ bool _isLocalRuntimeGlanceDetail(String detail) {
   return false;
 }
 
+/// A reachable runtime's headline from current normalized load evidence.
+/// Legacy status text cannot prove cold residency after cache migration.
+/// Callers handle reachability, stale evidence, and read errors separately.
+String localRuntimeStatusLabel(ProviderQuota quota) {
+  if (quota.hasEligibleLocalGenerationModel &&
+      quota.localGenerationReadiness == null) {
+    return 'reachable - load state unknown';
+  }
+  final status = quota.status;
+  if (status != null && status.trim().isNotEmpty) return status;
+  return switch (quota.localGenerationReadiness) {
+    'loaded' => 'loaded',
+    'cold' => 'ready - no model loaded',
+    _ => 'No eligible generation model',
+  };
+}
+
 /// Loaded-model extras and free VRAM for a collapsed local card or unselected
 /// `top` row. Host RAM, utilization, disk inventory, and GPU-resident context
 /// stay in [localRuntimeExpandedDetails].

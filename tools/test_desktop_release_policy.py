@@ -172,7 +172,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         publication = (ROOT / "tools" / "publish_release.py").read_text(
             encoding="utf-8"
         )
-        self.assertIn('"--prerelease", "--latest=false"', publication)
+        self.assertIn('"draft": True', publication)
+        self.assertIn('"make_latest": "false",', publication)
         self.assertIn('"make_latest": "false" if prerelease else "true"', publication)
         self.assertIn('"prerelease": "-" in metadata["tag"]', publication)
         self.assertIn("Prerelease unexpectedly replaced GitHub Latest", publication)
@@ -286,7 +287,13 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertGreaterEqual(
             publication.count("require_current_source(metadata)"), 3
         )
-        self.assertIn('"--verify-tag"', publication)
+        creation = publication.index('method="POST"')
+        self.assertLess(
+            publication.rindex("require_current_source(metadata)", 0, creation),
+            creation,
+        )
+        self.assertIn('"target_commitish": metadata["source_digest"]', publication)
+        self.assertIn('"tag_name": metadata["tag"]', publication)
         self.assertLess(
             publication.rindex("require_current_source(metadata)"),
             self.publication_offset(publication),
@@ -1244,7 +1251,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertNotIn("--generate-notes", release + publication)
         self.assertIn('ROOT / "CHANGELOG.md"', helper)
         self.assertIn("message_violations(body)", helper)
-        self.assertIn('"--notes-file"', publication)
+        self.assertIn('"body": metadata["body"]', publication)
         create = release.split("  create-release:\n", 1)[1].split("  build:\n", 1)[0]
         self.assertLess(
             create.index("actions/checkout@"),

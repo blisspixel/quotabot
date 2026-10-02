@@ -66,16 +66,19 @@ void main() {
 
       final q = await OllamaAdapter(client: client).collect();
       expect(q.ok, isTrue);
-      expect(q.active, isFalse, reason: 'nothing is loaded');
+      expect(q.active, isFalse, reason: 'no positive loaded observation');
       expect(q.models, hasLength(1));
       expect(q.models.single.loaded, isFalse);
+      expect(q.models.single.loadedStateKnown, isFalse);
+      expect(q.status, 'reachable - load state unknown');
     });
 
-    test('is not running when the installed endpoint is unreachable', () async {
+    test('reports an installed metadata endpoint failure', () async {
       final client = MockClient((_) async => http.Response('no daemon', 503));
       final q = await OllamaAdapter(client: client).collect();
       expect(q.ok, isFalse);
-      expect(q.error, 'not running');
+      expect(q.error, 'runtime metadata unavailable (HTTP 503)');
+      expect(q.httpStatus, 503);
     });
 
     test('is not running when the client throws', () async {

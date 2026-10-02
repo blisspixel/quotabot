@@ -1665,6 +1665,164 @@ void main() {
     expect(stats[quotaIdentityKey(id, 'home')]?.perHour, closeTo(2, 0.001));
   });
 
+  test('unavailable analytics preserves unknown fits for exact accounts', () {
+    const now = 1782000000;
+    ProviderQuota quota(String provider, String account) => ProviderQuota(
+          provider: provider,
+          displayName: provider,
+          account: account,
+          asOf: now,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+        );
+    final quotas = [
+      quota(id, 'work'),
+      quota(id, 'home'),
+      quota(grokProviderId, 'a')
+    ];
+    for (final entry in [
+      (id, 'work', 20.0),
+      (id, 'home', 2.0),
+      (grokProviderId, 'a', 40.0)
+    ]) {
+      recordHeadroomSample(entry.$1, 90, now - 3600, account: entry.$2);
+      recordHeadroomSample(entry.$1, 90 - entry.$3, now, account: entry.$2);
+    }
+    recordHeadroomSample(id, 90, now - 3600);
+    recordHeadroomSample(id, 85, now);
+    final healthy = recentBurnStatsByQuota(quotas, now);
+    expect(healthy.values.every((stat) => stat.perHour != null), isTrue);
+
+    final unavailable = File('${tempConfig.path}/unavailable-config')
+      ..writeAsStringSync('not a directory');
+    setQuotabotDirOverrideForTesting(Directory(unavailable.path));
+    try {
+      for (final lookback in [null, 2]) {
+        final stats =
+            recentBurnStatsByQuota(quotas, now, lookbackHours: lookback);
+        expect(stats.keys, unorderedEquals(quotas.map(quotaIdentityKeyFor)));
+        for (final stat in stats.values) {
+          expect(stat.samples, 0);
+          expect(stat.perHour, isNull);
+          expect(stat.sePerHour, isNull);
+        }
+        expect(stats.containsKey(id), isFalse,
+            reason: 'a storage error cannot borrow the provider-level fit');
+      }
+      for (final quota in quotas) {
+        expect(providerAvailability(quota, now).headroom, 80);
+        expect(providerAvailability(quota, now).available, isTrue);
+      }
+      expect(unavailable.readAsStringSync(), 'not a directory');
+    } finally {
+      setQuotabotDirOverrideForTesting(tempConfig);
+    }
+
+    final recovered = recentBurnStatsByQuota(quotas, now);
+    for (final key in healthy.keys) {
+      expect(recovered[key]!.perHour, healthy[key]!.perHour);
+      expect(recovered[key]!.sePerHour, healthy[key]!.sePerHour);
+      expect(recovered[key]!.samples, healthy[key]!.samples);
+    }
+  });
+
+  for (final evidence in ['directory', 'malformed']) {
+    test('unavailable $evidence account history cannot borrow provider burn',
+        () {
+      const now = 1782000000;
+      const account = 'broken-account';
+      recordHeadroomSample(id, 90, now - 3600);
+      recordHeadroomSample(id, 85, now);
+      expect(recentBurnStatsByProvider([id], now)[id]!.perHour, 5);
+      final exact = File(
+        '${cacheDir().path}/buckets_${id}_${accountStorageStem(account)}.json',
+      );
+      if (evidence == 'directory') {
+        Directory(exact.path).createSync();
+        expect(loadBuckets(id, account: account), hasLength(2),
+            reason: 'the public loader retains its existing default behavior');
+      } else {
+        exact.writeAsStringSync('{not-json');
+        expect(loadBuckets(id, account: account), isEmpty);
+      }
+      final quota = ProviderQuota(
+        provider: id,
+        displayName: 'Test',
+        account: account,
+        asOf: now,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      );
+
+      final stats = recentBurnStatsByQuota([quota], now);
+
+      expect(stats.keys, [quotaIdentityKeyFor(quota)]);
+      expect(stats.values.single.samples, 0);
+      expect(stats.values.single.perHour, isNull);
+      expect(stats.values.single.sePerHour, isNull);
+      expect(recentBurnStatsByProvider([id], now)[id]!.perHour, 5);
+    });
+  }
+
+  test('locked account metadata never borrows provider or checkpoint burn', () {
+    const now = 1782000000;
+    const account = 'locked-account';
+    recordHeadroomSample(id, 90, now - 3600);
+    recordHeadroomSample(id, 85, now);
+    recordHeadroomSample(id, 90, now - 3600, account: account);
+    recordHeadroomSample(id, 70, now, account: account);
+    final canonical = File(
+      '${cacheDir().path}/buckets_${id}_${accountStorageStem(account)}.json',
+    );
+    final legacy = File('${cacheDir().path}/buckets_${id}_$account.json')
+      ..writeAsStringSync(canonical.readAsStringSync());
+    final owner = File(
+      '${cacheDir().path}/legacy_bucket_owner_${id}_${accountStorageStem(account)}.json',
+    )..writeAsStringSync(jsonEncode({
+        'schema': 'quotabot.legacy-bucket-owner.v1',
+        'provider': id,
+        'account_digest': accountIdentityDigest(account),
+      }));
+    final marker = File(
+      '${cacheDir().path}/analytics_migration_${id}_${accountStorageStem(account)}.json',
+    );
+    final quota = ProviderQuota(
+      provider: id,
+      displayName: 'Test',
+      account: account,
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    final key = quotaIdentityKeyFor(quota);
+    final healthy = recentBurnStatsByQuota([quota], now)[key]!;
+    expect(healthy.perHour, isNotNull);
+
+    for (final file in [canonical, legacy, marker, owner]) {
+      final handle = file.openSync(mode: FileMode.append);
+      try {
+        handle.lockSync(FileLock.exclusive);
+        expect(file.existsSync(), isTrue);
+        expect(file.lengthSync(), greaterThan(0));
+        expect(file.readAsStringSync, throwsA(isA<FileSystemException>()));
+        final unavailable = recentBurnStatsByQuota([quota], now)[key]!;
+        expect(unavailable.samples, 0);
+        expect(unavailable.perHour, isNull);
+        expect(unavailable.sePerHour, isNull);
+        expect(loadBuckets(id, account: account), isEmpty,
+            reason: 'default callers still swallow their read failure');
+        expect(recentBurnStatsByProvider([id], now)[id]!.perHour, 5);
+      } finally {
+        handle.unlockSync();
+        handle.closeSync();
+      }
+      final recovered = recentBurnStatsByQuota([quota], now)[key]!;
+      expect(recovered.perHour, healthy.perHour);
+      expect(recovered.sePerHour, healthy.sePerHour);
+      expect(recovered.samples, healthy.samples);
+    }
+  },
+      skip: !Platform.isWindows
+          ? 'POSIX byte-range file locks do not block ordinary reads'
+          : false);
+
   test('colliding legacy account stems stay isolated across local evidence',
       () {
     const provider = grokProviderId;

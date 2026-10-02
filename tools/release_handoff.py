@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 if __package__:
     from .check_authorship import message_violations
@@ -50,9 +51,14 @@ def gh(*arguments: str, payload: object | None = None) -> str:
     ).stdout
 
 
-def api(endpoint: str, *, payload: object | None = None) -> object:
-    method = "GET" if payload is None else "PATCH"
-    return json.loads(gh("api", "--method", method, endpoint, payload=payload))
+def api(
+    endpoint: str,
+    *,
+    payload: object | None = None,
+    method: Literal["GET", "PATCH", "POST"] | None = None,
+) -> object:
+    selected_method = method or ("GET" if payload is None else "PATCH")
+    return json.loads(gh("api", "--method", selected_method, endpoint, payload=payload))
 
 
 def sha256(path: Path) -> str:

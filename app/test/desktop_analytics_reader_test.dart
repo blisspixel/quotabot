@@ -259,7 +259,11 @@ void main() {
       expect(data.history['work display'], isEmpty);
       expect(data.buckets['work display'], isEmpty);
       expect(data.insights['work display']!.samples, 0);
-      expect(data.burnStats, isEmpty);
+      expect(data.burnStats.keys, [quotaIdentityKeyFor(work)]);
+      final unknownBurn = data.burnStats[quotaIdentityKeyFor(work)]!;
+      expect(unknownBurn.samples, 0);
+      expect(unknownBurn.perHour, isNull);
+      expect(unknownBurn.sePerHour, isNull);
       expect(data.routedRequests.totalRequests, 3);
       expect(unavailable.readAsStringSync(), 'synthetic unavailable storage');
     },

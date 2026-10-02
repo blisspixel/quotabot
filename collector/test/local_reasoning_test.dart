@@ -58,12 +58,18 @@ void main() {
     final show = _fixture['show'] as Map;
     expect(ollamaShowFromJson(show['declared:7b'])!.reasoning, isTrue);
     expect(ollamaShowFromJson(show['ordinary:7b'])!.reasoning, isFalse);
-    for (final name in ['deepseek-r1:7b', 'malformed:7b']) {
+    for (final name in [
+      'deepseek-r1:7b',
+      'malformed:7b',
+      'mixed:7b',
+      'blank:7b'
+    ]) {
       expect(ollamaShowFromJson(show[name]), isNull, reason: name);
     }
-    for (final name in ['mixed:7b', 'empty:7b', 'blank:7b']) {
-      expect(ollamaShowFromJson(show[name])!.reasoning, isNull, reason: name);
-    }
+    final empty = ollamaShowFromJson(show['empty:7b'])!;
+    expect(empty.reasoning, isNull);
+    expect(empty.tools, isFalse);
+    expect(empty.vision, isFalse);
     for (final malformed in [true, false, 'thinking', 1]) {
       expect(ollamaShowFromJson({'capabilities': malformed}), isNull);
     }

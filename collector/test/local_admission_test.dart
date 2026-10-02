@@ -77,7 +77,12 @@ void main() {
       final quota = _local(
         scoped: [_pool('local-test', 'denied')],
         siblings: [
-          {'id': 'healthy-sibling', 'local': true, 'loaded': loaded}
+          {
+            'id': 'healthy-sibling',
+            'local': true,
+            'loaded': loaded,
+            'loaded_state_known': true,
+          }
         ],
       );
       final entries = buildModelRegistry([quota], _now);
@@ -97,6 +102,36 @@ void main() {
           suggestModel([quota], _now).recommended?.model.id, 'healthy-sibling');
     });
   }
+
+  test('legacy unknown sibling remains fallback without borrowing denied load',
+      () {
+    final quota = _local(
+      scoped: [_pool('local-test', 'denied')],
+      siblings: [
+        {
+          'id': 'unknown-sibling',
+          'local': true,
+          'context_tokens': 131072,
+        },
+      ],
+    );
+    final entry = buildModelRegistry([quota], _now)
+        .singleWhere((entry) => entry.model.id == 'unknown-sibling');
+    final route = suggestRoute([quota], _now, preferLocal: true);
+    expect(entry.available, isTrue);
+    expect(entry.model.loadedStateKnown, isFalse);
+    expect(entry.localReadiness, isNull);
+    expect(quota.localGenerationReadiness, isNull);
+    expect(route.recommended?.provider, 'ollama');
+    expect(route.recommended?.localReadiness, isNull);
+    expect(route.fallback.provider, 'ollama');
+    expect(
+      suggestModel([quota], _now,
+              requirements: const ModelRequirements(minContextTokens: 65536))
+          .recommended,
+      isNull,
+    );
+  });
 
   test('equal scoped variants retain every admission veto in either row order',
       () {

@@ -410,9 +410,10 @@ String providerSetupText(String provider) {
     case 'ollama':
     case 'lmstudio':
     case 'lemonade':
-      return 'Local runtime. Start its server and load a model; quotabot '
-          'detects what is installed and loaded automatically. No login '
-          'needed.';
+      return 'Local runtime. Start its server and check its model inventory. '
+          'quotabot reads installed and loaded model metadata without loading '
+          'a model. Token-required metadata access is reported; quotabot does '
+          'not send a token.';
     default:
       return 'quotabot reads this provider from local or provider metadata; '
           'no setup needed here.';

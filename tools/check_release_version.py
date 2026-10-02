@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?"
+STABLE_VERSION = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 STABLE_VERSION_LABELS = {
     "README current stable",
     "SECURITY current audited release",
@@ -171,6 +172,33 @@ def _locked_collector_version(path: Path) -> str:
     return match.group(1)
 
 
+def _pending_publication_version(root: Path) -> str | None:
+    markers = [
+        line
+        for line in (root / "README.md").read_text(encoding="utf-8").splitlines()
+        if re.match(r"^\s*>?\s*\*\*Pending publication\b", line, re.IGNORECASE)
+    ]
+    if not markers:
+        return None
+    if len(markers) != 1:
+        raise VersionCheckError(
+            "README must contain exactly one pending publication marker"
+        )
+    match = re.fullmatch(rf"> \*\*Pending publication:\*\* ({VERSION})\.", markers[0])
+    if match is None:
+        raise VersionCheckError("README pending publication marker is malformed")
+    return match.group(1)
+
+
+def _stable_version_parts(version: str) -> tuple[int, int, int]:
+    if re.fullmatch(STABLE_VERSION, version) is None:
+        raise VersionCheckError(
+            f"pending publication requires a stable version: {version}"
+        )
+    major, minor, patch = version.split(".")
+    return int(major), int(minor), int(patch)
+
+
 def check_release_versions(
     root: Path = ROOT,
     *,
@@ -180,6 +208,16 @@ def check_release_versions(
 
     versions, build = release_versions(root)
     expected = versions["collector pubspec"]
+    pending = _pending_publication_version(root)
+    if pending is not None:
+        if "-" in expected:
+            raise VersionCheckError(
+                "prerelease source must not declare pending publication"
+            )
+        if pending != expected:
+            raise VersionCheckError(
+                f"pending publication {pending} does not match source version {expected}"
+            )
     source_mismatches = {
         label: value
         for label, value in versions.items()
@@ -195,7 +233,7 @@ def check_release_versions(
         for label, value in versions.items()
         if label in STABLE_VERSION_LABELS
     }
-    if "-" in expected:
+    if "-" in expected or pending is not None:
         stable_expected = stable_versions["README current stable"]
         if "-" in stable_expected:
             raise VersionCheckError("README current stable must not name a prerelease")
@@ -210,6 +248,13 @@ def check_release_versions(
             )
             raise VersionCheckError(
                 f"expected stable {stable_expected}; mismatched {details}"
+            )
+        if pending is not None and _stable_version_parts(
+            expected
+        ) <= _stable_version_parts(stable_expected):
+            raise VersionCheckError(
+                "pending publication must be newer than the published stable release "
+                f"{stable_expected}"
             )
     else:
         stable_mismatches = {

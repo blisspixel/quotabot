@@ -1,34 +1,43 @@
 import asyncio
 import base64
+import functools
 import ipaddress
 import json
 import os
+import socketserver
+import ssl
 import tempfile
+import time
 import unittest
 import unittest.mock
 import urllib.parse
-import urllib.request
 import warnings
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 
-from quotabot_router import (
-    AgentRule,
-    Candidate,
-    Policy,
-    QuotabotRouter,
-    UnsafeRouteError,
-    _LeaseChoice,
-    _NO_REDIRECT_OPENER,
-    _best_ranked_candidate,
-    _candidate_for_reserved_target,
-    _is_loopback_url,
-    _load_local_http_token,
-    _local_server_proof,
-    _metric_info_for_candidate,
-    _reservation_candidates,
+from local_metadata import (
+    _OwnedHTTPSConnection,
+    local_metadata_request,
+    local_server_proof as _local_server_proof,
+    run_metadata_operation,
 )
+
+with unittest.mock.patch.dict(os.environ, {"LITELLM_LOCAL_MODEL_COST_MAP": "True"}):
+    from quotabot_router import (
+        AgentRule,
+        Candidate,
+        Policy,
+        QuotabotRouter,
+        UnsafeRouteError,
+        _LeaseChoice,
+        _best_ranked_candidate,
+        _candidate_for_reserved_target,
+        _is_loopback_url,
+        _load_local_http_token,
+        _metric_info_for_candidate,
+        _reservation_candidates,
+    )
 
 
 def _server_endpoint(handler: BaseHTTPRequestHandler) -> str:
@@ -868,14 +877,6 @@ models:
 
         policy = Policy(quotabot_url="http://169.254.169.254/latest")
         self.assertEqual(policy.quotabot_url, "http://127.0.0.1:8721")
-
-    def test_loopback_opener_never_inherits_environment_proxies(self):
-        proxy_handlers = [
-            handler
-            for handler in _NO_REDIRECT_OPENER.handlers
-            if isinstance(handler, urllib.request.ProxyHandler)
-        ]
-        self.assertEqual(proxy_handlers, [])
 
     def test_reserved_account_prefers_exact_candidate_over_wildcard(self):
         wildcard = Candidate(
@@ -1856,6 +1857,711 @@ class LeaseHttpTests(unittest.TestCase):
         )
         self.assertEqual(state["read_authorizations"], [f"Bearer {token}"])
         self.assertEqual(state["proof_authorizations"], [None] * 5)
+
+
+class LocalMetadataTests(unittest.TestCase):
+    token = "synthetic-transport-token-0123456789"
+
+    def _start_server(self, phase, *, before_response=None):
+        state = {"requests": [], "closed": Event(), "started": Event()}
+        token = self.token
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def handle(self):
+                try:
+                    super().handle()
+                except ConnectionError:
+                    state["closed"].set()
+
+            def finish(self):
+                try:
+                    super().finish()
+                finally:
+                    state["closed"].set()
+
+            def log_message(self, format, *args):
+                return
+
+            def _write(self, raw):
+                try:
+                    self.wfile.write(raw)
+                    self.wfile.flush()
+                    return True
+                except ConnectionError:
+                    state["closed"].set()
+                    return False
+
+            def _observe_close(self):
+                self.connection.settimeout(1)
+                try:
+                    if not self.connection.recv(1):
+                        state["closed"].set()
+                except ConnectionError:
+                    state["closed"].set()
+                except TimeoutError:
+                    # Leave closure unconfirmed so the test's assertion fails.
+                    pass
+
+            def _drip(self, raw):
+                state["started"].set()
+                for byte in raw:
+                    if not self._write(bytes((byte,))):
+                        break
+                    time.sleep(0.01)
+                self._observe_close()
+
+            def do_GET(self):
+                parsed = urllib.parse.urlsplit(self.path)
+                proof = parsed.path == "/auth/prove"
+                state["requests"].append(
+                    (parsed.path, self.headers.get("Authorization"))
+                )
+                if proof:
+                    nonce = urllib.parse.parse_qs(parsed.query)["nonce"][0]
+                    raw = json.dumps(
+                        {
+                            "schema": "quotabot.local-server-proof.v1",
+                            "nonce": nonce,
+                            "proof": _local_server_proof(
+                                token, nonce, _server_endpoint(self)
+                            )
+                            if phase != "non_ascii_proof"
+                            else "\u00e9" * 64,
+                        }
+                    ).encode()
+                else:
+                    raw = b'{"schema":"quotabot.suggest.v1","ranked":[]}'
+                target = "proof" if proof else "metadata"
+                if phase == f"recursive_{target}":
+                    raw = b"[" * 1500 + b"0" + b"]" * 1500
+                if phase == f"{target}_headers":
+                    self._drip(b"HTTP/1.1 200 OK\r\nX-Drip: " + b"x" * 500)
+                    return
+                if phase == "metadata_chunked" and not proof:
+                    self.send_response(200)
+                    self.send_header("Transfer-Encoding", "chunked")
+                    self.end_headers()
+                    self._drip(b"1\r\n" + b"0" * 500)
+                    return
+                if phase == f"{target}_body":
+                    raw += b" " * 500
+                if phase == "oversize_proof" and proof:
+                    raw += b" " * 4096
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                if phase == f"{target}_body":
+                    self._drip(raw)
+                    return
+                if before_response is not None:
+                    before_response()
+                self._write(raw)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = Thread(
+            target=lambda: server.serve_forever(poll_interval=0.01), daemon=True
+        )
+        thread.start()
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_port}", state
+
+    def test_loopback_transport_bypasses_environment_proxies(self):
+        url, state = self._start_server("normal")
+        with unittest.mock.patch.dict(
+            os.environ,
+            {
+                "HTTP_PROXY": "http://127.0.0.1:1",
+                "HTTPS_PROXY": "http://127.0.0.1:1",
+                "http_proxy": "http://127.0.0.1:1",
+                "https_proxy": "http://127.0.0.1:1",
+                "NO_PROXY": "",
+                "no_proxy": "",
+            },
+        ):
+            raw = local_metadata_request(url, "/suggest", None, maximum=4096)
+        self.assertEqual(json.loads(raw)["ranked"], [])
+        self.assertEqual(state["requests"], [("/suggest", None)])
+
+    def test_authenticated_transport_preserves_same_peer_proof(self):
+        url, state = self._start_server("normal")
+        raw = local_metadata_request(url, "/suggest", self.token, maximum=4096)
+        self.assertEqual(json.loads(raw)["ranked"], [])
+        self.assertEqual(
+            state["requests"],
+            [("/auth/prove", None), ("/suggest", f"Bearer {self.token}")],
+        )
+
+    def test_dripping_headers_and_bodies_have_one_deadline_and_close_socket(self):
+        for phase in (
+            "proof_headers",
+            "proof_body",
+            "metadata_headers",
+            "metadata_body",
+            "metadata_chunked",
+        ):
+            with self.subTest(phase=phase):
+                url, state = self._start_server(phase)
+                started = time.monotonic()
+                raw = local_metadata_request(
+                    url, "/suggest", self.token, maximum=4096, timeout=0.3
+                )
+                self.assertIsNone(raw)
+                self.assertLess(time.monotonic() - started, 1.5)
+                self.assertTrue(state["started"].is_set())
+                self.assertTrue(state["closed"].wait(1.5), "owned socket must close")
+                if phase.startswith("proof_"):
+                    self.assertEqual(state["requests"], [("/auth/prove", None)])
+
+    def test_proof_and_metadata_share_the_total_budget(self):
+        for phase_cost, succeeds in ((18.0, False), (8.0, True)):
+            with self.subTest(phase_cost=phase_cost):
+                clock = {"now": 100.0}
+                clock_lock = Lock()
+
+                def monotonic():
+                    with clock_lock:
+                        return clock["now"]
+
+                def advance_clock():
+                    with clock_lock:
+                        clock["now"] += phase_cost
+
+                url, state = self._start_server("normal", before_response=advance_clock)
+                # Charge each real HTTP phase against the transport clock.
+                # Keep the real socket timer separate from scheduling latency.
+                with unittest.mock.patch("local_metadata.time", wraps=time) as timer:
+                    timer.monotonic.side_effect = monotonic
+                    raw = local_metadata_request(
+                        url, "/suggest", self.token, maximum=4096, timeout=30.0
+                    )
+                if succeeds:
+                    self.assertEqual(json.loads(raw)["ranked"], [])
+                else:
+                    self.assertIsNone(
+                        raw, "two individually short phases must share one deadline"
+                    )
+                self.assertEqual(
+                    state["requests"],
+                    [("/auth/prove", None), ("/suggest", f"Bearer {self.token}")],
+                )
+
+    def test_oversize_proof_never_sends_bearer(self):
+        url, state = self._start_server("oversize_proof")
+        self.assertIsNone(
+            local_metadata_request(url, "/suggest", self.token, maximum=4096)
+        )
+        self.assertEqual(state["requests"], [("/auth/prove", None)])
+
+    def test_malformed_proof_fails_soft_without_sending_bearer(self):
+        for phase in ("non_ascii_proof", "recursive_proof"):
+            with self.subTest(phase=phase):
+                url, state = self._start_server(phase)
+                self.assertIsNone(
+                    local_metadata_request(url, "/suggest", self.token, maximum=4096)
+                )
+                self.assertEqual(state["requests"], [("/auth/prove", None)])
+
+    def _router_for_dripping_sidecar(self, url, *, local):
+        router = QuotabotRouter()
+        candidates = [
+            Candidate(
+                deployment="claude-fixed",
+                provider="claude",
+                account="synthetic-account",
+                spend="quota_plan",
+                overages_disabled=True,
+            )
+        ]
+        if local:
+            candidates.append(Candidate(deployment="ollama-local", local=True))
+        router.policy = Policy(quotabot_url=url, models={"frontier": candidates})
+        return router
+
+    def test_concurrent_routes_reach_local_fallback_and_negative_cache(self):
+        url, state = self._start_server("metadata_body")
+        router = self._router_for_dripping_sidecar(url, local=True)
+
+        async def route_twice():
+            requests = [{"model": "frontier"}, {"model": "frontier"}]
+            await asyncio.gather(
+                *(
+                    router.async_pre_call_hook(None, None, data, "completion")
+                    for data in requests
+                )
+            )
+            return requests
+
+        with (
+            unittest.mock.patch(
+                "quotabot_router._load_local_http_token", return_value=None
+            ),
+            unittest.mock.patch(
+                "quotabot_router._local_metadata_request",
+                functools.partial(local_metadata_request, timeout=0.3),
+            ),
+        ):
+            started = time.monotonic()
+            requests = asyncio.run(route_twice())
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertEqual([data["model"] for data in requests], ["ollama-local"] * 2)
+        self.assertEqual(state["requests"], [("/suggest", None)])
+        self.assertTrue(state["closed"].wait(1.5))
+
+    def test_timeout_without_local_route_fails_closed_before_reservation(self):
+        url, state = self._start_server("metadata_body")
+        router = self._router_for_dripping_sidecar(url, local=False)
+        with (
+            unittest.mock.patch(
+                "quotabot_router._load_local_http_token", return_value=None
+            ),
+            unittest.mock.patch(
+                "quotabot_router._local_metadata_request",
+                functools.partial(local_metadata_request, timeout=0.3),
+            ),
+            unittest.mock.patch.object(router, "_post_mutation") as mutate,
+        ):
+            with self.assertRaises(UnsafeRouteError):
+                asyncio.run(
+                    router.async_pre_call_hook(
+                        None, None, {"model": "frontier"}, "completion"
+                    )
+                )
+        mutate.assert_not_called()
+        self.assertTrue(state["closed"].wait(1.5))
+
+    def test_recursive_metadata_reaches_configured_local_fallback(self):
+        url, state = self._start_server("recursive_metadata")
+        router = self._router_for_dripping_sidecar(url, local=True)
+        with unittest.mock.patch(
+            "quotabot_router._load_local_http_token", return_value=None
+        ):
+            data = asyncio.run(
+                router.async_pre_call_hook(
+                    None, None, {"model": "frontier"}, "completion"
+                )
+            )
+        self.assertEqual(data["model"], "ollama-local")
+        self.assertEqual(state["requests"], [("/suggest", None)])
+
+    def test_cancelled_route_worker_closes_by_the_same_deadline(self):
+        url, state = self._start_server("metadata_body")
+        router = self._router_for_dripping_sidecar(url, local=True)
+
+        async def cancel_route():
+            task = asyncio.create_task(
+                router.async_pre_call_hook(
+                    None, None, {"model": "frontier"}, "completion"
+                )
+            )
+            self.assertTrue(await asyncio.to_thread(state["started"].wait, 1.5))
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.gather(task)
+            self.assertTrue(await asyncio.to_thread(state["closed"].wait, 1.5))
+
+        with (
+            unittest.mock.patch(
+                "quotabot_router._load_local_http_token", return_value=None
+            ),
+            unittest.mock.patch(
+                "quotabot_router._local_metadata_request",
+                functools.partial(local_metadata_request, timeout=0.3),
+            ),
+        ):
+            asyncio.run(cancel_route())
+
+    def test_stalled_tls_handshake_is_owned_and_bounded(self):
+        closed = Event()
+        context = ssl.create_default_context()
+
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self):
+                self.request.settimeout(1.5)
+                try:
+                    while self.request.recv(4096):
+                        pass
+                    closed.set()
+                except ConnectionError:
+                    closed.set()
+
+        server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+        thread = Thread(
+            target=lambda: server.serve_forever(poll_interval=0.01), daemon=True
+        )
+        thread.start()
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        started = time.monotonic()
+        with unittest.mock.patch(
+            "local_metadata.ssl.create_default_context", return_value=context
+        ):
+            self.assertIsNone(
+                local_metadata_request(
+                    f"https://127.0.0.1:{server.server_address[1]}",
+                    "/suggest",
+                    self.token,
+                    maximum=4096,
+                    timeout=0.3,
+                )
+            )
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertTrue(closed.wait(1.5))
+        connection = _OwnedHTTPSConnection("localhost", 443, timeout=0.3)
+        self.assertTrue(connection._tls_context.check_hostname)
+        self.assertEqual(connection._tls_context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertEqual(
+            connection._tls_context.minimum_version, ssl.TLSVersion.TLSv1_2
+        )
+
+    def test_tls_minimum_is_enforced_independently_of_context_defaults(self):
+        context = ssl.create_default_context()
+        with (
+            unittest.mock.patch.object(
+                ssl.SSLContext,
+                "minimum_version",
+                new_callable=unittest.mock.PropertyMock,
+            ) as minimum,
+            unittest.mock.patch(
+                "local_metadata.ssl.create_default_context", return_value=context
+            ),
+        ):
+            connection = _OwnedHTTPSConnection("localhost", 443, timeout=0.3)
+            minimum.assert_called_once_with(ssl.TLSVersion.TLSv1_2)
+        self.assertTrue(connection._tls_context.check_hostname)
+        self.assertEqual(connection._tls_context.verify_mode, ssl.CERT_REQUIRED)
+
+    def test_async_caller_is_bounded_before_socket_creation(self):
+        url, state = self._start_server("normal")
+        import http.client
+
+        connect = http.client.HTTPConnection.connect
+
+        def delayed_connect(connection):
+            time.sleep(0.35)
+            connect(connection)
+
+        async def request():
+            started = time.monotonic()
+            result = await run_metadata_operation(
+                local_metadata_request,
+                url,
+                "/suggest",
+                self.token,
+                maximum=4096,
+                timeout=0.1,
+            )
+            return result, time.monotonic() - started
+
+        with (
+            unittest.mock.patch("http.client.HTTPConnection.connect", delayed_connect),
+            unittest.mock.patch("local_metadata.LOCAL_METADATA_TIMEOUT_SECONDS", 0.1),
+        ):
+            result, elapsed = asyncio.run(request())
+        self.assertIsNone(result)
+        self.assertLess(elapsed, 0.3)
+        self.assertTrue(state["closed"].wait(1.5))
+        self.assertEqual(
+            state["requests"], [], "an expired late connection must send nothing"
+        )
+
+    def test_late_tcp_connection_never_starts_tls_handshake(self):
+        import http.client
+
+        closed = Event()
+        wire = []
+        context = ssl.create_default_context()
+        clock = {"now": 100.0}
+        clock_lock = Lock()
+
+        def monotonic():
+            with clock_lock:
+                return clock["now"]
+
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self):
+                self.request.settimeout(1.5)
+                try:
+                    while chunk := self.request.recv(4096):
+                        wire.append(chunk)
+                    closed.set()
+                except ConnectionError:
+                    closed.set()
+
+        server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+        thread = Thread(
+            target=lambda: server.serve_forever(poll_interval=0.01), daemon=True
+        )
+        thread.start()
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        connect = http.client.HTTPConnection.connect
+
+        def delayed_connect(connection):
+            with clock_lock:
+                clock["now"] += 31.0
+            connect(connection)
+
+        with (
+            unittest.mock.patch("local_metadata.time", wraps=time) as timer,
+            unittest.mock.patch(
+                "local_metadata.ssl.create_default_context", return_value=context
+            ),
+            unittest.mock.patch(
+                "http.client.HTTPConnection.connect",
+                autospec=True,
+                side_effect=delayed_connect,
+            ) as tcp_connect,
+            unittest.mock.patch.object(
+                context, "wrap_socket", wraps=context.wrap_socket
+            ) as wrap_socket,
+        ):
+            timer.monotonic.side_effect = monotonic
+            result = local_metadata_request(
+                f"https://127.0.0.1:{server.server_address[1]}",
+                "/suggest",
+                self.token,
+                maximum=4096,
+                timeout=30.0,
+            )
+        self.assertIsNone(result)
+        tcp_connect.assert_called_once()
+        wrap_socket.assert_not_called()
+        self.assertTrue(closed.wait(1.5))
+        self.assertEqual(wire, [], "an expired TCP connection must not start TLS")
+
+    def test_delayed_worker_preflight_never_starts_metadata_after_caller_timeout(self):
+        url, state = self._start_server("normal")
+        router = self._router_for_dripping_sidecar(url, local=True)
+
+        def delayed_token():
+            time.sleep(0.35)
+            return self.token
+
+        async def request():
+            return await router._availability()
+
+        with (
+            unittest.mock.patch(
+                "quotabot_router._load_local_http_token", delayed_token
+            ),
+            unittest.mock.patch("local_metadata.LOCAL_METADATA_TIMEOUT_SECONDS", 0.1),
+        ):
+            self.assertIsNone(asyncio.run(request()))
+        self.assertEqual(
+            state["requests"], [], "expired preflight must not restart its budget"
+        )
+
+    def _assert_delayed_tls_initialization_sends_nothing(self, *, asynchronous):
+        accepted = Event()
+        wire = []
+
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self):
+                accepted.set()
+                self.request.settimeout(1.5)
+                try:
+                    while chunk := self.request.recv(4096):
+                        wire.append(chunk)
+                except ConnectionError:
+                    # A reset is expected when the owned deadline aborts TLS.
+                    pass
+
+        server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+        thread = Thread(
+            target=lambda: server.serve_forever(poll_interval=0.01), daemon=True
+        )
+        thread.start()
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        create_context = ssl.create_default_context
+
+        def delayed_context():
+            time.sleep(0.35)
+            return create_context()
+
+        operation = functools.partial(
+            local_metadata_request,
+            f"https://127.0.0.1:{server.server_address[1]}",
+            "/suggest",
+            self.token,
+            maximum=4096,
+            timeout=0.5 if asynchronous else 0.1,
+        )
+        with (
+            unittest.mock.patch(
+                "local_metadata.ssl.create_default_context", delayed_context
+            ),
+            unittest.mock.patch("local_metadata.LOCAL_METADATA_TIMEOUT_SECONDS", 0.1),
+        ):
+            if asynchronous:
+                result = asyncio.run(run_metadata_operation(operation))
+            else:
+                result = operation()
+        self.assertIsNone(result)
+        self.assertFalse(accepted.is_set(), "expired initialization must not connect")
+        self.assertEqual(wire, [])
+
+    def test_standalone_timeout_includes_tls_context_initialization(self):
+        self._assert_delayed_tls_initialization_sends_nothing(asynchronous=False)
+
+    def test_async_deadline_includes_tls_context_initialization(self):
+        self._assert_delayed_tls_initialization_sends_nothing(asynchronous=True)
+
+    def _assert_token_preflight_allows_heartbeat(self, *, reserve):
+        router = QuotabotRouter()
+        times = []
+        beats = []
+
+        def delayed_token():
+            times.append(time.monotonic())
+            time.sleep(0.3)
+            times.append(time.monotonic())
+            return self.token
+
+        async def exercise():
+            finished = asyncio.Event()
+
+            async def heartbeat():
+                while not finished.is_set():
+                    beats.append(time.monotonic())
+                    await asyncio.sleep(0.01)
+
+            task = asyncio.create_task(heartbeat())
+            await asyncio.sleep(0)
+            try:
+                if reserve:
+                    await router._reserve_remote(
+                        [
+                            Candidate(
+                                "fixed", provider="claude", account="synthetic-account"
+                            )
+                        ],
+                        [],
+                        15,
+                        None,
+                    )
+                else:
+                    await router._release_route_lease(
+                        {"quotabot_lease_id": "synthetic-lease-0001"}
+                    )
+            finally:
+                finished.set()
+                await asyncio.gather(task)
+
+        with (
+            unittest.mock.patch(
+                "quotabot_router._load_local_http_token", delayed_token
+            ),
+            unittest.mock.patch.object(router, "_post_mutation", return_value=None),
+        ):
+            asyncio.run(exercise())
+        self.assertEqual(len(times), 2)
+        self.assertTrue(
+            any(times[0] < beat < times[1] for beat in beats),
+            "other async routing must progress while the token file is read",
+        )
+
+    def test_reservation_token_preflight_allows_event_loop_heartbeat(self):
+        self._assert_token_preflight_allows_heartbeat(reserve=True)
+
+    def test_release_token_preflight_allows_event_loop_heartbeat(self):
+        self._assert_token_preflight_allows_heartbeat(reserve=False)
+
+    def test_slow_mutation_token_preflight_never_dispatches_after_timeout(self):
+        for reserve in (True, False):
+            with self.subTest(reserve=reserve):
+                url, state = self._start_server("normal")
+                router = self._router_for_dripping_sidecar(url, local=True)
+
+                def delayed_token():
+                    time.sleep(0.35)
+                    return self.token
+
+                async def request():
+                    if reserve:
+                        return await router._reserve_remote(
+                            [
+                                Candidate(
+                                    "fixed",
+                                    provider="claude",
+                                    account="synthetic-account",
+                                )
+                            ],
+                            [],
+                            15,
+                            None,
+                        )
+                    return await router._release_route_lease(
+                        {"quotabot_lease_id": "synthetic-lease-0001"}
+                    )
+
+                with (
+                    unittest.mock.patch(
+                        "quotabot_router._load_local_http_token", delayed_token
+                    ),
+                    unittest.mock.patch(
+                        "local_metadata.LOCAL_METADATA_TIMEOUT_SECONDS", 0.1
+                    ),
+                ):
+                    self.assertIsNone(asyncio.run(request()))
+                self.assertEqual(
+                    state["requests"], [], "expired token preflight must not dispatch"
+                )
+
+    def test_rejected_owned_lease_cleanup_reuses_original_token(self):
+        router = QuotabotRouter()
+        candidate = Candidate("fixed", provider="claude", account="synthetic-account")
+        calls = []
+
+        def mutation(path, payload, token):
+            calls.append((path, token))
+            if path == "/leases/release":
+                return {"schema": "quotabot.release.v1", "released": True}
+            return {
+                "schema": "quotabot.reserve.v1",
+                "reserved": True,
+                "lease": {
+                    "id": "synthetic-owned-lease-0001",
+                    "provider": "claude",
+                    "account": "wrong-account",
+                    "client": "litellm",
+                    "idempotency_key": payload["idempotency_key"],
+                },
+                "selected": {"provider": "claude", "account": "synthetic-account"},
+            }
+
+        with (
+            unittest.mock.patch(
+                "quotabot_router._load_local_http_token",
+                side_effect=[self.token, "different-synthetic-token-0123456789"],
+            ) as load_token,
+            unittest.mock.patch.object(router, "_post_mutation", mutation),
+        ):
+            self.assertIsNone(
+                asyncio.run(router._reserve_remote([candidate], [], 15, None))
+            )
+        load_token.assert_called_once_with()
+        self.assertEqual(
+            calls,
+            [("/leases/reserve", self.token), ("/leases/release", self.token)],
+        )
+
+    def test_invalid_lease_id_does_not_read_token(self):
+        router = QuotabotRouter()
+        with (
+            unittest.mock.patch("quotabot_router._load_local_http_token") as load_token,
+            unittest.mock.patch.object(router, "_post_mutation") as mutation,
+        ):
+            asyncio.run(router._release_route_lease({"quotabot_lease_id": "invalid"}))
+        load_token.assert_not_called()
+        mutation.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ ProviderQuota _quota({
   bool stale = false,
   bool ok = true,
   String? error,
+  String? status,
   int asOf = _now,
 }) => ProviderQuota(
   provider: provider,
@@ -32,6 +33,7 @@ ProviderQuota _quota({
   stale: stale,
   ok: ok,
   error: error,
+  status: status,
 );
 
 Widget _wrap(
@@ -83,16 +85,24 @@ Future<void> _open(WidgetTester tester, ProviderQuota quota) async {
 }
 
 Future<void> _scrollTo(WidgetTester tester, Finder target) async {
+  final scrollable = find
+      .descendant(
+        of: find.byKey(const ValueKey('local-model-details-list')),
+        matching: find.byType(Scrollable),
+      )
+      .first;
+  // Registry order can place the next inspected model above the current view.
+  // Start from the top when the lazy list has already discarded that target.
+  final position = tester.state<ScrollableState>(scrollable).position;
+  if (target.evaluate().isEmpty && position.pixels > 0) {
+    position.jumpTo(0);
+    await tester.pump();
+  }
   await tester.scrollUntilVisible(
     target,
     160,
     maxScrolls: 200,
-    scrollable: find
-        .descendant(
-          of: find.byKey(const ValueKey('local-model-details-list')),
-          matching: find.byType(Scrollable),
-        )
-        .first,
+    scrollable: scrollable,
   );
   await tester.pumpAndSettle();
 }
@@ -102,6 +112,87 @@ Finder _model(String id) => find.byWidgetPredicate(
 );
 
 void main() {
+  testWidgets('unknown residency card reports reachability without ready', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        _tile(
+          _quota(
+            models: const [
+              ModelInfo(id: 'unobserved', local: true, loadedStateKnown: false),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(find.text('reachable'), findsWidgets);
+    expect(find.text('ready'), findsNothing);
+    expect(find.text('loaded'), findsNothing);
+    expect(find.text('reachable - load state unknown'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'legacy cold headline cannot override unknown cached load state',
+    (tester) async {
+      final quota = ProviderQuota.fromJson({
+        ..._quota().toJson(),
+        'status': 'ready - no model loaded',
+        'models': [
+          {'id': 'legacy', 'local': true},
+        ],
+      });
+      await tester.pumpWidget(_wrap(_tile(quota)));
+      expect(find.text('reachable - load state unknown'), findsOneWidget);
+      expect(find.text('ready - no model loaded'), findsNothing);
+      expect(find.text('ready'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final stale in [false, true]) {
+    testWidgets('unknown load state stays explicit when stale=$stale', (
+      tester,
+    ) async {
+      await _open(
+        tester,
+        _quota(
+          stale: stale,
+          models: const [
+            ModelInfo(
+              id: 'load-unobserved',
+              local: true,
+              loadedStateKnown: false,
+              sizeBytes: _gib,
+            ),
+          ],
+          hardware: const LocalHardwareInfo(
+            asOf: _now,
+            systemMemoryTotalBytes: 32 * _gib,
+            systemMemoryAvailableBytes: 24 * _gib,
+          ),
+        ),
+      );
+      expect(
+        find.text(
+          stale ? 'Load state unknown (last observed)' : 'Load state unknown',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Cold'), findsNothing);
+      expect(find.text('Loaded'), findsNothing);
+      await _scrollTo(tester, find.textContaining('Runtime load state'));
+      expect(
+        find.textContaining('Runtime load state could not be verified.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('comfortable using'), findsNothing);
+      expect(find.text('Reported context: unknown'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   for (final value in ['denied', 'future-admission']) {
     testWidgets(
       '$value local inventory retains metadata with the access exclusion',
@@ -427,6 +518,34 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final status in [
+    'reachable - no local models installed',
+    'reachable - cloud routes only',
+    'reachable - upstream routing unresolved',
+    'reachable - no generation models',
+  ]) {
+    testWidgets('runtime card preserves $status instead of a generic status', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          _tile(
+            _quota(
+              status: status,
+              models: const [
+                ModelInfo(id: 'cloud-only', local: true, cloudOffloaded: true),
+              ],
+            ),
+          ),
+        ),
+      );
+      expect(find.text(status), findsOneWidget);
+      expect(find.text('ready'), findsNothing);
+      expect(find.text('loaded'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('unavailable runtime inventory remains inspectable', (
     tester,
   ) async {
@@ -518,6 +637,181 @@ void main() {
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
     expect(find.byType(LocalModelDetailsDialog), findsNothing);
+    expect(find.byKey(const ValueKey('local-model-search')), findsNothing);
+  });
+
+  testWidgets('model search matches IDs and names without changing order', (
+    tester,
+  ) async {
+    await _open(
+      tester,
+      _quota(
+        models: const [
+          ModelInfo(id: 'unrelated', local: true),
+          ModelInfo(
+            id: 'catalog/model-b',
+            displayName: 'Beta second',
+            local: true,
+          ),
+          ModelInfo(
+            id: 'catalog/model-a',
+            displayName: 'Beta first',
+            local: true,
+            loaded: true,
+          ),
+        ],
+      ),
+    );
+    final search = find.byKey(const ValueKey('local-model-search'));
+    for (final query in ['  CaTaLoG/  ', 'BETA']) {
+      await tester.enterText(search, query);
+      await tester.pumpAndSettle();
+      expect(find.text('2 of 3 models'), findsOneWidget);
+      expect(_model('unrelated'), findsNothing);
+      expect(_model('catalog/model-a'), findsOneWidget);
+      expect(_model('catalog/model-b'), findsOneWidget);
+      expect(
+        tester.getTopLeft(_model('catalog/model-a')).dy,
+        lessThan(tester.getTopLeft(_model('catalog/model-b')).dy),
+      );
+    }
+    await tester.enterText(search, 'model-b');
+    await tester.pumpAndSettle();
+    expect(find.text('1 of 3 models'), findsOneWidget);
+    expect(_model('catalog/model-a'), findsNothing);
+    expect(find.text('Cold'), findsOneWidget);
+    await tester.tap(find.byTooltip('Clear search'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(search).controller!.text, isEmpty);
+    expect(tester.widget<TextField>(search).focusNode!.hasFocus, isTrue);
+    expect(find.textContaining('of 3 models'), findsNothing);
+    await _scrollTo(tester, _model('unrelated'));
+    expect(_model('unrelated'), findsOneWidget);
+  });
+
+  testWidgets('unmatched search preserves capture and resets when reopened', (
+    tester,
+  ) async {
+    await _open(
+      tester,
+      _quota(models: const [ModelInfo(id: 'available-model', local: true)]),
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('local-model-search')),
+      'not-in-inventory',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('1 reported. Captured 0s ago.'), findsOneWidget);
+    expect(find.text('0 of 1 models'), findsOneWidget);
+    expect(
+      find.text('No matching models. Try another name or clear the search.'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('No models were reported in this snapshot.'),
+      findsNothing,
+    );
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(LocalModelDetailsButton));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('local-model-search')))
+          .controller!
+          .text,
+      isEmpty,
+    );
+    expect(_model('available-model'), findsOneWidget);
+  });
+
+  testWidgets('search keeps stale and remote execution warnings visible', (
+    tester,
+  ) async {
+    await _open(
+      tester,
+      _quota(
+        stale: true,
+        models: const [
+          ModelInfo(id: 'local-model', local: true),
+          ModelInfo(
+            id: 'remote-model:cloud',
+            local: true,
+            loaded: true,
+            cloudOffloaded: true,
+          ),
+        ],
+      ),
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('local-model-search')),
+      'remote',
+    );
+    await tester.pumpAndSettle();
+    expect(_model('local-model'), findsNothing);
+    expect(_model('remote-model:cloud'), findsOneWidget);
+    expect(find.text('Loaded (last observed)'), findsOneWidget);
+    expect(
+      find.text('Cloud-offloaded. Excluded from local and quota budgets.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Stale inventory. Excluded from routing.'),
+      findsOneWidget,
+    );
+    expect(find.text('Reported context: unknown'), findsOneWidget);
+  });
+
+  testWidgets('filtering a scrolled inventory brings the match into view', (
+    tester,
+  ) async {
+    await _open(
+      tester,
+      _quota(
+        models: [
+          for (var index = 0; index < 32; index++)
+            ModelInfo(
+              id: 'model-${index.toString().padLeft(2, '0')}',
+              local: true,
+            ),
+        ],
+      ),
+    );
+    await _scrollTo(tester, _model('model-29'));
+    await tester.enterText(
+      find.byKey(const ValueKey('local-model-search')),
+      'model-00',
+    );
+    await tester.pumpAndSettle();
+    final viewport = tester.getRect(
+      find.byKey(const ValueKey('local-model-details-list')),
+    );
+    expect(viewport.contains(tester.getCenter(_model('model-00'))), isTrue);
+    expect(find.text('1 of 32 models'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('focused model search closes with Escape and restores focus', (
+    tester,
+  ) async {
+    await _open(
+      tester,
+      _quota(models: const [ModelInfo(id: 'keyboard-model', local: true)]),
+    );
+    final search = find.byKey(const ValueKey('local-model-search'));
+    await tester.enterText(search, 'keyboard');
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(search).focusNode!.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(LocalModelDetailsDialog), findsNothing);
+    final button = tester.widget<TextButton>(
+      find.descendant(
+        of: find.byType(LocalModelDetailsButton),
+        matching: find.byType(TextButton),
+      ),
+    );
+    expect(button.focusNode!.hasFocus, isTrue);
   });
 
   testWidgets('keyboard opens and closes details with focus restored', (
@@ -583,6 +877,11 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('This computer'));
         await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const ValueKey('local-model-search')),
+          'readable',
+        );
+        await tester.pumpAndSettle();
         for (final guideline in [
           labeledTapTargetGuideline,
           const MinimumTapTargetGuideline(
@@ -634,39 +933,73 @@ void main() {
       await tester.tap(find.byType(LocalModelDetailsButton));
       await tester.pumpAndSettle();
       expect(_model('compact-model'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('local-model-search')),
+        'not-in-inventory',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('0 of 1 models'), findsOneWidget);
+      await tester.tap(find.byTooltip('Clear search'));
+      await tester.pumpAndSettle();
+      expect(_model('compact-model'), findsOneWidget);
       expect(collects, 1);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 
-  testWidgets(
-    'narrow scaled details scroll long IDs without clipping controls',
-    (tester) async {
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(260, 540);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      addTearDown(tester.view.resetPhysicalSize);
-      final longId = 'model-${'long-identifier-' * 16}';
-      final quota = _quota(
-        models: [
-          for (var index = 0; index < 12; index++)
-            ModelInfo(id: '$index-$longId', local: true),
-        ],
-      );
-      await tester.pumpWidget(_wrap(_tile(quota), textScale: 2));
-      await tester.tap(find.byType(LocalModelDetailsButton));
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-      await _scrollTo(tester, _model('9-$longId'));
-      expect(_model('9-$longId'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-      final close = find.text('Close');
-      expect(tester.getRect(close).bottom, lessThan(540));
-      await tester.tap(close);
-      await tester.pumpAndSettle();
-      expect(find.byType(LocalModelDetailsDialog), findsNothing);
-    },
-  );
+  for (final height in [540.0, 360.0]) {
+    testWidgets(
+      'narrow scaled details scroll long IDs at height $height without clipping controls',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = Size(260, height);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        final longId = 'model-${'long-identifier-' * 16}';
+        final quota = _quota(
+          models: [
+            for (var index = 0; index < 12; index++)
+              ModelInfo(id: '$index-$longId', local: true),
+          ],
+        );
+        await tester.pumpWidget(_wrap(_tile(quota), textScale: 2));
+        await tester.tap(find.byType(LocalModelDetailsButton));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await _scrollTo(tester, _model('9-$longId'));
+        expect(_model('9-$longId'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.enterText(
+          find.byKey(const ValueKey('local-model-search')),
+          'not-in-inventory',
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('0 of 12 models'), findsOneWidget);
+        final viewport = tester.getRect(
+          find.byKey(const ValueKey('local-model-details-list')),
+        );
+        expect(
+          viewport.contains(
+            tester.getTopLeft(
+              find.text(
+                'No matching models. Try another name or clear the search.',
+              ),
+            ),
+          ),
+          isTrue,
+        );
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byTooltip('Clear search'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final close = find.text('Close');
+        expect(tester.getRect(close).bottom, lessThan(height));
+        await tester.tap(close);
+        await tester.pumpAndSettle();
+        expect(find.byType(LocalModelDetailsDialog), findsNothing);
+      },
+    );
+  }
 
   testWidgets('opening and inspecting details does not invoke collection', (
     tester,

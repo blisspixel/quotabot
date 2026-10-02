@@ -3,6 +3,36 @@ import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('local headlines preserve diagnostics but cannot invent cold state', () {
+    ProviderQuota quota({String? status, List<ModelInfo> models = const []}) =>
+        ProviderQuota(
+          provider: 'ollama',
+          displayName: 'Ollama',
+          account: 'default',
+          asOf: 123,
+          kind: ProviderQuotaKind.local,
+          status: status,
+          models: models,
+        );
+    expect(
+        localRuntimeStatusLabel(quota(status: 'reachable - cloud routes only')),
+        'reachable - cloud routes only');
+    expect(localRuntimeStatusLabel(quota()), 'No eligible generation model');
+    expect(
+        localRuntimeStatusLabel(quota(models: const [ModelInfo(id: 'cold')])),
+        'ready - no model loaded');
+    expect(
+        localRuntimeStatusLabel(
+            quota(models: const [ModelInfo(id: 'warm', loaded: true)])),
+        'loaded');
+    expect(
+        localRuntimeStatusLabel(quota(
+          status: 'ready - no model loaded',
+          models: const [ModelInfo(id: 'unknown', loadedStateKnown: false)],
+        )),
+        'reachable - load state unknown');
+  });
+
   group('resetCountdownLabel', () {
     test('unknown, reached, and whole-unit labels', () {
       expect(resetCountdownLabel(null, 1000), 'soon');

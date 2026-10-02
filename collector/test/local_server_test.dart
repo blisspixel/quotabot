@@ -9,6 +9,7 @@ import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/local_http_auth.dart';
 import 'package:quotabot_collector/local_server.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
 const _now = 1782000000;
@@ -239,6 +240,18 @@ Future<({int status, Map<String, dynamic> body})> _waitForStatus(
 }
 
 void main() {
+  late Directory configRoot;
+
+  setUp(() {
+    configRoot = Directory.systemTemp.createTempSync('quotabot_local_server_');
+    setQuotabotDirOverrideForTesting(configRoot);
+  });
+
+  tearDown(() {
+    setQuotabotDirOverrideForTesting(null);
+    if (configRoot.existsSync()) configRoot.deleteSync(recursive: true);
+  });
+
   test('rejects a non-loopback bind address before opening a socket', () async {
     await expectLater(
       startLocalQuotabotServer(
@@ -650,6 +663,141 @@ void main() {
       await server.close(force: true);
     }
   });
+
+  test('unavailable analytics keeps fresh quota separate from missing history',
+      () async {
+    final unavailable = File('${configRoot.path}/unavailable-config')
+      ..writeAsStringSync('not a directory');
+    setQuotabotDirOverrideForTesting(Directory(unavailable.path));
+    final store = InMemoryRouteLeaseStore(idFactory: () => 'no-history-lease');
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [_q('claude', 20)],
+      routeSummaryProvider: _emptyRouteSummary,
+      leaseStore: store,
+      mutationToken: _mutationToken,
+      now: () => _now,
+    );
+    final base = 'http://127.0.0.1:${server.port}';
+    void expectUnknownHistory(Map<String, dynamic> candidate,
+        {double effectiveHeadroom = 80}) {
+      expect(candidate['headroom_percent'], 80);
+      expect(candidate['effective_headroom_percent'], effectiveHeadroom);
+      expect(candidate['available'], isTrue);
+      expect(candidate['confidence'], closeTo(0.6, 0.000001));
+      for (final field in [
+        'burn_percent_per_hour',
+        'burn_se_percent_per_hour',
+        'strand_probability',
+        'projected_waste_percent',
+      ]) {
+        expect(candidate.containsKey(field), isFalse);
+      }
+    }
+
+    try {
+      final snapshot = await _getJson(Uri.parse('$base/'));
+      final provider = (snapshot['providers'] as List).single as Map;
+      expect(provider['ok'], isTrue);
+      expect(provider['stale'], isFalse);
+      expect((provider['windows'] as List).single,
+          containsPair('used_percent', 20));
+      final suggestion = await _getJson(Uri.parse('$base/suggest'));
+      expectUnknownHistory(suggestion['recommended'] as Map<String, dynamic>);
+      final winner = (suggestion['receipt'] as Map)['winner'] as Map;
+      expect(winner['raw_headroom_percent'], 80);
+      expect(winner['confidence'], closeTo(0.6, 0.000001));
+      expect(winner['confidence_reasons'], contains('limited_history_or_age'));
+
+      final reserve = await _requestJson(
+        Uri.parse('$base/leases/reserve'),
+        method: 'POST',
+        headers: {HttpHeaders.authorizationHeader: 'Bearer $_mutationToken'},
+        jsonBody: {
+          'targets': [
+            {'provider': 'claude', 'account': 'a'}
+          ],
+          'weight_percent': 20,
+        },
+      );
+      expect(reserve.status, HttpStatus.ok);
+      expect(reserve.body['reserved'], isTrue);
+      expectUnknownHistory(reserve.body['selected'] as Map<String, dynamic>);
+      expect(store.active(_now).single.provider, 'claude');
+      expect(store.active(_now).single.account, 'a');
+      final afterLease = await _getJson(Uri.parse('$base/suggest'));
+      final leasedCandidate = afterLease['recommended'] as Map<String, dynamic>;
+      expectUnknownHistory(leasedCandidate, effectiveHeadroom: 60);
+      expect(leasedCandidate['lease_discount_percent'], 20);
+      expect(unavailable.readAsStringSync(), 'not a directory');
+    } finally {
+      await server.close(force: true);
+      setQuotabotDirOverrideForTesting(configRoot);
+    }
+  });
+
+  for (final gate in ['denied', 'unresolved', 'stale', 'drift', 'spent']) {
+    test('unavailable analytics does not bypass $gate quota eligibility',
+        () async {
+      final unavailable = File('${configRoot.path}/unavailable-config')
+        ..writeAsStringSync('not a directory');
+      setQuotabotDirOverrideForTesting(Directory(unavailable.path));
+      final store = InMemoryRouteLeaseStore(idFactory: () => 'blocked-lease');
+      final quota = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'a',
+        asOf: _now,
+        requestAdmission: gate == 'denied'
+            ? RequestAdmission.denied
+            : gate == 'unresolved'
+                ? RequestAdmission.unresolved
+                : RequestAdmission.notReported,
+        stale: gate == 'stale',
+        driftReason: gate == 'drift' ? 'synthetic rejected quota' : null,
+        driftObservedAt: gate == 'drift' ? _now : null,
+        windows: [
+          QuotaWindow(label: 'weekly', usedPercent: gate == 'spent' ? 100 : 20)
+        ],
+      );
+      final server = await startLocalQuotabotServer(
+        port: 0,
+        snapshotProvider: () async => [quota],
+        routeSummaryProvider: _emptyRouteSummary,
+        leaseStore: store,
+        mutationToken: _mutationToken,
+        now: () => _now,
+      );
+      final base = 'http://127.0.0.1:${server.port}';
+      try {
+        final suggestion = await _getJson(Uri.parse('$base/suggest'));
+        expect(suggestion['recommended'], isNull);
+        final candidate = (suggestion['ranked'] as List).single as Map;
+        expect(candidate['headroom_percent'], gate == 'spent' ? 0 : 80);
+        expect(candidate['available'], isFalse);
+        expect(candidate.containsKey('burn_percent_per_hour'), isFalse);
+        expect(candidate.containsKey('burn_se_percent_per_hour'), isFalse);
+
+        final reserve = await _requestJson(
+          Uri.parse('$base/leases/reserve'),
+          method: 'POST',
+          headers: {HttpHeaders.authorizationHeader: 'Bearer $_mutationToken'},
+          jsonBody: {
+            'targets': [
+              {'provider': 'claude', 'account': 'a'}
+            ],
+          },
+        );
+        expect(reserve.status, HttpStatus.ok);
+        expect(reserve.body['reserved'], isFalse);
+        expect(reserve.body['selected'], isNull);
+        expect(store.active(_now), isEmpty);
+      } finally {
+        await server.close(force: true);
+        setQuotabotDirOverrideForTesting(configRoot);
+      }
+    });
+  }
 
   test('HTTP lease mutations authenticate, distribute, and release', () async {
     var collections = 0;

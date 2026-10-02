@@ -33,14 +33,9 @@ dependency), so it runs unchanged on Windows, macOS, and Linux.
 from __future__ import annotations
 
 import asyncio
-import base64
 import csv
 import datetime
 import email.utils
-import hashlib
-import hmac
-import http.client
-import ipaddress
 import json
 import logging
 import math
@@ -49,11 +44,14 @@ import re
 import secrets
 import subprocess
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Any, Optional
+
+from local_metadata import (
+    is_loopback_url as _is_loopback_url,
+    local_metadata_request as _local_metadata_request,
+    run_metadata_operation as _run_metadata_operation,
+)
 
 try:  # LiteLLM is present when this runs inside the proxy.
     from litellm.integrations.custom_logger import CustomLogger
@@ -72,41 +70,6 @@ def _expand(path: str) -> Path:
 
 def _default_metrics_dir() -> Path:
     return Path.home() / ".quotabot"
-
-
-def _is_loopback_url(url: str) -> bool:
-    if (
-        not isinstance(url, str)
-        or not url
-        or url != url.strip()
-        or "\\" in url
-        or any(char.isspace() for char in url)
-    ):
-        return False
-    try:
-        parsed = urllib.parse.urlsplit(url)
-        port = parsed.port
-    except ValueError:
-        return False
-    host = parsed.hostname
-    if (
-        parsed.scheme.lower() not in {"http", "https"}
-        or not parsed.netloc
-        or not host
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.path not in {"", "/"}
-        or parsed.query
-        or parsed.fragment
-        or port == 0
-    ):
-        return False
-    if host.lower() == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
 
 
 def _safe_metrics_path(raw: Optional[str]) -> Optional[str]:
@@ -191,18 +154,6 @@ def _restrict_owner_only_directory(path: Path) -> None:
         return
 
 
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
-        return None
-
-
-# Loopback quota reads and lease mutations must never inherit HTTP(S) proxy
-# settings. A configured proxy would otherwise receive the mutation bearer and
-# bounded account metadata even though the destination URL itself is loopback.
-_NO_REDIRECT_OPENER = urllib.request.build_opener(
-    urllib.request.ProxyHandler({}),
-    _NoRedirectHandler,
-)
 _SPEND_METADATA_KEY = "quotabot_spend"
 _PROVIDER_METADATA_KEY = "quotabot_provider"
 _ACCOUNT_METADATA_KEY = "quotabot_account"
@@ -220,9 +171,6 @@ _RESERVED_METADATA_KEYS = {
     _ORIGINAL_MODEL_METADATA_KEY,
 }
 _SUGGEST_SCHEMA = "quotabot.suggest.v1"
-_LOCAL_SERVER_PROOF_SCHEMA = "quotabot.local-server-proof.v1"
-_LOCAL_SERVER_PROOF_PATH = "/auth/prove"
-_MAX_SERVER_PROOF_RESPONSE_BYTES = 4096
 _MAX_SUGGEST_RESPONSE_BYTES = 4 * 1024 * 1024
 _MAX_LEASE_RESPONSE_BYTES = 256 * 1024
 _UNAVAILABLE_RETRY_SECONDS = 5.0
@@ -257,121 +205,6 @@ def _load_local_http_token() -> Optional[str]:
         return None
 
 
-def _local_server_endpoint(sock: Any) -> str:
-    peer = sock.getpeername()
-    if not isinstance(peer, tuple) or len(peer) < 2:
-        raise ValueError("missing loopback peer")
-    address = ipaddress.ip_address(str(peer[0]).split("%", 1)[0])
-    port = int(peer[1])
-    if not address.is_loopback or not 1 <= port <= 65535:
-        raise ValueError("peer is not loopback")
-    encoded = base64.urlsafe_b64encode(address.packed).rstrip(b"=").decode("ascii")
-    return f"{encoded}:{port}"
-
-
-def _local_server_proof(token: str, nonce: str, endpoint: str) -> str:
-    message = f"quotabot-local-server-proof-v1\n{nonce}\n{endpoint}"
-    return hmac.new(
-        token.encode("utf-8"),
-        message.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-
-
-def _read_bounded_response(
-    response: http.client.HTTPResponse,
-    maximum: int,
-) -> Optional[bytes]:
-    raw = response.read(maximum + 1)
-    return raw if len(raw) <= maximum else None
-
-
-def _authenticated_local_request(
-    base_url: str,
-    path: str,
-    token: str,
-    *,
-    method: str = "GET",
-    body: Optional[bytes] = None,
-    maximum: int,
-) -> Optional[bytes]:
-    if not _is_loopback_url(base_url):
-        return None
-    parsed = urllib.parse.urlsplit(base_url)
-    host = parsed.hostname
-    if host is None:
-        return None
-    connection_type = (
-        http.client.HTTPSConnection
-        if parsed.scheme.lower() == "https"
-        else http.client.HTTPConnection
-    )
-    connection = connection_type(host, parsed.port, timeout=2)
-    try:
-        connection.connect()
-        original_socket = connection.sock
-        if original_socket is None:
-            return None
-        endpoint = _local_server_endpoint(original_socket)
-        nonce = secrets.token_urlsafe(32)
-        challenge_path = f"{_LOCAL_SERVER_PROOF_PATH}?" + urllib.parse.urlencode(
-            {"nonce": nonce}
-        )
-        connection.request(
-            "GET",
-            challenge_path,
-            headers={"Accept": "application/json"},
-        )
-        challenge_response = connection.getresponse()
-        challenge_raw = _read_bounded_response(
-            challenge_response,
-            _MAX_SERVER_PROOF_RESPONSE_BYTES,
-        )
-        if (
-            challenge_response.status != 200
-            or challenge_response.will_close
-            or challenge_raw is None
-            or connection.sock is not original_socket
-        ):
-            return None
-        challenge = json.loads(challenge_raw.decode("utf-8"))
-        proof = challenge.get("proof") if isinstance(challenge, dict) else None
-        if (
-            not isinstance(challenge, dict)
-            or challenge.get("schema") != _LOCAL_SERVER_PROOF_SCHEMA
-            or challenge.get("nonce") != nonce
-            or not isinstance(proof, str)
-            or not hmac.compare_digest(
-                proof,
-                _local_server_proof(token, nonce, endpoint),
-            )
-            or connection.sock is not original_socket
-        ):
-            return None
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-        }
-        if body is not None:
-            headers["Content-Type"] = "application/json"
-            headers["Content-Length"] = str(len(body))
-        connection.request(method, path, body=body, headers=headers)
-        response = connection.getresponse()
-        raw = _read_bounded_response(response, maximum)
-        if response.status < 200 or response.status >= 300:
-            return None
-        return raw
-    except (
-        http.client.HTTPException,
-        OSError,
-        UnicodeError,
-        ValueError,
-    ):
-        return None
-    finally:
-        connection.close()
-
-
 class _Availability(list[dict[str, Any]]):
     """Ranked candidates plus the receipt id from the same atomic response."""
 
@@ -382,6 +215,16 @@ class _Availability(list[dict[str, Any]]):
     ) -> None:
         super().__init__(entries)
         self.decision_id = decision_id
+
+
+class _MutationResult:
+    """Internal mutation evidence and its credential for owned-lease cleanup."""
+
+    __slots__ = ("response", "token")
+
+    def __init__(self, response: dict[str, object] | None, token: str) -> None:
+        self.response = response
+        self.token = token
 
 
 class _LeaseChoice:
@@ -967,7 +810,7 @@ class QuotabotRouter(CustomLogger):
                 current - self._unavailable_at
             ) < min(self.policy.snapshot_ttl_seconds, _UNAVAILABLE_RETRY_SECONDS):
                 return None
-            payload = await asyncio.to_thread(self._fetch_suggest)
+            payload = await _run_metadata_operation(self._fetch_suggest)
             if payload is None:
                 self._unavailable_at = time.monotonic()
                 return None
@@ -1005,33 +848,17 @@ class QuotabotRouter(CustomLogger):
     def _fetch_suggest(self) -> Optional[dict]:
         if not _is_loopback_url(self.policy.quotabot_url):
             return None
-        url = self.policy.quotabot_url.rstrip("/") + "/suggest"
-        token = _load_local_http_token()
-        if token is not None:
-            raw = _authenticated_local_request(
-                self.policy.quotabot_url,
-                "/suggest",
-                token,
-                maximum=_MAX_SUGGEST_RESPONSE_BYTES,
-            )
-            if raw is None:
-                return None
-            try:
-                return json.loads(raw.decode("utf-8"))
-            except (UnicodeError, ValueError):
-                return None
-        headers: dict[str, str] = {}
-        request = urllib.request.Request(url, headers=headers)  # noqa: S310 (local only)
-        try:
-            with _NO_REDIRECT_OPENER.open(request, timeout=2) as resp:
-                raw = resp.read(_MAX_SUGGEST_RESPONSE_BYTES + 1)
-                if len(raw) > _MAX_SUGGEST_RESPONSE_BYTES:
-                    return None
-                return json.loads(raw.decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            error.close()
+        raw = _local_metadata_request(
+            self.policy.quotabot_url,
+            "/suggest",
+            _load_local_http_token(),
+            maximum=_MAX_SUGGEST_RESPONSE_BYTES,
+        )
+        if raw is None:
             return None
-        except (urllib.error.URLError, OSError, ValueError):
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeError, ValueError, RecursionError):
             return None
 
     async def _reserve_remote(
@@ -1064,9 +891,6 @@ class QuotabotRouter(CustomLogger):
             targets.append(target)
         if not targets:
             return None
-        token = _load_local_http_token()
-        if token is None:
-            return None
         idempotency_key = secrets.token_urlsafe(18)
         payload = {
             "targets": targets,
@@ -1076,12 +900,15 @@ class QuotabotRouter(CustomLogger):
             "client": "litellm",
             "idempotency_key": idempotency_key,
         }
-        response = await asyncio.to_thread(
-            self._post_mutation,
+        mutation = await _run_metadata_operation(
+            self._post_local_mutation,
             "/leases/reserve",
             payload,
-            token,
         )
+        if mutation is None:
+            return None
+        response = mutation.response
+        token = mutation.token
         if not isinstance(response, dict):
             return None
         if response.get("schema") != "quotabot.reserve.v1":
@@ -1101,7 +928,7 @@ class QuotabotRouter(CustomLogger):
 
         async def reject_reserved_lease() -> None:
             if owns_lease:
-                await asyncio.to_thread(
+                await _run_metadata_operation(
                     self._post_mutation,
                     "/leases/release",
                     {"lease_id": lease_id},
@@ -1159,6 +986,18 @@ class QuotabotRouter(CustomLogger):
             return None
         return _LeaseChoice(candidate, info, lease_id, decision_id)
 
+    def _post_local_mutation(
+        self,
+        path: str,
+        payload: dict[str, object],
+    ) -> Optional[_MutationResult]:
+        if not _is_loopback_url(self.policy.quotabot_url):
+            return None
+        token = _load_local_http_token()
+        if token is None:
+            return None
+        return _MutationResult(self._post_mutation(path, payload, token), token)
+
     def _post_mutation(
         self,
         path: str,
@@ -1168,7 +1007,7 @@ class QuotabotRouter(CustomLogger):
         if not _is_loopback_url(self.policy.quotabot_url):
             return None
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        raw = _authenticated_local_request(
+        raw = _local_metadata_request(
             self.policy.quotabot_url,
             path,
             token,
@@ -1181,19 +1020,17 @@ class QuotabotRouter(CustomLogger):
                 return None
             decoded = json.loads(raw.decode("utf-8"))
             return decoded if isinstance(decoded, dict) else None
-        except (UnicodeError, ValueError):
+        except (UnicodeError, ValueError, RecursionError):
             return None
 
     async def _release_route_lease(self, route_meta: dict[str, Any]) -> None:
         lease_id = _string_field(route_meta, _LEASE_METADATA_KEY)
-        token = _load_local_http_token()
-        if not _valid_lease_id(lease_id) or token is None:
+        if not _valid_lease_id(lease_id):
             return
-        await asyncio.to_thread(
-            self._post_mutation,
+        await _run_metadata_operation(
+            self._post_local_mutation,
             "/leases/release",
             {"lease_id": lease_id},
-            token,
         )
 
     # -- metrics ------------------------------------------------------------

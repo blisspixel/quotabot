@@ -139,10 +139,11 @@ isolated empty profile paths and makes no quota or inference request.
 
 Guidelines:
 
-The strict Python gate initially covers the five maintained metadata/config
-helpers in `mypy.ini`; the router, other tooling, and tests are not yet in that
-scope. Expand it with precise boundary types and regression evidence. Ruff
-success does not prove type safety. To regenerate development tools, use
+The strict Python gate covers the six maintained metadata/config modules in
+`mypy.ini`, including the LiteLLM loopback transport. The SDK-facing router,
+other tooling, and tests are not yet in that scope. Expand it with precise
+boundary types and regression evidence. Ruff success does not prove type safety.
+To regenerate development tools, use
 `uv pip compile --universal --generate-hashes --python-version 3.10 --no-header -o tools/requirements-dev.txt tools/requirements-dev.in`.
 
 - Keep changes focused and the diff small. One concern per pull request.

@@ -181,6 +181,232 @@ class ReleaseVersionCheckTests(unittest.TestCase):
             ):
                 check_release_versions(root, tag="v1.2.4")
 
+    def test_pending_publication_preserves_published_stable_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(
+                root,
+                source_version="1.2.4",
+                stable_version="1.2.3",
+                locked_version="1.2.4",
+                pending_version="1.2.4",
+            )
+
+            self.assertEqual(
+                check_release_versions(root, tag="v1.2.4"), ("1.2.4", "17")
+            )
+
+    def test_newer_source_without_pending_marker_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(
+                root,
+                source_version="1.2.4",
+                stable_version="1.2.3",
+                locked_version="1.2.4",
+            )
+
+            with self.assertRaisesRegex(
+                VersionCheckError, r"expected 1\.2\.4; mismatched"
+            ):
+                check_release_versions(root)
+
+    def test_pending_publication_requires_exact_source_version(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(root, pending_version="1.2.4")
+
+            with self.assertRaisesRegex(
+                VersionCheckError,
+                r"pending publication 1\.2\.4 does not match source version 1\.2\.3",
+            ):
+                check_release_versions(root)
+
+    def test_pending_publication_rejects_malformed_or_duplicate_markers(self) -> None:
+        markers = (
+            "> **Pending publication:** 1.2.4\n",
+            "> **Pending publication:** v1.2.4.\n",
+            "> **Pending publication:** 1.2.4. Release notes.\n",
+            " **Pending publication:** 1.2.4.\n",
+            "> **pending publication:** 1.2.4.\n",
+            "> **Pending publication:** 1.2.4.\n" * 2,
+        )
+        for marker in markers:
+            with (
+                self.subTest(marker=marker),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                self._write_fixture(
+                    root,
+                    source_version="1.2.4",
+                    stable_version="1.2.3",
+                    locked_version="1.2.4",
+                )
+                with (root / "README.md").open("a", encoding="utf-8") as readme:
+                    readme.write(marker)
+
+                with self.assertRaisesRegex(
+                    VersionCheckError, r"pending publication marker"
+                ):
+                    check_release_versions(root)
+
+    def test_pending_publication_rejects_prerelease_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(
+                root,
+                source_version="1.3.0-rc.1",
+                stable_version="1.2.3",
+                locked_version="1.3.0-rc.1",
+                pending_version="1.3.0-rc.1",
+            )
+
+            with self.assertRaisesRegex(
+                VersionCheckError,
+                r"prerelease source must not declare pending publication",
+            ):
+                check_release_versions(root)
+
+    def test_pending_publication_requires_newer_stable_version(self) -> None:
+        for source_version in ("1.2.3", "1.2.2", "1.1.9", "0.99.99", "01.2.4"):
+            with (
+                self.subTest(source_version=source_version),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                self._write_fixture(
+                    root,
+                    source_version=source_version,
+                    stable_version="1.2.3",
+                    locked_version=source_version,
+                    pending_version=source_version,
+                )
+
+                with self.assertRaisesRegex(
+                    VersionCheckError,
+                    r"pending publication (must be newer|requires a stable version)",
+                ):
+                    check_release_versions(root)
+
+    def test_pending_publication_compares_versions_numerically(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(
+                root,
+                source_version="1.2.10",
+                stable_version="1.2.9",
+                locked_version="1.2.10",
+                pending_version="1.2.10",
+            )
+
+            self.assertEqual(check_release_versions(root), ("1.2.10", "17"))
+
+    def test_pending_publication_rejects_prerelease_stable_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(
+                root,
+                source_version="1.3.0",
+                stable_version="1.2.3-rc.1",
+                locked_version="1.3.0",
+                pending_version="1.3.0",
+            )
+
+            with self.assertRaisesRegex(
+                VersionCheckError, r"README current stable must not name a prerelease"
+            ):
+                check_release_versions(root)
+
+    def test_pending_publication_rejects_each_disagreeing_stable_marker(self) -> None:
+        for path in (
+            "README.md",
+            "SECURITY.md",
+            "AGENTS.md",
+            "docs/README.md",
+            "docs/SETUP.md",
+            "ROADMAP.md",
+        ):
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._write_fixture(
+                    root,
+                    source_version="1.2.4",
+                    stable_version="1.2.3",
+                    locked_version="1.2.4",
+                    pending_version="1.2.4",
+                )
+                target = root / path
+                target.write_text(
+                    target.read_text(encoding="utf-8").replace("1.2.3", "1.2.2"),
+                    encoding="utf-8",
+                )
+
+                with self.assertRaisesRegex(
+                    VersionCheckError, r"expected stable .*; mismatched"
+                ):
+                    check_release_versions(root)
+
+    def test_pending_publication_does_not_mask_source_or_tag_mismatch(self) -> None:
+        for path in (
+            "collector/bin/collect.dart",
+            "collector/lib/mcp.dart",
+            "app/pubspec.lock",
+            "CHANGELOG.md",
+        ):
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._write_fixture(
+                    root,
+                    source_version="1.2.4",
+                    stable_version="1.2.3",
+                    locked_version="1.2.4",
+                    pending_version="1.2.4",
+                )
+                target = root / path
+                target.write_text(
+                    target.read_text(encoding="utf-8").replace("1.2.4", "1.2.3"),
+                    encoding="utf-8",
+                )
+
+                with self.assertRaisesRegex(
+                    VersionCheckError, r"expected 1\.2\.4; mismatched"
+                ):
+                    check_release_versions(root)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(
+                root,
+                source_version="1.2.4",
+                stable_version="1.2.3",
+                locked_version="1.2.4",
+                pending_version="1.2.4",
+            )
+            with self.assertRaisesRegex(
+                VersionCheckError,
+                r"tag 'v1\.2\.3' does not match source version v1\.2\.4",
+            ):
+                check_release_versions(root, tag="v1.2.3")
+
+    def test_publication_promotion_removes_pending_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(root, pending_version="1.2.3")
+            with self.assertRaisesRegex(
+                VersionCheckError, r"pending publication must be newer"
+            ):
+                check_release_versions(root)
+
+            readme = root / "README.md"
+            readme.write_text(
+                readme.read_text(encoding="utf-8").replace(
+                    "> **Pending publication:** 1.2.3.\n", ""
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(check_release_versions(root), ("1.2.3", "17"))
+
     @staticmethod
     def _write_fixture(
         root: Path,
@@ -188,6 +414,7 @@ class ReleaseVersionCheckTests(unittest.TestCase):
         *,
         source_version: str = "1.2.3",
         stable_version: str = "1.2.3",
+        pending_version: str | None = None,
     ) -> None:
         files = {
             "collector/pubspec.yaml": f"version: {source_version}\n",
@@ -214,6 +441,11 @@ class ReleaseVersionCheckTests(unittest.TestCase):
                 + (
                     f"> **Current release candidate:** {source_version}.\n"
                     if "-" in source_version
+                    else ""
+                )
+                + (
+                    f"> **Pending publication:** {pending_version}.\n"
+                    if pending_version is not None
                     else ""
                 )
             ),

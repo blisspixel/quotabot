@@ -4,6 +4,65 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+Version 0.11.8 below is pending publication. Published stable remains 0.11.7.
+
+## 0.11.8 - 2026-10-01
+
+Conservative model eligibility, bounded metadata operations, and reliable
+owner publication.
+
+- Update selected PyJWT and urllib3 dependencies to 2.15.0 and 2.8.0, and the
+  MCP examples' fast-uri and ip-address dependencies to 3.1.8 and 10.7.3, to
+  address current advisories while preserving unrelated pins.
+- Require TLS 1.2 or newer for the owned Python metadata HTTPS transport while
+  preserving certificate and hostname verification.
+- Preserve unknown local-model load state across adapters, cache, routing,
+  JSON, desktop detail, and terminal inspection. Failed or incomplete load
+  metadata cannot become confirmed cold capacity, an advertised running
+  context, or a host-fit estimate. Keep general inventory advice available.
+- Filter the desktop Models view by case-insensitive name or ID, with match
+  counts, a clear action, and a distinct no-results state. Preserve snapshot
+  identity, registry order, exclusions, and unknown evidence. Keep search and
+  Close reachable in short windows and at larger text sizes.
+- Distinguish local-runtime inventory authentication, access denial, invalid
+  metadata, HTTP failure, and unreachable transport. Retain informative failure
+  evidence across compatibility probes, provide matching setup guidance, and
+  show empty or excluded-only runtime statuses without marking them ready.
+- Apply explicit provider-routing model requirements to local candidates and
+  fallback. Compute readiness from matching models, and exclude declared
+  non-text or embedding catalog entries from generation capability gates.
+- When shared and scoped quota are both spent, report the later recovery reset;
+  retain unknown recovery when either binding reset is unknown. Preserve the
+  measured minimum headroom.
+- Keep LM Studio model maximum context separate from loaded-instance context.
+  Aggregate coherent loaded instances conservatively and keep missing or
+  malformed running context unknown, regardless of instance order.
+- Resolve supported Lemonade composites from bounded component metadata.
+  Propagate cloud exclusion and omit unresolved component scope with a
+  count-only diagnostic. Never inspect or execute routing policies.
+- Disable local-runtime metadata redirects and cap response accumulation at
+  4 MiB. Move Lemonade onto the shared abortable HTTP seam, preserving client
+  ownership and preventing late reads from recreating a retired pool.
+- Reject malformed Ollama capability arrays as a whole while retaining
+  independent upstream exclusions, rather than partially accepting positive
+  declarations from invalid metadata.
+- Extract the LiteLLM loopback transport into one strict-checked module.
+  Bound connection, same-peer proof, headers, body, and chunk framing with a
+  cumulative deadline; close owned sockets and bound asynchronous callers.
+  Keep credential preflight inside the bounded worker. Preserve local fallback,
+  account identity, and lease controls.
+- Own installed-proxy test descendants through checked Windows job cleanup.
+  Verify log-handle release and use bundled SDK cost metadata, keeping the
+  fixture deterministic without weakening authentication or lease assertions.
+- Keep optional analytics storage failures from blocking fresh quota advice.
+  Preserve unknown burn and uncertainty for the exact account, and isolate
+  local-server test state. Prune generated audit directories before traversal
+  while retaining checks for every maintained runtime source.
+- Publish using the validated draft creation response and release ID for
+  binary uploads. Remove post-creation listing and tag lookup dependencies
+  while preserving owner, exact source, fresh download, provenance, unchanged
+  asset inventory, immutable publication, and stable Latest checks.
+
 ## 0.11.7 - 2026-09-30
 
 Current model evidence, defensive metadata collection, account-safe routing,

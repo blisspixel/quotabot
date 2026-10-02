@@ -148,15 +148,17 @@ class ModelEntry {
     this.driftObservedAt,
   });
 
-  String? get localReadiness => local && !model.hasLocalGenerationVeto
-      ? (model.loaded ? 'loaded' : 'cold')
-      : null;
+  String? get localReadiness =>
+      local && !model.hasLocalGenerationVeto && model.loadedStateKnown
+          ? (model.loaded ? 'loaded' : 'cold')
+          : null;
 
   Map<String, dynamic> toJson() => {
         ...model.toJson(),
         'provider': provider,
         'account': account,
         'local': local,
+        if (local) 'loaded_state_known': model.loadedStateKnown,
         'available': available,
         'stale': stale,
         if (driftReason != null) 'drift_reason': driftReason,
@@ -184,6 +186,13 @@ LocalModelHardwareFit localModelHardwareFit(
     return const LocalModelHardwareFit(
       status: LocalHardwareFitStatus.unknown,
       basis: 'local_execution_unverified',
+    );
+  }
+  if (!model.loadedStateKnown) {
+    return LocalModelHardwareFit(
+      status: LocalHardwareFitStatus.unknown,
+      basis: 'load_state_unreported',
+      observedAt: hardware?.asOf,
     );
   }
   if (model.loaded) {
@@ -507,8 +516,12 @@ ModelRequirements taskProfile(String? task) {
 bool meetsRequirements(ModelEntry e, ModelRequirements r) {
   final m = e.model;
   if (!meetsBudgetPolicy(e, r.budgetPolicy)) return false;
+  // Without load evidence, an advertised maximum may hide a smaller running
+  // configuration. Inventory still qualifies fallback without a context floor.
   if (r.minContextTokens != null &&
-      (m.contextTokens == null || m.contextTokens! < r.minContextTokens!)) {
+      ((e.local && !m.loadedStateKnown) ||
+          m.contextTokens == null ||
+          m.contextTokens! < r.minContextTokens!)) {
     return false;
   }
   if (r.requireTools && m.tools != true) return false;
@@ -576,12 +589,16 @@ class ModelCapabilityGates {
   /// One denied model never blocks another eligible alternative.
   final Map<String, RequestAdmission> requestAdmissionByQuotaKey;
 
+  /// Readiness of local models that satisfy an explicit provider-route profile.
+  final Map<String, String> localReadinessByQuotaKey;
+
   const ModelCapabilityGates({
     required this.knownQuotaKeys,
     required this.availableQuotaKeys,
     this.budgetResetByQuotaKey = const {},
     this.headroomByQuotaKey = const {},
     this.requestAdmissionByQuotaKey = const {},
+    this.localReadinessByQuotaKey = const {},
   });
 }
 
@@ -590,19 +607,37 @@ ModelCapabilityGates modelCapabilityGates(
   int now, {
   Map<String, List<ModelInfo>> catalog = const {},
   ModelRequirements requirements = kDefaultProviderRouteRequirements,
+  bool includeLocal = false,
 }) {
   final known = <String>{};
   final available = <String>{};
   final budgetResets = <String, int>{};
   final routeHeadroom = <String, double>{};
   final admissions = <String, List<RequestAdmission>>{};
+  final localReadiness = <String, String>{};
+  final unknownLocalReadiness = <String>{};
   for (final entry in buildModelRegistry(snapshot, now, catalog: catalog)) {
-    if (entry.local || !meetsRequirements(entry, requirements)) continue;
+    if ((entry.local && (!includeLocal || entry.model.hasLocalExecutionVeto)) ||
+        entry.model.embedding == true ||
+        entry.model.textGeneration == false ||
+        !meetsRequirements(entry, requirements)) {
+      continue;
+    }
     final key = quotaIdentityKey(entry.provider, entry.account);
     known.add(key);
     admissions.putIfAbsent(key, () => []).add(entry.requestAdmission);
     if (entry.available) {
       available.add(key);
+      if (entry.local) {
+        final readiness = entry.localReadiness;
+        if (readiness == 'loaded') {
+          localReadiness[key] = 'loaded';
+        } else if (readiness == 'cold') {
+          localReadiness.putIfAbsent(key, () => 'cold');
+        } else {
+          unknownLocalReadiness.add(key);
+        }
+      }
       // Antigravity's provider window is the tightest display summary across
       // model-facing gates. It must not gate an unrelated eligible model.
       // Among eligible available pools, retain the lowest measured headroom so
@@ -627,6 +662,11 @@ ModelCapabilityGates modelCapabilityGates(
       }
     }
   }
+  // A matching loaded observation proves residency. Otherwise every eligible
+  // matching model must be observed unloaded before the provider reads cold.
+  for (final key in unknownLocalReadiness) {
+    if (localReadiness[key] != 'loaded') localReadiness.remove(key);
+  }
   return ModelCapabilityGates(
     knownQuotaKeys: known,
     availableQuotaKeys: available,
@@ -640,6 +680,7 @@ ModelCapabilityGates modelCapabilityGates(
               ? RequestAdmission.denied
               : RequestAdmission.unresolved,
     },
+    localReadinessByQuotaKey: localReadiness,
   );
 }
 
@@ -654,6 +695,7 @@ ModelCapabilityGates providerRouteCapabilityGates(
       now,
       catalog: catalog,
       requirements: requirements ?? kDefaultProviderRouteRequirements,
+      includeLocal: requirements != null,
     );
 
 /// Builds the registry from a snapshot. For each provider, local models come from
@@ -838,13 +880,20 @@ List<ModelEntry> buildModelRegistry(
         available: false,
       );
     }
-    final scopedIsTighter = scopedHeadroom < providerHeadroom;
-    final headroom = scopedIsTighter ? scopedHeadroom : providerHeadroom;
-    final reset = scopedIsTighter ? quota.resetsAt : providerResetsAt;
+    final headroom = math.min(scopedHeadroom, providerHeadroom);
+    // Every spent constraint must clear before this model can be used again.
+    // An unknown reset remains unknown even when the other pool names a time.
+    final bothSpent = scopedHeadroom <= kSpentHeadroomFloor &&
+        providerHeadroom <= kSpentHeadroomFloor;
+    final scopedIsBinding = bothSpent
+        ? providerResetsAt != null &&
+            (quota.resetsAt == null || quota.resetsAt! > providerResetsAt)
+        : scopedHeadroom < providerHeadroom;
+    final reset = scopedIsBinding ? quota.resetsAt : providerResetsAt;
     return (
       headroomPercent: headroom,
       resetsAt: reset,
-      gatingWindow: scopedIsTighter
+      gatingWindow: scopedIsBinding
           ? (_trustedModelQuotaWindowLabel(quota) ??
               (reset == null ? null : resetLabel(reset, q.asOf)))
           : bindingLabel,
@@ -1085,9 +1134,11 @@ String _recommendReason(
         'capacity.';
   }
   if (e.local) {
-    final readiness = e.model.loaded
-        ? 'loaded and ready now'
-        : 'installed locally; cold start may be required';
+    final readiness = switch (e.localReadiness) {
+      'loaded' => 'loaded and ready now',
+      'cold' => 'installed locally; cold start may be required',
+      _ => 'reported in runtime inventory; load state is unknown',
+    };
     final evidence = _localModelEvidence(e.model);
     final fit = _localHardwareFitReason(e.hardwareFit);
     return '${e.model.id} (local-runtime entry) is $readiness'
@@ -1120,9 +1171,13 @@ List<String> _localModelEvidence(ModelInfo model) {
     evidence.add('${formatCompactBytes(model.sizeBytes!)} on disk');
   }
   if (model.contextTokens != null) {
+    final contextKind = !model.loadedStateKnown
+        ? 'declared context; running context unverified'
+        : model.loaded
+            ? 'running context'
+            : 'max context';
     evidence.add(
-      '${formatContextTokens(model.contextTokens!)} '
-      '${model.loaded ? 'running context' : 'max context'}',
+      '${formatContextTokens(model.contextTokens!)} $contextKind',
     );
   }
   if (model.quant != null) evidence.add(model.quant!);
@@ -1133,6 +1188,9 @@ String? _localHardwareFitReason(LocalModelHardwareFit? fit) {
   if (fit == null || fit.status == LocalHardwareFitStatus.loaded) return null;
   final estimate = fit.estimatedMemoryBytes;
   if (fit.status == LocalHardwareFitStatus.unknown) {
+    if (fit.basis == 'load_state_unreported') {
+      return 'hardware fit is unknown because runtime load state is unavailable';
+    }
     return estimate == null
         ? 'hardware fit is unknown because model size is unavailable'
         : 'hardware fit is unknown because machine capacity is unavailable '

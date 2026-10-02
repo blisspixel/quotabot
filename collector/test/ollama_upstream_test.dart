@@ -213,6 +213,38 @@ void main() {
   });
 
   group('show metadata and cache', () {
+    test('invalid capability siblings never remove independent upstream veto',
+        () async {
+      for (final invalid in <Object?>[17, '', '   ', null]) {
+        final quota = await OllamaAdapter(
+          environment: const {},
+          capabilityCache: OllamaCapabilityCache(),
+          client: _runtime([
+            {'name': 'alias:7b', 'digest': 'test-digest'},
+          ], show: {
+            'alias:7b': {
+              ..._remote,
+              'capabilities': [
+                'completion',
+                'tools',
+                'vision',
+                'thinking',
+                invalid
+              ],
+              'model_info': {'test.context_length': 65536},
+            },
+          }),
+        ).collect();
+        expect(quota.models.single.upstreamRouting, UpstreamRouting.declared);
+        expect(quota.models.single.tools, isNull);
+        expect(quota.models.single.vision, isNull);
+        expect(quota.models.single.reasoning, isNull);
+        expect(quota.models.single.embedding, isNull);
+        expect(quota.models.single.contextTokens, isNull);
+        _expectNoLocalCapacity(quota, quota.asOf);
+      }
+    });
+
     for (final capabilities in [
       null,
       'malformed',
@@ -295,6 +327,47 @@ void main() {
   });
 
   group('residency and generation evidence', () {
+    for (final includeLoaded in [false, true]) {
+      test('execution veto does not prove cold with loaded=$includeLoaded', () {
+        final installed = <Map<String, Object?>>[
+          {'name': 'declared', 'context_length': 131072, ..._remote},
+          {
+            'name': 'unresolved',
+            'context_length': 131072,
+            'remote_host': _remote['remote_host'],
+          },
+          {'name': 'remote:cloud', 'context_length': 131072},
+        ];
+        final quota = _normalize(installed, [
+          if (includeLoaded)
+            for (final model in installed)
+              {'name': model['name'], 'context_length': 8192},
+        ]);
+        final back = ProviderQuota.fromJson(quota.toJson());
+        for (final model in back.models) {
+          expect(model.loaded, isFalse);
+          expect(model.loadedStateKnown, isFalse);
+          expect(model.contextTokens, 131072,
+              reason: 'declared inventory remains inspectable');
+        }
+        final entries = buildModelRegistry([back], _now);
+        expect(entries, hasLength(3));
+        for (final entry in entries) {
+          expect(entry.localReadiness, isNull);
+          expect(entry.hardwareFit, isNull);
+        }
+        expect(
+          suggestModel([back], _now,
+              requirements: const ModelRequirements(
+                budgetPolicy: ModelBudgetPolicy.any,
+                minContextTokens: 65536,
+              )).recommended,
+          isNull,
+        );
+        _expectNoLocalCapacity(back, _now);
+      });
+    }
+
     test('loaded upstream and embedding entries cannot override a cold model',
         () {
       final quota = _provider(const [
@@ -343,17 +416,24 @@ void main() {
       expect(quota.details.join(' '), isNot(contains('GPU resident')));
     });
 
-    test('ordinary digest replacement stays cold without upstream evidence',
-        () {
+    test('ordinary digest replacement leaves residency unknown', () {
       final quota = _normalize([
-        {'name': 'alias:7b', 'digest': 'new-digest'}
+        {'name': 'alias:7b', 'digest': 'new-digest', 'context_length': 131072}
       ], [
-        {'name': 'alias:7b', 'digest': 'old-digest', 'size_vram': 9999}
+        {
+          'name': 'alias:7b',
+          'digest': 'old-digest',
+          'size_vram': 9999,
+          'context_length': 8192
+        }
       ]);
       expect(quota.models.single.upstreamRouting, UpstreamRouting.notReported);
       expect(quota.models.single.loaded, isFalse);
       expect(quota.models.single.vramBytes, isNull);
-      expect(quota.localGenerationReadiness, 'cold');
+      expect(quota.models.single.loadedStateKnown, isFalse);
+      expect(quota.models.single.contextTokens, isNull);
+      expect(quota.localGenerationReadiness, isNull);
+      expect(quota.status, 'reachable - load state unknown');
       expect(isLocalRuntimeAvailableAt(quota, _now), isTrue);
     });
 

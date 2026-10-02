@@ -679,16 +679,26 @@ class ProviderQuota {
   /// remote subscription.
   bool get isLocal => kind.isLocal;
 
-  /// Legacy runtime generation readiness after known execution and capability
-  /// vetoes. A non-null value is not proof of physical on-device execution.
-  /// Provider-wide activity cannot substitute for an eligible represented model.
+  Iterable<ModelInfo> get _eligibleLocalGenerationModels => models.where(
+        (model) =>
+            !model.hasLocalGenerationVeto &&
+            !requestAdmissionForModel(model).blocksRequests,
+      );
+
+  /// A represented generation candidate after execution and admission vetoes.
+  /// Inventory eligibility is independent of whether residency was observed.
+  bool get hasEligibleLocalGenerationModel =>
+      isLocal && _eligibleLocalGenerationModels.isNotEmpty;
+
+  /// Known runtime generation readiness after execution and capability vetoes.
+  /// Missing load observations do not establish cold capacity. A non-null value
+  /// is not proof of physical on-device execution.
   String? get localGenerationReadiness {
     if (!isLocal) return null;
-    final eligible = models.where((model) =>
-        !model.hasLocalGenerationVeto &&
-        !requestAdmissionForModel(model).blocksRequests);
+    final eligible = _eligibleLocalGenerationModels.toList();
     if (eligible.isEmpty) return null;
-    return eligible.any((model) => model.loaded) ? 'loaded' : 'cold';
+    if (eligible.any((model) => model.loaded)) return 'loaded';
+    return eligible.every((model) => model.loadedStateKnown) ? 'cold' : null;
   }
 
   /// Shared matching keeps local availability and model-budget routing on the
@@ -834,7 +844,14 @@ class ProviderQuota {
         if (resetCreditsAvailable > 0)
           'reset_credits_available': resetCreditsAvailable,
         'windows': windows.map((w) => w.toJson()).toList(),
-        if (models.isNotEmpty) 'models': models.map((m) => m.toJson()).toList(),
+        if (models.isNotEmpty)
+          'models': [
+            for (final model in models)
+              {
+                ...model.toJson(),
+                if (isLocal) 'loaded_state_known': model.loadedStateKnown,
+              },
+          ],
         if (localHardware != null) 'local_hardware': localHardware!.toJson(),
         if (modelQuotas.isNotEmpty)
           'model_quotas': modelQuotas.map((m) => m.toJson()).toList(),
@@ -1266,6 +1283,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
           quotaIncludedUntil: m.quotaIncludedUntil,
           local: m.local,
           loaded: m.loaded,
+          loadedStateKnown: m.loadedStateKnown,
           sizeBytes: m.sizeBytes,
           vramBytes: m.vramBytes,
           quant: m.quant == null ? null : t(m.quant!),
@@ -1488,6 +1506,12 @@ class ModelInfo {
   /// Local only: currently loaded into memory.
   final bool loaded;
 
+  /// Whether residency was established by a usable runtime observation. False
+  /// distinguishes an unknown load state from a confirmed cold model.
+  /// Trusted constructor callers must pass false for unobserved residency;
+  /// wire decoding never treats an omitted legacy flag as cold evidence.
+  final bool loadedStateKnown;
+
   /// Local only: on-disk size in bytes.
   final int? sizeBytes;
 
@@ -1513,11 +1537,12 @@ class ModelInfo {
     this.local = false,
     this.cloudOffloaded = false,
     this.upstreamRouting = UpstreamRouting.notReported,
-    this.loaded = false,
+    bool loaded = false,
+    this.loadedStateKnown = true,
     this.sizeBytes,
     this.vramBytes,
     this.quant,
-  });
+  }) : loaded = loaded && loadedStateKnown;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -1533,6 +1558,7 @@ class ModelInfo {
         if (quotaIncludedUntil != null)
           'quota_included_until': quotaIncludedUntil,
         if (local) 'local': local,
+        if (local) 'loaded_state_known': loadedStateKnown,
         if (cloudOffloaded) 'cloud_offloaded': cloudOffloaded,
         if (upstreamRouting != UpstreamRouting.notReported)
           'upstream_routing': upstreamRouting.wireName,
@@ -1542,26 +1568,38 @@ class ModelInfo {
         if (quant != null) 'quant': quant,
       };
 
-  factory ModelInfo.fromJson(Map<String, dynamic> j) => ModelInfo(
-        id: j['id'] as String,
-        displayName: j['display_name'] as String?,
-        contextTokens: (j['context_tokens'] as num?)?.toInt(),
-        maxOutputTokens: (j['max_output_tokens'] as num?)?.toInt(),
-        tools: j['tools'] as bool?,
-        vision: j['vision'] as bool?,
-        embedding: j['embedding'] as bool?,
-        textGeneration: j['text_generation'] as bool?,
-        reasoning: j['reasoning'] as String?,
-        tier: j['tier'] as String?,
-        quotaIncludedUntil: (j['quota_included_until'] as num?)?.toInt(),
-        local: j['local'] as bool? ?? false,
-        cloudOffloaded: j['cloud_offloaded'] as bool? ?? false,
-        upstreamRouting: j.containsKey('upstream_routing')
-            ? UpstreamRouting.fromWire(j['upstream_routing'])
-            : UpstreamRouting.notReported,
-        loaded: j['loaded'] as bool? ?? false,
-        sizeBytes: (j['size_bytes'] as num?)?.toInt(),
-        vramBytes: (j['vram_bytes'] as num?)?.toInt(),
-        quant: j['quant'] as String?,
-      );
+  factory ModelInfo.fromJson(Map<String, dynamic> j) {
+    final local = j['local'] as bool? ?? false;
+    final rawLoaded = j['loaded'];
+    final validLoaded = !j.containsKey('loaded') || rawLoaded is bool;
+    // Older snapshots omit false loaded values. Only a positive observation
+    // survives without an explicit certainty flag; absence cannot prove cold.
+    final loadedStateKnown = validLoaded &&
+        (j.containsKey('loaded_state_known')
+            ? j['loaded_state_known'] == true
+            : rawLoaded == true);
+    return ModelInfo(
+      id: j['id'] as String,
+      displayName: j['display_name'] as String?,
+      contextTokens: (j['context_tokens'] as num?)?.toInt(),
+      maxOutputTokens: (j['max_output_tokens'] as num?)?.toInt(),
+      tools: j['tools'] as bool?,
+      vision: j['vision'] as bool?,
+      embedding: j['embedding'] as bool?,
+      textGeneration: j['text_generation'] as bool?,
+      reasoning: j['reasoning'] as String?,
+      tier: j['tier'] as String?,
+      quotaIncludedUntil: (j['quota_included_until'] as num?)?.toInt(),
+      local: local,
+      cloudOffloaded: j['cloud_offloaded'] as bool? ?? false,
+      upstreamRouting: j.containsKey('upstream_routing')
+          ? UpstreamRouting.fromWire(j['upstream_routing'])
+          : UpstreamRouting.notReported,
+      loaded: rawLoaded == true,
+      loadedStateKnown: loadedStateKnown,
+      sizeBytes: (j['size_bytes'] as num?)?.toInt(),
+      vramBytes: (j['vram_bytes'] as num?)?.toInt(),
+      quant: j['quant'] as String?,
+    );
+  }
 }

@@ -11,6 +11,9 @@ models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
 > **Current stable:** 0.11.7. quotabot remains under active 0.x development.
+> **Pending publication:** 0.11.8.
+> Source is prepared for desktop build 63. Native release validation and owner
+> publication remain pending.
 > **Next:** support Claude discovery for macOS Keychain sign-ins and prove
 > account-wide quota refresh on idle machines, then strengthen execution-scope
 > evidence for local-only advice. Native signing proceeds alongside product
@@ -122,7 +125,8 @@ Capability hints describe what a model declares, not measured quality. A model
 catalog also cannot establish access through a particular account or harness.
 The [September 30 review](docs/research/2026-09-30-review.md) checks current
 models, quota/reset policies, local status sources, and routing integrations;
-it records the research and verification behind 0.11.7 and remaining gaps.
+it records the research behind 0.11.7, follow-up source verification, and the
+remaining gaps.
 
 See the [usage guide](docs/USAGE.md) for profiles, accounts, model capability
 filters, alerts, analytics, drift recovery, routing receipts, and every command.
@@ -207,11 +211,15 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Stable 0.11.7 refreshes the curated model catalog, cancels stalled local
-metadata requests, preserves explicit Lemonade deployment kinds and current
-context, and binds LiteLLM reservations to exact accounts. Its Python integration
-dependencies include current security fixes, and five boundary helpers gain
-enforced strict checking. See the [changelog](CHANGELOG.md) and
+Prepared 0.11.8 source keeps model requirements consistent across cloud and local advice,
+preserves unknown loaded context, and excludes unresolved or cloud-backed
+Lemonade composites from local capacity. Runtime metadata reads and LiteLLM
+metadata exchanges are bounded through their original operations. Prepared
+desktop source adds model search and explicit unknown load state. The additive
+`loaded_state_known` field is in prepared source; published stable 0.11.7 does not emit it.
+Six Python boundary modules have enforced strict checking. Stable 0.11.7 refreshed model
+and security dependencies and bound LiteLLM leases to exact accounts. See the
+[changelog](CHANGELOG.md) and
 [September 30 review](docs/research/2026-09-30-review.md) for verification scope.
 The preceding 0.11.6 corrects NVIDIA catalog evidence across collection, setup, and
 the read manifest, and expands native legacy MCP launch checks. The September

@@ -1,10 +1,12 @@
 import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/decision.dart';
 import 'package:quotabot_collector/model_catalog.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/parsing.dart';
 import 'package:quotabot_collector/plan_evidence.dart';
 import 'package:quotabot_collector/provider_ids.dart';
 import 'package:quotabot_collector/registry.dart';
+import 'package:quotabot_collector/routing_context.dart';
 import 'package:test/test.dart';
 
 const _now = kClaudeFableIncludedQuotaEffectiveAt + 86400;
@@ -970,6 +972,220 @@ void main() {
     expect(sharedTighter.gatingWindow, 'weekly');
   });
 
+  for (final provider in const [claudeProviderId, codexProviderId]) {
+    for (final sample in const [
+      (
+        name: 'equally spent scoped pool resets later',
+        sharedUsed: 100.0,
+        sharedReset: _now + 3600,
+        scopedUsed: 100.0,
+        scopedReset: _now + 86400,
+        expectedReset: _now + 86400,
+        expectedWindow: 'daily',
+      ),
+      (
+        name: 'equally spent shared pool resets later',
+        sharedUsed: 100.0,
+        sharedReset: _now + 86400,
+        scopedUsed: 100.0,
+        scopedReset: _now + 3600,
+        expectedReset: _now + 86400,
+        expectedWindow: 'weekly',
+      ),
+      (
+        name: 'shared pool at the spent floor resets later',
+        sharedUsed: 100 - kSpentHeadroomFloor,
+        sharedReset: _now + 86400,
+        scopedUsed: 100.0,
+        scopedReset: _now + 3600,
+        expectedReset: _now + 86400,
+        expectedWindow: 'weekly',
+      ),
+      (
+        name: 'scoped pool at the spent floor resets later',
+        sharedUsed: 100.0,
+        sharedReset: _now + 3600,
+        scopedUsed: 100 - kSpentHeadroomFloor,
+        scopedReset: _now + 86400,
+        expectedReset: _now + 86400,
+        expectedWindow: 'daily',
+      ),
+      (
+        name: 'spent scoped pool has an unknown reset',
+        sharedUsed: 100.0,
+        sharedReset: _now + 3600,
+        scopedUsed: 99.0,
+        scopedReset: null,
+        expectedReset: null,
+        expectedWindow: 'daily',
+      ),
+      (
+        name: 'spent shared pool has an unknown reset',
+        sharedUsed: 99.0,
+        sharedReset: null,
+        scopedUsed: 100.0,
+        scopedReset: _now + 3600,
+        expectedReset: null,
+        expectedWindow: 'weekly',
+      ),
+      (
+        name: 'healthy scoped pool does not delay a spent shared pool',
+        sharedUsed: 100.0,
+        sharedReset: _now + 3600,
+        scopedUsed: 10.0,
+        scopedReset: _now + 86400,
+        expectedReset: _now + 3600,
+        expectedWindow: 'weekly',
+      ),
+      (
+        name: 'healthy shared pool does not hide a spent scoped pool',
+        sharedUsed: 10.0,
+        sharedReset: null,
+        scopedUsed: 100.0,
+        scopedReset: _now + 3600,
+        expectedReset: _now + 3600,
+        expectedWindow: 'daily',
+      ),
+    ]) {
+      test('$provider ${sample.name} preserves the binding reset', () {
+        final model = ModelInfo(
+          id: provider == claudeProviderId ? 'claude-fable-5' : 'gpt-6',
+          displayName:
+              provider == claudeProviderId ? 'Claude Fable 5' : 'GPT-6',
+          reasoning: 'reasoning',
+          tier: 'standard',
+        );
+        final catalog = {
+          provider: [model],
+        };
+        final quota = _cloud(
+          provider,
+          sample.sharedUsed,
+          plan: 'max',
+          planEvidenceSource: ProviderPlanEvidenceSource.providerMetadata,
+          planEvidenceAsOf: _now,
+          resetsAt: sample.sharedReset,
+          modelQuotas: [
+            ModelQuota(
+              model: model.displayName!,
+              usedPercent: sample.scopedUsed,
+              resetsAt: sample.scopedReset,
+              windowLabel: 'daily',
+            ),
+          ],
+        );
+
+        final entry =
+            buildModelRegistry([quota], _now, catalog: catalog).single;
+        expect(entry.available, isFalse);
+        expect(entry.headroomPercent, 0);
+        expect(entry.resetsAt, sample.expectedReset);
+        expect(entry.gatingWindow, sample.expectedWindow);
+
+        final route = decide(
+          [quota],
+          _now,
+          context:
+              providerRouteDecisionContext([quota], _now, catalog: catalog),
+        ).route;
+        expect(route.recommended, isNull);
+        expect(route.ranked.single.resetsAt, sample.expectedReset);
+        expect(route.fallback.resetsAt, sample.expectedReset);
+        expect(
+          route.fallback.kind,
+          sample.expectedReset == null
+              ? RouteFallbackKind.passthrough
+              : RouteFallbackKind.soonestReset,
+        );
+      });
+    }
+  }
+
+  test(
+      'a later spent shared reset preserves the tighter measured model percent',
+      () {
+    final quota = _cloud(
+      codexProviderId,
+      99,
+      resetsAt: _now + 86400,
+      modelQuotas: const [
+        ModelQuota(
+          model: 'GPT-6',
+          usedPercent: 99.5,
+          resetsAt: _now + 3600,
+          windowLabel: 'daily',
+        ),
+      ],
+    );
+    final entry = buildModelRegistry(
+      [quota],
+      _now,
+      catalog: const {
+        codexProviderId: [ModelInfo(id: 'gpt-6')],
+      },
+    ).single;
+    expect(entry.available, isFalse);
+    expect(entry.headroomPercent, 0.5);
+    expect(entry.resetsAt, _now + 86400);
+    expect(entry.gatingWindow, 'weekly');
+  });
+
+  for (final nonText in const [
+    ModelInfo(
+      id: 'non-text-deployment',
+      textGeneration: false,
+      reasoning: 'reasoning',
+      tier: 'standard',
+    ),
+    ModelInfo(
+      id: 'embedding-deployment',
+      embedding: true,
+      reasoning: 'reasoning',
+      tier: 'standard',
+    ),
+  ]) {
+    test('${nonText.id} cannot satisfy a provider generation gate', () {
+      final quota = _cloud(codexProviderId, 10);
+      final catalog = {
+        codexProviderId: [nonText],
+      };
+
+      expect(buildModelRegistry([quota], _now, catalog: catalog), hasLength(1));
+      expect(suggestModel([quota], _now, catalog: catalog).recommended, isNull);
+      final route = decide(
+        [quota],
+        _now,
+        context: providerRouteDecisionContext([quota], _now, catalog: catalog),
+      ).route;
+      expect(route.recommended, isNull);
+      expect(route.ranked.single.capabilityLimited, isTrue);
+      expect(route.fallback.kind, RouteFallbackKind.passthrough);
+
+      final withTextSibling = {
+        codexProviderId: [
+          nonText,
+          const ModelInfo(
+            id: 'text-deployment',
+            textGeneration: true,
+            reasoning: 'reasoning',
+            tier: 'standard',
+          ),
+        ],
+      };
+      final siblingRoute = decide(
+        [quota],
+        _now,
+        context: providerRouteDecisionContext(
+          [quota],
+          _now,
+          catalog: withTextSibling,
+        ),
+      ).route;
+      expect(siblingRoute.recommended?.provider, codexProviderId);
+      expect(siblingRoute.ranked.single.capabilityLimited, isFalse);
+    });
+  }
+
   test('Claude Fable reset never synthesizes full scoped headroom', () {
     const catalog = {
       claudeProviderId: [
@@ -1447,6 +1663,79 @@ void main() {
     expect(reg.map((e) => e.model.id).toList(), ['a-loaded', 'z-cold']);
     expect(reg.first.toJson()['local_readiness'], 'loaded');
     expect(reg.last.toJson()['local_readiness'], 'cold');
+  });
+
+  test('unknown load state preserves inventory without context or fit claims',
+      () {
+    const gib = 1024 * 1024 * 1024;
+    final quota = _local(
+      'ollama',
+      const [
+        ModelInfo(
+          id: 'inventory-only',
+          local: true,
+          loadedStateKnown: false,
+          contextTokens: 131072,
+          sizeBytes: 4 * gib,
+        ),
+      ],
+      hardware: const LocalHardwareInfo(
+        asOf: _now,
+        systemMemoryTotalBytes: 16 * gib,
+        systemMemoryAvailableBytes: 12 * gib,
+      ),
+    );
+    final entry = buildModelRegistry([quota], _now).single;
+    expect(entry.available, isTrue);
+    expect(entry.model.contextTokens, 131072,
+        reason: 'declared context remains inspectable');
+    expect(entry.localReadiness, isNull);
+    expect(entry.toJson(), isNot(contains('local_readiness')));
+    expect(entry.hardwareFit!.status, LocalHardwareFitStatus.unknown);
+    expect(entry.hardwareFit!.basis, 'load_state_unreported');
+    expect(entry.hardwareFit!.estimatedMemoryBytes, isNull);
+
+    final suggestion = suggestModel([quota], _now);
+    expect(suggestion.recommended?.model.id, 'inventory-only');
+    expect(suggestion.reason, contains('load state is unknown'));
+    expect(suggestion.reason, contains('running context unverified'));
+    expect(suggestion.reason, contains('runtime load state is unavailable'));
+    expect(suggestion.reason, isNot(contains('cold start')));
+    const requirements = ModelRequirements(minContextTokens: 65536);
+    expect(
+        buildModelRegistry([quota], _now, requirements: requirements), isEmpty);
+    expect(suggestModel([quota], _now, requirements: requirements).recommended,
+        isNull);
+  });
+
+  test('known cold capacity and observed running context retain their gates',
+      () {
+    final quota = _local('ollama', const [
+      ModelInfo(id: 'known-cold', contextTokens: 131072),
+      ModelInfo(
+        id: 'known-loaded',
+        local: true,
+        loaded: true,
+        contextTokens: 8192,
+      ),
+    ]);
+    final matching = buildModelRegistry(
+      [quota],
+      _now,
+      requirements: const ModelRequirements(minContextTokens: 65536),
+    );
+    expect(matching.map((entry) => entry.model.id), ['known-cold']);
+    expect(matching.single.localReadiness, 'cold');
+    expect(matching.single.toJson()['local'], isTrue);
+    expect(matching.single.toJson()['loaded_state_known'], isTrue,
+        reason: 'provider-kind local entries preserve trusted load evidence');
+    final suggestion = suggestModel(
+      [quota],
+      _now,
+      requirements: const ModelRequirements(minContextTokens: 65536),
+    );
+    expect(suggestion.recommended?.model.id, 'known-cold');
+    expect(suggestion.reason, contains('128K max context'));
   });
 
   test('cold local models sort by passive hardware fit', () {

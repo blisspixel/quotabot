@@ -527,12 +527,17 @@ on clean desktop sessions.
 Before cutting a public tag, verify the release exactly the way an installer and
 maintainer will consume it:
 
-1. Align every public version marker, including the collector package, CLI and
-   MCP constants, desktop package and lockfile, changelog, roadmap, README,
-   agent guidance, documentation index, and setup guide. Run
+1. Align source version markers, including the collector package, CLI and MCP
+   constants, desktop package and lockfile, and dated changelog section. Keep
+   the six published stable markers at the actual published release during
+   preparation. Declare exactly one `> **Pending publication:** X.Y.Z.` line
+   in README, matching the newer stable source version. Keep any pending notice
+   outside the dated changelog section so generated release notes describe the
+   published artifact. Run
    `python tools/check_release_version.py --tag vX.Y.Z`; it must confirm the
    intended tag and one consistent version. The release workflow enforces the
-   same exact tag-to-source check before creating a draft.
+   same exact tag-to-source check before creating the attested handoff. Without
+   the pending marker, stable source and published markers must agree.
 2. Build the current platform's archive with `tools\package-cli.ps1` on Windows
    or `tools/package-cli.sh` on macOS/Linux.
 3. Confirm the `.sha256` sidecar contains a 64 character SHA-256 hash and the
@@ -580,9 +585,11 @@ maintainer will consume it:
    --directory .agent/publish-vX.Y.Z`, choosing an empty download directory.
    The helper checks the successful workflow attempt, protected main and tag,
    attested handoff, all seven archive contracts and their provenance, and the
-   exact fourteen-file inventory. It creates an owner-authored draft, uploads
-   through that same login, freshly downloads and verifies every draft asset,
-   then checks the unchanged draft and publishes it immutably. No owner token
+   exact fourteen-file inventory. It validates the owner-authored draft directly
+   from the creation response and uploads through the same login using that
+   release ID, without a second listing or tag lookup. It freshly downloads and
+   verifies every draft asset, then checks the unchanged draft and publishes it
+   immutably. No owner token
    belongs in CI. A failed attempt can resume the matching owner draft using a
    new empty handoff directory; published assets are never replaced.
    Confirm that every CLI archive contains `lib/install.ps1` and
@@ -622,6 +629,14 @@ maintainer will consume it:
     macOS, and Linux.
 14. Confirm GitHub security signals are clear: CI, CodeQL, secret scanning,
     Dependabot alerts, and the dependency-review PR gate.
+
+After immutable publication and passing published Install smoke, advance the
+six published stable markers together: README, SECURITY, AGENTS, ROADMAP,
+`docs/README.md`, and `docs/SETUP.md`. Remove README's pending marker and
+pending-validation block, remove the changelog's pending notice, and promote
+prepared-source prose only where the release evidence proves it. Preserve the
+tag and its source commit. Verify version consistency and integrate this
+documentation update through the ordinary protected pull-request gates.
 
 Use the preserved published stable release as the actual prior-version fixture.
 Verify its archive against its original tag and source digest. Historical

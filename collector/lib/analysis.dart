@@ -367,7 +367,7 @@ bool isLocalRuntimeAvailableAt(ProviderQuota quota, int now) =>
     isLocalRuntimeReachableAt(quota, now) &&
     !quota.requestAdmission.blocksRequests &&
     quota.error == null &&
-    quota.localGenerationReadiness != null;
+    quota.hasEligibleLocalGenerationModel;
 
 /// Whether any provider can take work right now: a running local runtime, or a
 /// metered subscription with headroom left. Lets a shell or agent branch on "is
@@ -637,9 +637,9 @@ class RouteCandidate {
   /// Shared or capability-scoped admission for the requested route.
   final RequestAdmission requestAdmission;
 
-  /// Local-runtime readiness used by quota-stretch routing. Null for cloud
-  /// candidates, `loaded` when at least one on-device model is resident, and
-  /// `cold` when the runtime can load an on-device model on demand.
+  /// Observed local-runtime readiness used by quota-stretch routing. Null for
+  /// cloud candidates or unknown load state, `loaded` when an eligible model
+  /// is resident, and `cold` when all eligible models are observed unloaded.
   final String? localReadiness;
 
   const RouteCandidate({
@@ -1584,12 +1584,14 @@ RouteCandidate? preferredViableCandidate(
   required Set<String>? availableQuotaKeys,
   required Map<String, int> budgetResetByQuotaKey,
   required int? availabilityResetsAt,
+  bool gateLocalCapabilities = false,
 }) {
   // Either set alone still defines the gate; fall back to the other when one is
   // absent so a caller may supply only "known" or only "available".
   final known = knownQuotaKeys ?? availableQuotaKeys;
   final available = availableQuotaKeys ?? knownQuotaKeys;
-  final hasGate = !q.isLocal && (known != null || available != null);
+  final hasGate = (!q.isLocal || gateLocalCapabilities) &&
+      (known != null || available != null);
   final limited = hasGate && !(known?.contains(quotaKey) ?? false);
   final budgetLimited =
       hasGate && !limited && !(available?.contains(quotaKey) ?? false);
@@ -1628,6 +1630,8 @@ RouteSuggestion suggestRoute(
   Map<String, int> capabilityBudgetResetByQuotaKey = const {},
   Map<String, double> capabilityHeadroomByQuotaKey = const {},
   Map<String, RequestAdmission> capabilityRequestAdmissionByQuotaKey = const {},
+  bool gateLocalCapabilities = false,
+  Map<String, String> capabilityLocalReadinessByQuotaKey = const {},
   List<String> preferenceOrder = const [],
   String snapshotSource = 'live',
   int? snapshotAsOf,
@@ -1668,6 +1672,7 @@ RouteSuggestion suggestRoute(
       availableQuotaKeys: capabilityAvailableQuotaKeys,
       budgetResetByQuotaKey: capabilityBudgetResetByQuotaKey,
       availabilityResetsAt: a.resetsAt,
+      gateLocalCapabilities: gateLocalCapabilities,
     );
     final capabilityLimited = cap.limited;
     final capabilityBudgetLimited = cap.budgetLimited;
@@ -1804,10 +1809,12 @@ RouteSuggestion suggestRoute(
       driftReason: q.driftReason,
       driftObservedAt: q.driftObservedAt,
       available: q.isLocal
-          ? isLocalRuntimeAvailableAt(q, now)
+          ? isLocalRuntimeAvailableAt(q, now) && !capabilityBlocked
           : routeAvailable && !capabilityBlocked && !admission.blocksRequests,
       requestAdmission: admission,
-      localReadiness: q.localGenerationReadiness,
+      localReadiness: q.isLocal && gateLocalCapabilities
+          ? capabilityLocalReadinessByQuotaKey[quotaKey]
+          : q.localGenerationReadiness,
       leaseDiscount: leaseDiscount,
       pipeDiscount: pipeDiscount,
       capabilityLimited: capabilityLimited,
@@ -1835,8 +1842,12 @@ RouteSuggestion suggestRoute(
   // live 80%, while letting a slow-burn provider beat a fast-draining one.
   final subs = usable.where((c) => !c.isLocal).toList()
     ..sort(_compareSubscriptionCandidates);
-  final locals = usable.where((c) => c.isLocal).toList();
-  final policyLocals = useQuotaStretch
+  final localCandidates = usable.where((c) => c.isLocal).toList();
+  final locals = [
+    ...localCandidates.where((candidate) => candidate.available),
+    ...localCandidates.where((candidate) => !candidate.available),
+  ];
+  final orderedLocals = useQuotaStretch
       ? (List<RouteCandidate>.of(locals)
         ..sort((a, b) {
           final readiness = (a.localReadiness == 'loaded' ? 0 : 1)
@@ -1846,11 +1857,13 @@ RouteSuggestion suggestRoute(
           return provider != 0 ? provider : a.account.compareTo(b.account);
         }))
       : locals;
+  final policyLocals =
+      orderedLocals.where((candidate) => candidate.available).toList();
 
   // Ranked view: normal mode leads with subscriptions. Local-first mode is an
   // explicit cost-safety request, so locals lead when present.
   final ranked =
-      preferLocal ? [...locals, ...subs] : [...subs, ...policyLocals];
+      preferLocal ? [...locals, ...subs] : [...subs, ...orderedLocals];
 
   // The fail-soft fallback is always present, so a caller that skips the pick
   // (or gets a null recommendation) still has an actionable next step. The
@@ -2038,7 +2051,7 @@ RouteSuggestion suggestRoute(
     );
   }
 
-  final admissionBlocked = routingSubs
+  final admissionBlocked = [...routingSubs, ...locals]
       .where((candidate) =>
           !candidate.stale &&
           candidate.driftReason == null &&
@@ -2048,13 +2061,16 @@ RouteSuggestion suggestRoute(
   if (admissionBlocked.isNotEmpty) {
     return result(
       null,
-      'Measured quota remains visible, but request admission is denied or '
-      'unresolved for the remaining routes. Check the provider before retrying.',
+      admissionBlocked.any((candidate) => candidate.isLocal)
+          ? 'The models that meet the requested capability profile have denied '
+              'or unresolved request admission. Check the provider before retrying.'
+          : 'Measured quota remains visible, but request admission is denied or '
+              'unresolved for the remaining routes. Check the provider before retrying.',
       decisionCode: RouteDecisionCode.requestBlocked,
     );
   }
 
-  final capabilityBlocked = routingSubs
+  final capabilityBlocked = [...routingSubs, ...locals]
       .where((c) =>
           (c.capabilityLimited || c.capabilityBudgetLimited) &&
           (c.headroom ?? 0) > kSpentHeadroomFloor)
@@ -2063,9 +2079,13 @@ RouteSuggestion suggestRoute(
     final hasKnown = capabilityBlocked.any((c) => c.capabilityBudgetLimited);
     return result(
       null,
-      hasKnown
-          ? 'Providers have quota, but no default-capable model has budget right now; use quotabot models or wait for the model gate to reset.'
-          : 'Providers have quota, but none has a catalog model that meets the default capability floor; use quotabot models or pass an explicit task profile.',
+      capabilityBlocked.any((candidate) => candidate.isLocal)
+          ? 'No provider has an available generation model that meets the '
+              'requested capability profile; inspect quotabot models or adjust '
+              'the requirements.'
+          : hasKnown
+              ? 'Providers have quota, but no default-capable model has budget right now; use quotabot models or wait for the model gate to reset.'
+              : 'Providers have quota, but none has a catalog model that meets the default capability floor; use quotabot models or pass an explicit task profile.',
       decisionCode: hasKnown
           ? RouteDecisionCode.capabilityBudgetBlocked
           : RouteDecisionCode.capabilityBlocked,

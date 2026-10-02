@@ -39,7 +39,7 @@ import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.11.7';
+const quotabotMcpVersion = '0.11.8';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
@@ -1122,6 +1122,10 @@ final _modelEntrySchema = JsonSchema.object(
     'available': JsonSchema.boolean(),
     'stale': JsonSchema.boolean(),
     'quota_backed': JsonSchema.boolean(),
+    'loaded_state_known': JsonSchema.boolean(
+      description: 'For local-runtime models, whether load state was observed. '
+          'False omits local_readiness and cannot satisfy a context floor.',
+    ),
     'local_readiness': JsonSchema.string(
       description: 'For local-runtime models: loaded or cold.',
     ),
@@ -1132,12 +1136,14 @@ final _modelEntrySchema = JsonSchema.object(
     ),
     'hardware_fit_basis': JsonSchema.string(
       description: 'Evidence pool used for local hardware fit: '
-          'runtime_loaded, system_memory, gpu_memory, or insufficient_evidence.',
+          'runtime_loaded, system_memory, gpu_memory, insufficient_evidence, '
+          'or load_state_unreported.',
       enumValues: const [
         'runtime_loaded',
         'system_memory',
         'gpu_memory',
         'insufficient_evidence',
+        'load_state_unreported',
       ],
     ),
     'estimated_memory_bytes': JsonSchema.integer(

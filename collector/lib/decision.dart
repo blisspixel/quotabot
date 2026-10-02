@@ -44,6 +44,13 @@ class DecisionContext {
   final Map<String, int> capabilityBudgetResetByQuotaKey;
   final Map<String, double> capabilityHeadroomByQuotaKey;
   final Map<String, RequestAdmission> capabilityRequestAdmissionByQuotaKey;
+
+  /// Apply an explicit model profile to local routes as well as subscriptions.
+  /// The default provider floor leaves legacy local fallback unchanged.
+  final bool gateLocalCapabilities;
+
+  /// Readiness of only the local models that satisfy that explicit profile.
+  final Map<String, String> capabilityLocalReadinessByQuotaKey;
   final String snapshotSource;
   final int? snapshotAsOf;
   final bool? snapshotStale;
@@ -73,6 +80,8 @@ class DecisionContext {
     this.capabilityBudgetResetByQuotaKey = const {},
     this.capabilityHeadroomByQuotaKey = const {},
     this.capabilityRequestAdmissionByQuotaKey = const {},
+    this.gateLocalCapabilities = false,
+    this.capabilityLocalReadinessByQuotaKey = const {},
     this.preferenceOrder = const [],
     this.snapshotSource = 'live',
     this.snapshotAsOf,
@@ -155,6 +164,9 @@ Decision decide(
         capabilityHeadroomByQuotaKey: context.capabilityHeadroomByQuotaKey,
         capabilityRequestAdmissionByQuotaKey:
             context.capabilityRequestAdmissionByQuotaKey,
+        gateLocalCapabilities: context.gateLocalCapabilities,
+        capabilityLocalReadinessByQuotaKey:
+            context.capabilityLocalReadinessByQuotaKey,
         preferenceOrder: context.preferenceOrder,
         snapshotSource: context.snapshotSource,
         snapshotAsOf: context.snapshotAsOf,

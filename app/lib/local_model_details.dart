@@ -84,17 +84,43 @@ class LocalModelDetailsDialog extends StatefulWidget {
 
 class _LocalModelDetailsDialogState extends State<LocalModelDetailsDialog> {
   final _scroll = ScrollController();
+  final _search = TextEditingController();
+  final _searchFocus = FocusNode(debugLabel: 'Find model');
   late final _entries = buildModelRegistry([widget.quota], widget.now);
+  String _query = '';
+
+  void _filter(String value) {
+    setState(() => _query = value.trim().toLowerCase());
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+  }
+
+  void _clearSearch() {
+    _search.clear();
+    _filter('');
+    _searchFocus.requestFocus();
+  }
 
   @override
   void dispose() {
     _scroll.dispose();
+    _search.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final chrome = AppChromeTheme.of(context);
+    final visible = _query.isEmpty
+        ? _entries
+        : _entries
+              .where((entry) {
+                final model = entry.model;
+                return model.id.toLowerCase().contains(_query) ||
+                    (model.displayName?.toLowerCase().contains(_query) ??
+                        false);
+              })
+              .toList(growable: false);
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
       constraints: const BoxConstraints(maxWidth: 560),
@@ -104,72 +130,156 @@ class _LocalModelDetailsDialogState extends State<LocalModelDetailsDialog> {
         height: 640,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 14, 12, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Semantics(
-                header: true,
-                child: Text(
-                  '${widget.quota.displayName} models',
-                  style: TextStyle(
-                    fontSize: AppType.title,
-                    fontWeight: FontWeight.w700,
-                    color: chrome.foreground,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${_entries.length} reported. '
-                '${_captureLabel(widget.quota.asOf, widget.now)}.',
-                style: TextStyle(
-                  fontSize: AppType.caption,
-                  color: chrome.muted,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: Scrollbar(
-                  controller: _scroll,
-                  thumbVisibility: true,
-                  child: ListView.builder(
-                    key: const ValueKey('local-model-details-list'),
-                    controller: _scroll,
-                    padding: const EdgeInsets.only(right: 8),
-                    itemCount: _entries.length + 1,
-                    itemBuilder: (context, index) => index == 0
-                        ? _inventorySummary(chrome)
-                        : _ModelDetail(
-                            entry: _entries[index - 1],
-                            chrome: chrome,
-                            inventoryCurrent:
-                                isLocalRuntimeReachableAt(
-                                  widget.quota,
-                                  widget.now,
-                                ) &&
-                                widget.quota.error == null &&
-                                widget.quota.driftReason == null,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // In short windows, let the heading scroll with the inventory so
+              // search and Close remain reachable at larger text sizes.
+              final headingInList = constraints.maxHeight < 400;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (!headingInList) _heading(chrome),
+                  if (_entries.isNotEmpty) ...[
+                    TextField(
+                      key: const ValueKey('local-model-search'),
+                      controller: _search,
+                      focusNode: _searchFocus,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      enableIMEPersonalizedLearning: false,
+                      onChanged: _filter,
+                      style: TextStyle(
+                        fontSize: AppType.body,
+                        color: chrome.foreground,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: 'Find model',
+                        hintText: 'Name or ID',
+                        labelStyle: TextStyle(color: chrome.muted),
+                        hintStyle: TextStyle(color: chrome.muted),
+                        isDense: true,
+                        filled: true,
+                        fillColor: chrome.card,
+                        prefixIcon: Icon(
+                          Icons.search_rounded,
+                          size: 18,
+                          color: chrome.muted,
+                        ),
+                        suffixIcon: _search.text.isEmpty
+                            ? null
+                            : IconButton(
+                                tooltip: 'Clear search',
+                                onPressed: _clearSearch,
+                                icon: const Icon(Icons.close_rounded, size: 18),
+                                color: chrome.foreground,
+                              ),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: chrome.tileBorder),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(
+                            color: chrome.accent,
+                            width: 2,
                           ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                    if (_query.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Semantics(
+                        liveRegion: true,
+                        child: Text(
+                          '${visible.length} of ${_entries.length} models',
+                          style: TextStyle(
+                            fontSize: AppType.caption,
+                            color: chrome.muted,
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                  ],
+                  Expanded(
+                    child: Scrollbar(
+                      controller: _scroll,
+                      thumbVisibility: true,
+                      child: ListView.builder(
+                        key: const ValueKey('local-model-details-list'),
+                        controller: _scroll,
+                        padding: const EdgeInsets.only(right: 8),
+                        itemCount: visible.length + 1,
+                        itemBuilder: (context, index) => index == 0
+                            ? _inventorySummary(
+                                chrome,
+                                noMatches:
+                                    visible.isEmpty && _entries.isNotEmpty,
+                                headingInList: headingInList,
+                              )
+                            : _ModelDetail(
+                                entry: visible[index - 1],
+                                chrome: chrome,
+                                inventoryCurrent:
+                                    isLocalRuntimeReachableAt(
+                                      widget.quota,
+                                      widget.now,
+                                    ) &&
+                                    widget.quota.error == null &&
+                                    widget.quota.driftReason == null,
+                              ),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  style: TextButton.styleFrom(foregroundColor: chrome.accent),
-                  child: const Text('Close'),
-                ),
-              ),
-            ],
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: TextButton.styleFrom(
+                        foregroundColor: chrome.accent,
+                      ),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
     );
   }
 
-  Widget _inventorySummary(AppChromeTheme chrome) {
+  Widget _heading(AppChromeTheme chrome) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Semantics(
+        header: true,
+        child: Text(
+          '${widget.quota.displayName} models',
+          style: TextStyle(
+            fontSize: AppType.title,
+            fontWeight: FontWeight.w700,
+            color: chrome.foreground,
+          ),
+        ),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        '${_entries.length} reported. '
+        '${_captureLabel(widget.quota.asOf, widget.now)}.',
+        style: TextStyle(fontSize: AppType.caption, color: chrome.muted),
+      ),
+      const SizedBox(height: 12),
+    ],
+  );
+
+  Widget _inventorySummary(
+    AppChromeTheme chrome, {
+    required bool noMatches,
+    required bool headingInList,
+  }) {
     final hardware = widget.quota.localHardware;
     final ramTotal = hardware?.systemMemoryTotalBytes;
     final gpuName = hardware?.gpuName;
@@ -188,6 +298,17 @@ class _LocalModelDetailsDialogState extends State<LocalModelDetailsDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (noMatches) ...[
+            Text(
+              'No matching models. Try another name or clear the search.',
+              style: TextStyle(
+                fontSize: AppType.body,
+                color: chrome.foreground,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (headingInList) _heading(chrome),
           Text(
             'Listed models may run on another device. '
             'Context may be a configured or maximum limit.',
@@ -265,7 +386,9 @@ class _ModelDetail extends StatelessWidget {
     // current metadata observation or prove that its runtime is unreachable.
     final lastObserved = !inventoryCurrent;
     final upstream = model.upstreamRouting;
-    final residency = upstream != UpstreamRouting.notReported
+    final residency = !model.loadedStateKnown
+        ? 'Load state unknown'
+        : upstream != UpstreamRouting.notReported
         ? model.loaded
               ? 'Runtime reports loaded'
               : 'No runtime residency reported'
@@ -384,6 +507,9 @@ String _fitLabel(ModelEntry entry, {required bool lastObserved}) {
   }
   final fit = entry.hardwareFit;
   final prefix = lastObserved ? 'Last observed advisory fit' : 'Advisory fit';
+  if (!entry.model.loadedStateKnown) {
+    return '$prefix: unknown. Runtime load state could not be verified.';
+  }
   if (fit == null || fit.status == LocalHardwareFitStatus.unknown) {
     return '$prefix: unknown. Model size or host memory evidence is incomplete.';
   }

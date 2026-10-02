@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
@@ -9,7 +8,14 @@ import '../local_runtime_config.dart';
 import '../models.dart';
 import '../provider_ids.dart';
 import '../util.dart';
+import 'local_runtime_inventory.dart';
 import 'ollama.dart' show LocalModel, localRuntimeQuota;
+
+typedef LmStudioModelInventory = ({
+  List<LocalModel> installed,
+  List<LocalModel> loaded,
+  Set<String> unknownLoadModelNames,
+});
 
 /// Detects a local LM Studio server and reports installed and loaded models,
 /// the same way the Ollama adapter does (no quota; a local runtime has nothing
@@ -42,6 +48,8 @@ class LmStudioAdapter {
   Future<http.Response> _get(String path) => sendMetadataRequest(
         _http ?? sharedHttpClient,
         Uri.parse('${baseUrl(environment: _environment)}$path'),
+        followRedirects: false,
+        maxResponseBytes: localRuntimeMetadataMaxResponseBytes,
         timeout: const Duration(seconds: 2),
       ).timeout(const Duration(seconds: 2));
 
@@ -50,8 +58,10 @@ class LmStudioAdapter {
     if (!isLoopbackRuntimeHost(_environment['LMSTUDIO_HOST'])) {
       return _nonLoopback(asOf);
     }
+    final diagnostics = LocalRuntimeInventoryDiagnostics();
     try {
-      final native = await _v1Models() ?? await _nativeModels();
+      final native =
+          await _v1Models(diagnostics) ?? await _nativeModels(diagnostics);
       if (native != null) {
         return localRuntimeQuota(
           id: id,
@@ -59,56 +69,43 @@ class LmStudioAdapter {
           asOf: asOf,
           installed: native.installed,
           loaded: native.loaded,
+          unknownLoadModelNames: native.unknownLoadModelNames,
         );
       }
       // Fallback: OpenAI-compatible listing has no load state.
-      final compat = await _compatModels();
-      if (compat == null) return _notRunning(asOf);
+      final compat = await _compatModels(diagnostics);
+      if (compat == null) return _unavailable(asOf, diagnostics);
       return localRuntimeQuota(
         id: id,
         name: name,
         asOf: asOf,
         installed: compat,
         loaded: const [],
+        loadedInventoryComplete: false,
       );
     } catch (_) {
-      return _notRunning(asOf);
+      return _unavailable(asOf, diagnostics);
     }
   }
 
-  Future<({List<LocalModel> installed, List<LocalModel> loaded})?>
-      _v1Models() async {
-    try {
-      final resp = await _get('/api/v1/models');
-      if (resp.statusCode != 200) return null;
-      return lmStudioV1FromJson(jsonDecode(resp.body));
-    } catch (_) {
-      return null;
-    }
-  }
+  Future<LmStudioModelInventory?> _v1Models(
+          LocalRuntimeInventoryDiagnostics diagnostics) =>
+      diagnostics.read(() => _get('/api/v1/models'), lmStudioV1FromJson);
 
-  Future<({List<LocalModel> installed, List<LocalModel> loaded})?>
-      _nativeModels() async {
-    try {
-      final resp = await _get('/api/v0/models');
-      if (resp.statusCode != 200) return null;
-      return lmStudioNativeFromJson(jsonDecode(resp.body));
-    } catch (_) {
-      return null;
-    }
-  }
+  Future<LmStudioModelInventory?> _nativeModels(
+          LocalRuntimeInventoryDiagnostics diagnostics) =>
+      diagnostics.read(() => _get('/api/v0/models'), lmStudioNativeFromJson);
 
-  Future<List<LocalModel>?> _compatModels() async {
-    try {
-      final resp = await _get('/v1/models');
-      if (resp.statusCode != 200) return null;
-      return lmStudioCompatFromJson(jsonDecode(resp.body));
-    } catch (_) {
-      return null;
-    }
-  }
+  Future<List<LocalModel>?> _compatModels(
+    LocalRuntimeInventoryDiagnostics diagnostics,
+  ) =>
+      diagnostics.read(() => _get('/v1/models'), lmStudioCompatFromJson);
 
-  ProviderQuota _notRunning(int asOf) => ProviderQuota(
+  ProviderQuota _unavailable(
+    int asOf,
+    LocalRuntimeInventoryDiagnostics diagnostics,
+  ) =>
+      ProviderQuota(
         provider: id,
         displayName: name,
         account: 'local',
@@ -116,7 +113,8 @@ class LmStudioAdapter {
         kind: ProviderQuotaKind.local,
         asOf: asOf,
         ok: false,
-        error: 'not running',
+        error: diagnostics.error,
+        httpStatus: diagnostics.httpStatus,
       );
 
   ProviderQuota _nonLoopback(int asOf) => ProviderQuota(
@@ -134,40 +132,24 @@ class LmStudioAdapter {
 
 /// Parses LM Studio's current native `/api/v1/models` body (0.4.0+) into
 /// installed/loaded model lists, or null when the shape is unexpected. Loaded
-/// models carry one or more `loaded_instances`; the running context length comes
-/// from the loaded instance's config, otherwise the model's max. Unlike v0, v1
+/// models carry one or more `loaded_instances`; each running context comes only
+/// from that instance's config. The installed inventory retains the model's
+/// maximum separately. Unlike v0, v1
 /// exposes a real parameter size (`params_string`) and object-shaped
 /// quantization. Pure for testing; reads metadata only.
-({List<LocalModel> installed, List<LocalModel> loaded})? lmStudioV1FromJson(
+LmStudioModelInventory? lmStudioV1FromJson(
   dynamic data,
 ) {
   final list = data is Map ? data['models'] : null;
   if (list is! List) return null;
   final installed = <LocalModel>[];
   final loaded = <LocalModel>[];
+  final unknownLoadModelNames = <String>{};
   for (final m in list) {
     if (m is! Map || m['key'] is! String) continue;
     final key = (m['key'] as String).trim();
     if (key.isEmpty) continue;
     final instances = m['loaded_instances'];
-    Map<dynamic, dynamic>? firstInstance;
-    if (instances is List) {
-      for (final instance in instances) {
-        if (instance is Map) {
-          firstInstance = instance;
-          break;
-        }
-      }
-    }
-    final isLoaded = firstInstance != null;
-    final loadedConfig = firstInstance?['config'];
-    final loadedContext = loadedConfig is Map
-        ? boundedIntFromWire(
-            loadedConfig['context_length'],
-            min: 1,
-            max: 100000000,
-          )
-        : null;
     final quant = m['quantization'];
     // v1 states capabilities as an object of flags. It carries only the ones it
     // asserts, so a missing flag leaves the capability undeclared rather than
@@ -179,49 +161,79 @@ class LmStudioAdapter {
     // from the capability flags above rather than from the type.
     final type =
         m['type'] is String ? (m['type'] as String).trim().toLowerCase() : null;
-    final model = (
-      name: key,
-      bytes: boundedIntFromWire(m['size_bytes'], min: 0),
-      param: m['params_string'] is String ? m['params_string'] as String : null,
-      quant: quant is Map && quant['name'] is String
-          ? quant['name'] as String
-          : null,
-      vramBytes: null,
-      expiresAt: null,
-      context: loadedContext ??
-          boundedIntFromWire(
-            m['max_context_length'],
-            min: 1,
-            max: 100000000,
-          ),
-      cloud: false,
-      upstreamRouting: UpstreamRouting.notReported,
-      tools: _flag(declared?['trained_for_tool_use']),
-      vision: _flag(declared?['vision']),
-      // LM Link can serve localhost requests on another device. The current
-      // model-list contract has no execution-location evidence, so do not
-      // broaden local reasoning routing from its reasoning configuration yet.
-      reasoning: null,
-      embedding: _declaredEmbedding(type),
-      textGeneration: null,
-      digest: null,
-    );
-    installed.add(model);
-    if (isLoaded) loaded.add(model);
+    LocalModel modelWithContext(int? context) => (
+          name: key,
+          bytes: boundedIntFromWire(m['size_bytes'], min: 0),
+          param: m['params_string'] is String
+              ? m['params_string'] as String
+              : null,
+          quant: quant is Map && quant['name'] is String
+              ? quant['name'] as String
+              : null,
+          vramBytes: null,
+          expiresAt: null,
+          context: context,
+          cloud: false,
+          upstreamRouting: UpstreamRouting.notReported,
+          tools: _flag(declared?['trained_for_tool_use']),
+          vision: _flag(declared?['vision']),
+          // LM Link can serve localhost requests on another device. The current
+          // model-list contract has no execution-location evidence, so do not
+          // broaden local reasoning routing from its reasoning configuration yet.
+          reasoning: null,
+          embedding: _declaredEmbedding(type),
+          textGeneration: null,
+          digest: null,
+        );
+    installed.add(modelWithContext(boundedIntFromWire(
+      m['max_context_length'],
+      min: 1,
+      max: 100000000,
+    )));
+    if (instances is List) {
+      for (final instance in instances) {
+        if (instance is! Map) {
+          unknownLoadModelNames.add(key);
+          continue;
+        }
+        // The required instance identity proves this is a loaded-instance row.
+        // Validate it without retaining or exposing the identifier.
+        final instanceId = instance['id'];
+        if (instanceId is! String ||
+            instanceId.trim().isEmpty ||
+            instanceId.length > 512 ||
+            _invalidInstanceIdCharacters.hasMatch(instanceId)) {
+          unknownLoadModelNames.add(key);
+          continue;
+        }
+        final config = instance['config'];
+        loaded.add(modelWithContext(config is Map
+            ? boundedIntFromWire(config['context_length'],
+                min: 1, max: 100000000)
+            : null));
+      }
+    } else {
+      unknownLoadModelNames.add(key);
+    }
   }
-  return (installed: installed, loaded: loaded);
+  return (
+    installed: installed,
+    loaded: loaded,
+    unknownLoadModelNames: unknownLoadModelNames
+  );
 }
 
 /// Parses LM Studio's native `/api/v0/models` body into installed/loaded model
 /// lists (loaded = those whose `state` is "loaded"), or null when the shape is
 /// unexpected. Pure for testing.
-({List<LocalModel> installed, List<LocalModel> loaded})? lmStudioNativeFromJson(
+LmStudioModelInventory? lmStudioNativeFromJson(
   dynamic data,
 ) {
   final list = data is Map ? data['data'] : null;
   if (list is! List) return null;
   final installed = <LocalModel>[];
   final loaded = <LocalModel>[];
+  final unknownLoadModelNames = <String>{};
   for (final m in list) {
     if (m is! Map || m['id'] is! String) continue;
     final id = (m['id'] as String).trim();
@@ -239,43 +251,51 @@ class LmStudioAdapter {
         : null;
     final type =
         m['type'] is String ? (m['type'] as String).trim().toLowerCase() : null;
-    final model = (
-      name: id,
-      bytes: null,
-      // LM Studio's v0 model shape carries `arch` (architecture, e.g. "llama"),
-      // not a parameter size, and no parameter-count field. Leave param null
-      // rather than mislabel the architecture as the model's size.
-      param: null,
-      quant: m['quantization'] is String ? m['quantization'] as String : null,
-      vramBytes: null,
-      expiresAt: null,
-      context: boundedIntFromWire(
-            m['loaded_context_length'],
-            min: 1,
-            max: 100000000,
-          ) ??
-          boundedIntFromWire(
-            m['max_context_length'],
-            min: 1,
-            max: 100000000,
-          ),
-      cloud: false,
-      upstreamRouting: UpstreamRouting.notReported,
-      tools: declared?.contains('tool_use'),
-      vision: switch (type) {
-        'vlm' => true,
-        'llm' || 'embedding' || 'embeddings' => false,
-        _ => null,
-      },
-      reasoning: null,
-      embedding: _declaredEmbedding(type),
-      textGeneration: null,
-      digest: null,
-    );
-    installed.add(model);
-    if (m['state'] == 'loaded') loaded.add(model);
+    LocalModel modelWithContext(int? context) => (
+          name: id,
+          bytes: null,
+          // LM Studio's v0 model shape carries `arch` (architecture, e.g. "llama"),
+          // not a parameter size, and no parameter-count field. Leave param null
+          // rather than mislabel the architecture as the model's size.
+          param: null,
+          quant:
+              m['quantization'] is String ? m['quantization'] as String : null,
+          vramBytes: null,
+          expiresAt: null,
+          context: context,
+          cloud: false,
+          upstreamRouting: UpstreamRouting.notReported,
+          tools: declared?.contains('tool_use'),
+          vision: switch (type) {
+            'vlm' => true,
+            'llm' || 'embedding' || 'embeddings' => false,
+            _ => null,
+          },
+          reasoning: null,
+          embedding: _declaredEmbedding(type),
+          textGeneration: null,
+          digest: null,
+        );
+    installed.add(modelWithContext(boundedIntFromWire(
+      m['max_context_length'],
+      min: 1,
+      max: 100000000,
+    )));
+    if (m['state'] == 'loaded') {
+      loaded.add(modelWithContext(boundedIntFromWire(
+        m['loaded_context_length'],
+        min: 1,
+        max: 100000000,
+      )));
+    } else if (m['state'] != 'not-loaded') {
+      unknownLoadModelNames.add(id);
+    }
   }
-  return (installed: installed, loaded: loaded);
+  return (
+    installed: installed,
+    loaded: loaded,
+    unknownLoadModelNames: unknownLoadModelNames
+  );
 }
 
 /// Parses an OpenAI-compatible `/v1/models` body into model names with no load
@@ -312,6 +332,8 @@ List<LocalModel>? lmStudioCompatFromJson(dynamic data) {
 /// Reads a declared boolean flag, ignoring any other type a drifted runtime
 /// might send. An absent or unusable flag stays undeclared.
 bool? _flag(dynamic value) => value is bool ? value : null;
+
+final _invalidInstanceIdCharacters = RegExp(r'[\x00-\x1f\x7f]');
 
 /// Maps LM Studio's model `type` to whether it declares an embedding model. An
 /// unrecognized or absent type leaves the kind unknown, which keeps the model

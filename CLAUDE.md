@@ -140,13 +140,18 @@ Inspect what already exists before adding another.
 - **One registry.** Built-in providers are compile-time rows in
   `collector/lib/provider_adapters.dart` with a sanitized fixture under
   `collector/test/fixtures/provider_shapes/`. No runtime plugin discovery.
-- **One HTTP client.** Cloud metadata uses `sharedHttpClient` from
+- **One HTTP client.** Dart metadata uses `sharedHttpClient` from
   `collector/lib/http_client.dart`. Inject a client in tests. Do not add a
   second pooled client, logger, cache, credential store, or lease path.
   Reuse `provider_read_gate.dart` for provider read backoff and
   `expiring_single_flight.dart` for request coalescing and short-lived result
   caching. Cache expiry does not bound pending work. Inspect ownership,
   cancellation, and callers before changing either seam.
+  Local-runtime reads use `sendMetadataRequest` with redirects disabled and
+  the shared response-size cap. Bound the original headers and body operation,
+  not just the caller's wait. The LiteLLM integration's Python loopback
+  transport is `integrations/litellm/local_metadata.py`; preserve its same-peer
+  proof, owned socket, and cumulative deadline, including credential preflight.
 - **Host credentials stay read-only.** Opportunistic reuse of a host token is
   fine. Refresh and persist only quotabot-owned grants. Never invoke a provider
   print or headless prompt command (`claude -p`, TUI slash commands) as a
@@ -156,6 +161,8 @@ Inspect what already exists before adding another.
   trusted evidence visibly stale, or returns an explanatory note. Adapters do
   not throw out of collection. A spent longer window overrides a healthy
   shorter one.
+  Optional analytics I/O failure retains an unknown fit and limited confidence;
+  it does not invent zero burn or block otherwise validated fresh quota.
 - **Evidence before eligibility.** A reachable catalog does not prove account
   access, a localhost endpoint does not prove on-device execution, and an
   interactive subscription does not prove a headless harness uses included
@@ -164,8 +171,11 @@ Inspect what already exists before adding another.
 - **Validate at the boundary.** Narrow untrusted JSON, files, environment, and
   provider fields before domain use. Preserve finite numeric bounds, source
   identity, capture time, and reset semantics rather than fixing malformed
-  values into plausible capacity. Runtime declarations establish capabilities
-  and model kind; names and arbitrary scores do not establish quality or fit.
+  values into plausible capacity. Runtime declarations establish capabilities,
+  model kind, and load state. Failed or incomplete residency reads remain
+  unknown, never cold, and cannot establish context or hardware fit. Preserve
+  inventory eligibility independently of residency certainty.
+  Names and arbitrary scores do not establish quality or fit.
   Inspect metadata reads for load, download, wake, routing inference, and
   content-bearing side effects before adding an endpoint.
 
@@ -206,12 +216,14 @@ must stay at least 90 percent and desktop at least 80 percent
 Both packages enable
 `strict-casts`, `strict-inference`, and `strict-raw-types`; `dart analyze` and
 `flutter analyze` must report no issues.
+On Windows, run native-asset commands serially within a package; overlapping
+Dart test/build/run commands can collide with a loaded SQLite DLL.
 The MCP TypeScript snippets also require `npm run typecheck` from
 `integrations/mcp_clients/`. Python uses Ruff, integration tests, and
-`python -m mypy` for the five boundary helpers listed in `mypy.ini`, with strict
-checking and explicit `Any` forbidden. The router, other tools, and Python tests
-are outside that initial static scope; do not describe a scoped check as
-whole-project type safety. Development tools are hash-locked in
+`python -m mypy` for the six boundary modules listed in `mypy.ini`, with strict
+checking and explicit `Any` forbidden. The SDK-facing router, other tools, and
+Python tests are outside that initial static scope; do not describe a scoped
+check as whole-project type safety. Development tools are hash-locked in
 `tools/requirements-dev.txt` and installed by the Windows gate.
 
 Explicit `dynamic` and raw wire maps still require validation; strict analyzer

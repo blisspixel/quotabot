@@ -66,6 +66,13 @@ admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
 explicit-spend evidence. Fresh quota publishes before advisory analytics.
 
+Source is prepared for 0.11.8 with stronger explicit local-model matching,
+loaded context, composite execution exclusions, and metadata bounds.
+Publication is pending; the published stable release remains 0.11.7. See
+[CHANGELOG.md](CHANGELOG.md) and the
+[source review](docs/research/2026-09-30-code-quality.md#second-round-against-0117)
+for tested changes that are not yet in the stable release.
+
 Agents changing this repository follow [CLAUDE.md](CLAUDE.md). Immediate product
 work, guardrails, and completion criteria live only in
 [ROADMAP.md](ROADMAP.md#next).
@@ -114,6 +121,8 @@ for that surface.
     runtime; `quota_stretch_threshold_percent` can override that reserve from 20
     through 50. Pass `profile` to apply that profile's provider filters and its
     saved `preference_order` among viable candidates (same rule as the CLI).
+    In 0.11.8 source, explicit model requirements also constrain local
+    candidates and fallback; loaded readiness comes from matching models.
   - `decide_now` - the same routing decision from the latest cached snapshot,
     with explicit `as_of`, age, and staleness so per-request routers do not force
     live collection. It accepts the same `local_first` and `quota_stretch`
@@ -140,8 +149,12 @@ for that surface.
     Explicit `text_generation: false` identifies a non-text deployment; it stays
     inspectable but never qualifies generation advice or local provider fallback.
     A true or missing value does not prove execution location or account access.
-    Eligible local-runtime model entries include `local_readiness` (`loaded` or `cold`);
-    on-device entries also carry an advisory metadata-only `hardware_fit`
+    Version 0.11.8 source adds `loaded_state_known` to local-runtime entries.
+    Stable 0.11.7 does not emit this flag. In 0.11.8 source, eligible models
+    include `local_readiness` (`loaded` or `cold`) only when load state is known;
+    missing or invalid load observations omit readiness and cannot satisfy an
+    explicit context requirement. General inventory advice remains available.
+    On-device entries also carry an advisory metadata-only `hardware_fit`
     (`loaded`, `comfortable`, `tight`, `constrained`, or `unknown`) with the
     selected RAM/GPU capacity evidence. Prefer loaded, then comfortably fitting
     local models when equivalent candidates are available. Cloud routes exposed
