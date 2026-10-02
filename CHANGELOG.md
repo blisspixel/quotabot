@@ -4,8 +4,6 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-Version 0.11.8 below is pending publication. Published stable remains 0.11.7.
-
 ## 0.11.8 - 2026-10-01
 
 Conservative model eligibility, bounded metadata operations, and reliable

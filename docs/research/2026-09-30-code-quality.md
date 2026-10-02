@@ -339,3 +339,17 @@ The native Windows release package also builds successfully. Its isolated
 readiness check reports a ready window and tray, stops the test process, and
 confirms the complete bundle stayed unchanged. This proves packaged startup,
 not Narrator behavior or native interaction on every supported platform.
+
+Canonical source setup installed CLI 0.11.8 and desktop 0.11.8+63 on the
+Windows review host. The first activation encountered a file lock and retained
+the previous desktop. Closing the installed app before retry allowed setup to
+activate both payloads and restart the new desktop. Saved preferences and the
+default profile hashes stayed unchanged. This installation smoke does not
+establish account-consumption accuracy or native screen-reader behavior.
+
+After immutable publication, canonical installation replaced both source-built
+payloads with the official 0.11.8 release. Fresh checksum and workflow
+attestation checks passed for the Windows CLI and desktop archives. All four
+installed CLI files and all 20 desktop files match those archives. The same two
+saved settings files remained unchanged, `doctor` passed, and desktop 0.11.8+63
+restarted successfully.

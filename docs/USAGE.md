@@ -31,7 +31,6 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
 - **Settings:** Providers, Display, Alerts, and Updates have direct section
   navigation, with a compact selector in narrow windows. Navigation and Close
   stay reachable while the active section scrolls, and long action labels wrap.
-  This navigation is in prepared 0.11.8 source; publication is pending.
   Choose or manage a named profile, hide or
   show provider cards, set cadence and provider order, select text size, and
   toggle always-on-top, taskbar visibility, notifications, and "Show account
@@ -39,8 +38,9 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   account. Duplicate emails can still appear on compact route, notifications,
   and group headers when that toggle is on. Single-account providers stay
   unlabeled at a glance, and credential digests never occupy the collapsed
-  list. Local runtime cards keep loaded or ready status plus free VRAM at a
-  glance; open the card for RAM, utilization, disk, and the Models list.
+  list. Local runtime cards show loaded, ready, unknown load state, or an
+  inventory diagnostic, plus reported free VRAM when available; open the card
+  for RAM, utilization, disk, and the Models list.
 - **Updates:** Settings shows the installed build. "Check for updates" is a
   user-invoked GitHub read that shows the latest release candidate and stable
   release separately. "Install latest update" runs the checksum-verified CLI
@@ -108,7 +108,7 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   Inventory alone cannot certify on-device execution, and reported context can
   mean a configured limit or a model maximum. Keyboard activation and Close
   return focus to the Models control. Unknown load-state display and model
-  search are additions in prepared 0.11.8 source; publication is pending.
+  search were added in 0.11.8.
   **Find model** filters names and IDs without changing the captured snapshot
   or its order. Matching counts distinguish a filtered view from an empty
   runtime inventory; **Clear search** restores every reported entry. The search
@@ -775,8 +775,7 @@ Human `models` and
 task-profiled `suggest` rows label live versus cached reads, spend class, real
 account identity when the provider exposes one, source class, and capture age;
 JSON carries `source_class` and `local_readiness` (`loaded` or `cold`).
-Version 0.11.8 source adds `loaded_state_known`; stable 0.11.7 does not emit it.
-Publication of 0.11.8 is pending.
+Version 0.11.8 adds `loaded_state_known`; version 0.11.7 does not emit it.
 Its normalized outputs expose readiness only when load state is known.
 Failed or incomplete load metadata stays unknown in its model detail and
 cannot satisfy `--min-context` or establish a memory-fit estimate. General

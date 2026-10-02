@@ -166,12 +166,12 @@ release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` or
 `vMAJOR.MINOR.PATCH-rc.N` selects one exact tag for a reproducible rollback.
 
 The current stable release is
-[v0.11.7](https://github.com/blisspixel/quotabot/releases/tag/v0.11.7). Its
-release workflow enforces the exact immutable 14-asset contract, and its
-unpinned GitHub Latest smoke covers exact-tag installation, upgrade from the
-actual prior stable, persistent state, source setup, stable-channel resolution,
-canonical unversioned acquisition, and the desktop-run matrix on Windows,
-macOS, and Ubuntu. Every patch release follows the same published-artifact path.
+[v0.11.8](https://github.com/blisspixel/quotabot/releases/tag/v0.11.8). Its
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/36969617185) enforces the exact immutable 14-asset contract.
+Its [three-OS Install smoke](https://github.com/blisspixel/quotabot/actions/runs/36973784629) covers exact-tag installation, upgrade
+from 0.11.7, persistent state, source setup, stable-channel resolution, canonical
+unversioned acquisition, and the desktop-run matrix on Windows, macOS, and Ubuntu.
+Every patch release follows the same published-artifact path.
 The preceding v0.10.2 [release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
 and [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
 remain the prior audited lifecycle record.
