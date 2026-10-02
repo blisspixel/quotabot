@@ -2176,6 +2176,7 @@ class LocalMetadataTests(unittest.TestCase):
 
     def test_stalled_tls_handshake_is_owned_and_bounded(self):
         closed = Event()
+        context = ssl.create_default_context()
 
         class Handler(socketserver.BaseRequestHandler):
             def handle(self):
@@ -2196,15 +2197,18 @@ class LocalMetadataTests(unittest.TestCase):
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
         started = time.monotonic()
-        self.assertIsNone(
-            local_metadata_request(
-                f"https://127.0.0.1:{server.server_address[1]}",
-                "/suggest",
-                self.token,
-                maximum=4096,
-                timeout=0.3,
+        with unittest.mock.patch(
+            "local_metadata.ssl.create_default_context", return_value=context
+        ):
+            self.assertIsNone(
+                local_metadata_request(
+                    f"https://127.0.0.1:{server.server_address[1]}",
+                    "/suggest",
+                    self.token,
+                    maximum=4096,
+                    timeout=0.3,
+                )
             )
-        )
         self.assertLess(time.monotonic() - started, 1.5)
         self.assertTrue(closed.wait(1.5))
         connection = _OwnedHTTPSConnection("localhost", 443, timeout=0.3)
@@ -2270,6 +2274,13 @@ class LocalMetadataTests(unittest.TestCase):
 
         closed = Event()
         wire = []
+        context = ssl.create_default_context()
+        clock = {"now": 100.0}
+        clock_lock = Lock()
+
+        def monotonic():
+            with clock_lock:
+                return clock["now"]
 
         class Handler(socketserver.BaseRequestHandler):
             def handle(self):
@@ -2292,18 +2303,35 @@ class LocalMetadataTests(unittest.TestCase):
         connect = http.client.HTTPConnection.connect
 
         def delayed_connect(connection):
-            time.sleep(0.35)
+            with clock_lock:
+                clock["now"] += 31.0
             connect(connection)
 
-        with unittest.mock.patch("http.client.HTTPConnection.connect", delayed_connect):
+        with (
+            unittest.mock.patch("local_metadata.time", wraps=time) as timer,
+            unittest.mock.patch(
+                "local_metadata.ssl.create_default_context", return_value=context
+            ),
+            unittest.mock.patch(
+                "http.client.HTTPConnection.connect",
+                autospec=True,
+                side_effect=delayed_connect,
+            ) as tcp_connect,
+            unittest.mock.patch.object(
+                context, "wrap_socket", wraps=context.wrap_socket
+            ) as wrap_socket,
+        ):
+            timer.monotonic.side_effect = monotonic
             result = local_metadata_request(
                 f"https://127.0.0.1:{server.server_address[1]}",
                 "/suggest",
                 self.token,
                 maximum=4096,
-                timeout=0.1,
+                timeout=30.0,
             )
         self.assertIsNone(result)
+        tcp_connect.assert_called_once()
+        wrap_socket.assert_not_called()
         self.assertTrue(closed.wait(1.5))
         self.assertEqual(wire, [], "an expired TCP connection must not start TLS")
 

@@ -298,3 +298,13 @@ without depending on runner scheduling. All 79 router tests pass on Python 3.10
 and 3.13; 20 focused repetitions pass on each, and a temporary per-phase deadline
 reset is rejected. Real socket, drip, TLS, and initialization timeout regressions
 remain unchanged. This is a fixture correction, not a production deadline change.
+
+The same run's Windows job passed native packaging and desktop readiness, then
+exposed certificate-store initialization consuming a late-TCP fixture's short
+budget before connection. That fixture now prepares its trusted context first,
+establishes a real TCP socket, and advances only the transport clock past its
+deadline. It requires socket closure with no TLS wrapping. The active-handshake
+fixture also prepares its trusted context before timing the real handshake.
+Both runtime suites pass; 20 late-TCP repetitions pass on each Python version,
+and removing the pre-TLS deadline check is rejected. Constructor and worker
+preflight deadline regressions continue to test initialization separately.
