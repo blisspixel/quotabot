@@ -1862,7 +1862,7 @@ class LeaseHttpTests(unittest.TestCase):
 class LocalMetadataTests(unittest.TestCase):
     token = "synthetic-transport-token-0123456789"
 
-    def _start_server(self, phase):
+    def _start_server(self, phase, *, before_response=None):
         state = {"requests": [], "closed": Event(), "started": Event()}
         token = self.token
 
@@ -1955,8 +1955,8 @@ class LocalMetadataTests(unittest.TestCase):
                 if phase == f"{target}_body":
                     self._drip(raw)
                     return
-                if phase == "combined_budget":
-                    time.sleep(0.18)
+                if before_response is not None:
+                    before_response()
                 self._write(raw)
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -2017,12 +2017,37 @@ class LocalMetadataTests(unittest.TestCase):
                     self.assertEqual(state["requests"], [("/auth/prove", None)])
 
     def test_proof_and_metadata_share_the_total_budget(self):
-        url, state = self._start_server("combined_budget")
-        raw = local_metadata_request(
-            url, "/suggest", self.token, maximum=4096, timeout=0.3
-        )
-        self.assertIsNone(raw, "two individually short phases must share one deadline")
-        self.assertEqual(len(state["requests"]), 2)
+        for phase_cost, succeeds in ((18.0, False), (8.0, True)):
+            with self.subTest(phase_cost=phase_cost):
+                clock = {"now": 100.0}
+                clock_lock = Lock()
+
+                def monotonic():
+                    with clock_lock:
+                        return clock["now"]
+
+                def advance_clock():
+                    with clock_lock:
+                        clock["now"] += phase_cost
+
+                url, state = self._start_server("normal", before_response=advance_clock)
+                # Charge each real HTTP phase against the transport clock.
+                # Keep the real socket timer separate from scheduling latency.
+                with unittest.mock.patch("local_metadata.time", wraps=time) as timer:
+                    timer.monotonic.side_effect = monotonic
+                    raw = local_metadata_request(
+                        url, "/suggest", self.token, maximum=4096, timeout=30.0
+                    )
+                if succeeds:
+                    self.assertEqual(json.loads(raw)["ranked"], [])
+                else:
+                    self.assertIsNone(
+                        raw, "two individually short phases must share one deadline"
+                    )
+                self.assertEqual(
+                    state["requests"],
+                    [("/auth/prove", None), ("/suggest", f"Bearer {self.token}")],
+                )
 
     def test_oversize_proof_never_sends_bearer(self):
         url, state = self._start_server("oversize_proof")

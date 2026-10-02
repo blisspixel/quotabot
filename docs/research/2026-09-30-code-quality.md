@@ -287,3 +287,14 @@ until owner publication. A single exact pending-publication marker admits that
 bounded preparation state without relaxing source, build, stable-coherence, or
 tag checks. Hosted CI, the native release matrix, immutable owner publication,
 and published installation remain separate completion gates.
+
+The macOS job in [CI run 36957253600](https://github.com/blisspixel/quotabot/actions/runs/36957253600)
+passed strict analysis, coverage, and native packaging before exposing a
+timing-sensitive shared-deadline fixture. Its sleeps could exhaust the budget
+before the second request. The replacement charges a controlled transport clock
+before each real HTTP response while retaining proof and authenticated metadata
+requests. An over-budget case and successful control verify the single deadline
+without depending on runner scheduling. All 79 router tests pass on Python 3.10
+and 3.13; 20 focused repetitions pass on each, and a temporary per-phase deadline
+reset is rejected. Real socket, drip, TLS, and initialization timeout regressions
+remain unchanged. This is a fixture correction, not a production deadline change.
