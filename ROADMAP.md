@@ -137,14 +137,14 @@ separate SDK credits; the September 13 billing conclusion is superseded.
 Preserve the priority on measured provider truth and bounded execution evidence
 rather than treating every newly announced model or router as an adapter task.
 
-Unreleased source strengthens explicit local capability gates, conservative running
+Source prepared for 0.11.8 strengthens explicit local capability gates, conservative running
 context, Lemonade composite exclusions, metadata deadlines and response bounds,
 and draft publication handling. These reproducible fixes do not supply native LM Link,
 forwarded-endpoint, idle-machine, or real-account proof. The second-round record
 is in the existing [code-quality review](docs/research/2026-09-30-code-quality.md#second-round-against-0117).
 
-**Maintenance release handoff:** prepare 0.11.8 with desktop build 63 after
-the Unreleased source is integrated. Require passing three-OS CI, the canonical
+**Maintenance release handoff:** publish prepared 0.11.8 with desktop build 63
+after source integration. Require passing three-OS CI, the canonical
 owner publisher's fresh asset and provenance checks, immutable publication, and
 published install smoke. Artifact downloads and Sigstore initialization were
 unavailable during the September 30 review; retain those gates. Stable remains

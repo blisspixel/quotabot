@@ -237,3 +237,53 @@ evidence. Stable is still 0.11.7. Preparation for 0.11.8 remains in ROADMAP Next
 artifact downloads failed and the Sigstore verifier could not initialize in
 this environment. The canonical owner publisher must retain its fresh-download,
 attestation and immutable-publication gates.
+
+## October 1 integration follow-up
+
+The final load-certainty and desktop-polish pass preserves inventory eligibility
+independently of residency. Failed or incomplete observations remain unknown;
+they cannot establish cold state, context, or hardware fit. Positive partial
+observations retain loaded state while withholding unproven context. Matching
+model requirements constrain both advice and fallback. The frozen source passed
+2,283 collector tests with 92.78 percent line coverage and 444 desktop tests with
+87.38 percent coverage, each with one existing Windows link-permission skip.
+Both strict analyzers and formatters passed. Five rendered real-font desktop
+scenarios, including narrow layouts at 2x text, were inspected. These are widget
+and synthetic runtime checks, separate from native account validation.
+
+Hosted [PR 151](https://github.com/blisspixel/quotabot/pull/151) found an implicit
+TLS policy in the extracted Python metadata transport. The fix explicitly
+requires TLS 1.2 or newer while retaining certificate and hostname verification,
+socket ownership, and the cumulative deadline. Its regression coverage checks
+the real context and explicit policy assignment; the 79 router tests passed on
+Python 3.10 and 3.13.
+
+The October 1 dependency review selected compatible stable security patches:
+
+- [PyJWT 2.15.0](https://github.com/jpadilla/pyjwt/releases/tag/2.15.0) repairs
+  malformed pre-verification payload handling described in
+  [GHSA-42vr-xj54-vc7v](https://github.com/jpadilla/pyjwt/security/advisories/GHSA-42vr-xj54-vc7v).
+- [urllib3 2.8.0](https://github.com/urllib3/urllib3/releases/tag/2.8.0) repairs
+  chunk-size buffering, Deflate streaming, and HTTPS proxy TLS configuration.
+  Its proxy trust separation is intentional; the quotabot metadata helper uses
+  direct loopback sockets.
+- [fast-uri 3.1.8](https://github.com/fastify/fast-uri/releases/tag/v3.1.8) repairs
+  percent-encoded host normalization.
+- [ip-address 10.7.3](https://github.com/beaugunderson/ip-address/releases/tag/v10.7.3)
+  includes corrected family and link-local classification and bounded parsing.
+
+Native lock regeneration changed only those four package records and the
+explicit urllib3 input. LiteLLM 1.102.2, MCP 1.30.0, and unrelated pins remain.
+Fresh hash-locked Python 3.10 and 3.13 installations each passed all 82 router
+and real proxy tests with no skips, plus dependency consistency and malformed
+JWT controls. Audits covered all applicable locked rows, 111 and 109
+respectively, with no reported vulnerabilities or skipped packages. The MCP
+examples passed strict TypeScript checking, 15 tests, focused URI and address
+controls, and an npm audit reporting no vulnerabilities. These results establish
+compatibility and known-advisory remediation, not absence of undisclosed issues.
+
+Source preparation for 0.11.8 keeps the published stable markers at 0.11.7
+until owner publication. A single exact pending-publication marker admits that
+bounded preparation state without relaxing source, build, stable-coherence, or
+tag checks. Hosted CI, the native release matrix, immutable owner publication,
+and published installation remain separate completion gates.

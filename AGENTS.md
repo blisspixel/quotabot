@@ -66,9 +66,11 @@ admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
 explicit-spend evidence. Fresh quota publishes before advisory analytics.
 
-Unreleased source strengthens explicit local-model matching, loaded context,
-composite execution exclusions, and metadata bounds. See [CHANGELOG.md](CHANGELOG.md)
-and the [source review](docs/research/2026-09-30-code-quality.md#second-round-against-0117)
+Source is prepared for 0.11.8 with stronger explicit local-model matching,
+loaded context, composite execution exclusions, and metadata bounds.
+Publication is pending; the published stable release remains 0.11.7. See
+[CHANGELOG.md](CHANGELOG.md) and the
+[source review](docs/research/2026-09-30-code-quality.md#second-round-against-0117)
 for tested changes that are not yet in the stable release.
 
 Agents changing this repository follow [CLAUDE.md](CLAUDE.md). Immediate product
@@ -119,7 +121,7 @@ for that surface.
     runtime; `quota_stretch_threshold_percent` can override that reserve from 20
     through 50. Pass `profile` to apply that profile's provider filters and its
     saved `preference_order` among viable candidates (same rule as the CLI).
-    In Unreleased source, explicit model requirements also constrain local
+    In 0.11.8 source, explicit model requirements also constrain local
     candidates and fallback; loaded readiness comes from matching models.
   - `decide_now` - the same routing decision from the latest cached snapshot,
     with explicit `as_of`, age, and staleness so per-request routers do not force
@@ -147,8 +149,8 @@ for that surface.
     Explicit `text_generation: false` identifies a non-text deployment; it stays
     inspectable but never qualifies generation advice or local provider fallback.
     A true or missing value does not prove execution location or account access.
-    Unreleased source adds `loaded_state_known` to local-runtime entries.
-    Stable 0.11.7 does not emit this flag. In Unreleased source, eligible models
+    Version 0.11.8 source adds `loaded_state_known` to local-runtime entries.
+    Stable 0.11.7 does not emit this flag. In 0.11.8 source, eligible models
     include `local_readiness` (`loaded` or `cold`) only when load state is known;
     missing or invalid load observations omit readiness and cannot satisfy an
     explicit context requirement. General inventory advice remains available.

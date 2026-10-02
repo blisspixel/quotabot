@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import base64
 import ctypes
+import ctypes.wintypes as wintypes
 import hashlib
 import hmac
 import ipaddress
@@ -30,7 +31,6 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from ctypes import wintypes
 from typing import Any, Iterator
 
 

@@ -4,9 +4,18 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+Version 0.11.8 below is pending publication. Published stable remains 0.11.7.
+
+## 0.11.8 - 2026-10-01
+
 Conservative model eligibility, bounded metadata operations, and reliable
 owner publication.
 
+- Update selected PyJWT and urllib3 dependencies to 2.15.0 and 2.8.0, and the
+  MCP examples' fast-uri and ip-address dependencies to 3.1.8 and 10.7.3, to
+  address current advisories while preserving unrelated pins.
+- Require TLS 1.2 or newer for the owned Python metadata HTTPS transport while
+  preserving certificate and hostname verification.
 - Preserve unknown local-model load state across adapters, cache, routing,
   JSON, desktop detail, and terminal inspection. Failed or incomplete load
   metadata cannot become confirmed cold capacity, an advertised running

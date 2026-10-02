@@ -1901,6 +1901,7 @@ class LocalMetadataTests(unittest.TestCase):
                 except ConnectionError:
                     state["closed"].set()
                 except TimeoutError:
+                    # Leave closure unconfirmed so the test's assertion fails.
                     pass
 
             def _drip(self, raw):
@@ -2134,7 +2135,7 @@ class LocalMetadataTests(unittest.TestCase):
             self.assertTrue(await asyncio.to_thread(state["started"].wait, 1.5))
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
-                await task
+                await asyncio.gather(task)
             self.assertTrue(await asyncio.to_thread(state["closed"].wait, 1.5))
 
         with (
@@ -2182,6 +2183,26 @@ class LocalMetadataTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 1.5)
         self.assertTrue(closed.wait(1.5))
         connection = _OwnedHTTPSConnection("localhost", 443, timeout=0.3)
+        self.assertTrue(connection._tls_context.check_hostname)
+        self.assertEqual(connection._tls_context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertEqual(
+            connection._tls_context.minimum_version, ssl.TLSVersion.TLSv1_2
+        )
+
+    def test_tls_minimum_is_enforced_independently_of_context_defaults(self):
+        context = ssl.create_default_context()
+        with (
+            unittest.mock.patch.object(
+                ssl.SSLContext,
+                "minimum_version",
+                new_callable=unittest.mock.PropertyMock,
+            ) as minimum,
+            unittest.mock.patch(
+                "local_metadata.ssl.create_default_context", return_value=context
+            ),
+        ):
+            connection = _OwnedHTTPSConnection("localhost", 443, timeout=0.3)
+            minimum.assert_called_once_with(ssl.TLSVersion.TLSv1_2)
         self.assertTrue(connection._tls_context.check_hostname)
         self.assertEqual(connection._tls_context.verify_mode, ssl.CERT_REQUIRED)
 
@@ -2295,6 +2316,7 @@ class LocalMetadataTests(unittest.TestCase):
                     while chunk := self.request.recv(4096):
                         wire.append(chunk)
                 except ConnectionError:
+                    # A reset is expected when the owned deadline aborts TLS.
                     pass
 
         server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
@@ -2378,7 +2400,7 @@ class LocalMetadataTests(unittest.TestCase):
                     )
             finally:
                 finished.set()
-                await task
+                await asyncio.gather(task)
 
         with (
             unittest.mock.patch(

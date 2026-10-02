@@ -106,7 +106,7 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   Inventory alone cannot certify on-device execution, and reported context can
   mean a configured limit or a model maximum. Keyboard activation and Close
   return focus to the Models control. Unknown load-state display and model
-  search are Unreleased additions.
+  search are additions in prepared 0.11.8 source; publication is pending.
   **Find model** filters names and IDs without changing the captured snapshot
   or its order. Matching counts distinguish a filtered view from an empty
   runtime inventory; **Clear search** restores every reported entry. The search
@@ -773,7 +773,8 @@ Human `models` and
 task-profiled `suggest` rows label live versus cached reads, spend class, real
 account identity when the provider exposes one, source class, and capture age;
 JSON carries `source_class` and `local_readiness` (`loaded` or `cold`).
-Unreleased source adds `loaded_state_known`; stable 0.11.7 does not emit it.
+Version 0.11.8 source adds `loaded_state_known`; stable 0.11.7 does not emit it.
+Publication of 0.11.8 is pending.
 Its normalized outputs expose readiness only when load state is known.
 Failed or incomplete load metadata stays unknown in its model detail and
 cannot satisfy `--min-context` or establish a memory-fit estimate. General

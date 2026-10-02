@@ -387,9 +387,9 @@ Some provider models with temporary included-quota terms can include
 `quota_backed` for `--budget=quota` routing unless the provider exposes a normal
 quota-backed path for it.
 
-Unreleased source adds `loaded_state_known` to local-runtime entries. Stable
+Version 0.11.8 source adds `loaded_state_known` to local-runtime entries. Stable
 0.11.7 does not emit this flag. The following load-certainty rules describe
-the Unreleased reader and outputs.
+the prepared 0.11.8 reader and outputs; publication is pending.
 When true, `loaded: true` is a positive observation and an omitted `loaded`
 means confirmed cold. When false, load state is unknown and `local_readiness`
 is omitted. Legacy snapshots without the certainty flag retain only a positive

@@ -11,6 +11,9 @@ models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
 > **Current stable:** 0.11.7. quotabot remains under active 0.x development.
+> **Pending publication:** 0.11.8.
+> Source is prepared for desktop build 63. Native release validation and owner
+> publication remain pending.
 > **Next:** support Claude discovery for macOS Keychain sign-ins and prove
 > account-wide quota refresh on idle machines, then strengthen execution-scope
 > evidence for local-only advice. Native signing proceeds alongside product
@@ -208,12 +211,12 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Unreleased source keeps model requirements consistent across cloud and local advice,
+Prepared 0.11.8 source keeps model requirements consistent across cloud and local advice,
 preserves unknown loaded context, and excludes unresolved or cloud-backed
 Lemonade composites from local capacity. Runtime metadata reads and LiteLLM
-metadata exchanges are bounded through their original operations. Unreleased
+metadata exchanges are bounded through their original operations. Prepared
 desktop source adds model search and explicit unknown load state. The additive
-`loaded_state_known` field is also Unreleased; stable 0.11.7 does not emit it.
+`loaded_state_known` field is in prepared source; published stable 0.11.7 does not emit it.
 Six Python boundary modules have enforced strict checking. Stable 0.11.7 refreshed model
 and security dependencies and bound LiteLLM leases to exact accounts. See the
 [changelog](CHANGELOG.md) and

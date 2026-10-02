@@ -145,6 +145,7 @@ class _Deadline:
             try:
                 peer_socket.shutdown(socket.SHUT_RDWR)
             except OSError:
+                # A peer that already closed needs no further shutdown.
                 pass
 
     def close(self) -> None:
@@ -160,6 +161,7 @@ class _OwnedHTTPSConnection(http.client.HTTPSConnection):
     def __init__(self, host: str, port: int | None, timeout: float) -> None:
         self._deadline: _Deadline | None = None
         self._tls_context = ssl.create_default_context()
+        self._tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
         self._tls_context.set_alpn_protocols(["http/1.1"])
         super().__init__(host, port, timeout=timeout, context=self._tls_context)
 
