@@ -88,7 +88,15 @@ FirstRunPresence firstRunPresence(ProviderQuota? quota, int now) {
   return FirstRunPresence.found;
 }
 
-String firstRunStatusLabel(FirstRunPresence presence, {String? error}) {
+String firstRunStatusLabel(
+  FirstRunPresence presence, {
+  String? error,
+  int? httpStatus,
+}) {
+  if (httpStatus == 401) return 'authentication required';
+  if (httpStatus == 403) return 'metadata access denied';
+  if (httpStatus == 200) return 'invalid model metadata';
+  if (httpStatus != null) return 'metadata unavailable';
   final text = (error ?? '').toLowerCase();
   if (text.contains('invalid') && text.contains('usage')) {
     return 'signed in';
@@ -104,12 +112,28 @@ String firstRunSetupHint(
   String id,
   FirstRunPresence presence, {
   String? error,
+  int? httpStatus,
 }) {
   final text = (error ?? '').toLowerCase();
   if (text.contains('invalid') && text.contains('usage')) {
     return 'This account is on this machine. Refresh after opening the app once.';
   }
   if (presence == FirstRunPresence.live) return 'Ready.';
+  if (id == ollamaProviderId ||
+      id == lmStudioProviderId ||
+      id == lemonadeProviderId) {
+    return switch (httpStatus) {
+      401 =>
+        'The local server requires authentication. Review its metadata access settings.',
+      403 =>
+        'The local server denied metadata access. Review its access settings.',
+      200 =>
+        'The local server returned invalid model metadata. Check its version and settings.',
+      _ when httpStatus != null =>
+        'The local server\'s model metadata is unavailable. Check its status and settings.',
+      _ => 'Start the local server and enable metadata access.',
+    };
+  }
   return switch (id) {
     claudeProviderId => 'Open Claude Code and sign in once.',
     codexProviderId => 'Open the Codex CLI and sign in once.',
@@ -119,9 +143,6 @@ String firstRunSetupHint(
     cursorProviderId ||
     windsurfProviderId ||
     kiroProviderId => 'Open the app once and sign in, then come back.',
-    ollamaProviderId ||
-    lmStudioProviderId ||
-    lemonadeProviderId => 'Start the local server. No login.',
     nvidiaProviderId => 'Set NVIDIA_API_KEY if you use NVIDIA NIM. Optional.',
     _ => 'Open that app once, then come back.',
   };
@@ -158,11 +179,15 @@ List<FirstRunEntry> firstRunEntries(
         statusLabel: firstRunStatusLabel(
           firstRunPresence(latest[id], now),
           error: latest[id]?.error,
+          httpStatus: latest[id]?.isLocal == true
+              ? latest[id]?.httpStatus
+              : null,
         ),
         setupHint: firstRunSetupHint(
           id,
           firstRunPresence(latest[id], now),
           error: latest[id]?.error,
+          httpStatus: latest[id]?.httpStatus,
         ),
         canConnect:
             (canConnect?.call(id) ?? false) &&

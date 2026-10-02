@@ -95,9 +95,9 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   "likely to run out before it resets" once that risk is material), the same
   forecast `quotabot top` shows. It appears only with a real burn signal.
 - **Local models:** the **Models** control on an Ollama, LM Studio, or Lemonade
-  card opens every model in that card's displayed snapshot. It shows loaded or
-  cold state, the reported context, quantization, capabilities, model size,
-  GPU residency, and advisory memory fit when the evidence supports them.
+  card opens every model in that card's displayed snapshot. It shows loaded,
+  cold, or unknown load state, the reported context, quantization, capabilities,
+  model size, GPU residency, and advisory memory fit when the evidence supports them.
   Unknown values remain unknown. Stale, unavailable, embedding, cloud-offloaded,
   and upstream-configured entries explain their routing exclusions. Upstream
   models show no advisory host fit or promise of free local execution. The computer's
@@ -105,7 +105,13 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   model. Opening this view does not refresh the runtime or load a model.
   Inventory alone cannot certify on-device execution, and reported context can
   mean a configured limit or a model maximum. Keyboard activation and Close
-  return focus to the Models control.
+  return focus to the Models control. Unknown load-state display and model
+  search are Unreleased additions.
+  **Find model** filters names and IDs without changing the captured snapshot
+  or its order. Matching counts distinguish a filtered view from an empty
+  runtime inventory; **Clear search** restores every reported entry. The search
+  is kept only while the dialog is open. Search and Close remain accessible in
+  short windows while the title and capture details scroll with the inventory.
 - **Tight by default, tap to expand:** each card defaults to its window bars,
   including Claude Fable when that plan-gated pool exists, and reset
   countdowns. Codex Spark stays off the collapsed card. Tapping a card expands
@@ -125,7 +131,7 @@ the average remaining headroom across visible providers and uses the same smooth
 headroom palette as the terminal truecolor view.
 
 <p align="center">
-  <a href="screenshot-local-models.png"><img src="screenshot-local-models.png" alt="Local-model detail dialog showing loaded and cold models, reported capabilities, and advisory memory fit with synthetic data" width="340"></a>
+  <a href="screenshot-local-models.png"><img src="screenshot-local-models.png" alt="Local-model detail dialog with name and ID search, loaded and cold models, reported capabilities, and advisory memory fit with synthetic data" width="340"></a>
 </p>
 
 <p align="center"><sub>The real desktop detail renderer using synthetic inventory and hardware data.</sub></p>
@@ -766,8 +772,13 @@ models are read live; cloud capability hints come from a refreshable catalog.
 Human `models` and
 task-profiled `suggest` rows label live versus cached reads, spend class, real
 account identity when the provider exposes one, source class, and capture age;
-JSON carries `source_class` and stable machine fields such as
-`local_readiness` (`loaded` or `cold`). Concrete model suggestions prefer loaded
+JSON carries `source_class` and `local_readiness` (`loaded` or `cold`).
+Unreleased source adds `loaded_state_known`; stable 0.11.7 does not emit it.
+Its normalized outputs expose readiness only when load state is known.
+Failed or incomplete load metadata stays unknown in its model detail and
+cannot satisfy `--min-context` or establish a memory-fit estimate. General
+inventory advice remains available; it does not claim a model is cold.
+Concrete model suggestions prefer loaded
 local models before installed-but-cold local models when both meet the requested
 profile. Cold on-device models then rank by passive `hardware_fit`:
 `comfortable`, `tight`, `unknown`, then `constrained`. The human provenance tag

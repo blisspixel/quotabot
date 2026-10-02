@@ -1,6 +1,7 @@
 import 'package:quotabot_collector/adapters/lmstudio.dart';
 import 'package:quotabot_collector/adapters/ollama.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/registry.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
@@ -69,10 +70,140 @@ void main() {
       expect(loaded.quant, 'Q4_K_M'); // from the object-shaped quantization
       expect(loaded.bytes, 6326938154);
       expect(loaded.context, 8192); // the loaded instance's running context
+      expect(r.installed.first.context, 131072);
       // The not-loaded model falls back to its max context.
       final notLoaded =
           r.installed.firstWhere((m) => m.name == 'example/embed-v1');
       expect(notLoaded.context, 2048);
+    });
+
+    test('v1 retains each instance and uses an order-independent context', () {
+      final small = {
+        'id': 'small-instance',
+        'config': {'context_length': 4096},
+      };
+      final large = {
+        'id': 'large-instance',
+        'config': {'context_length': 65536},
+      };
+      for (final instances in [
+        [small, large],
+        [large, small]
+      ]) {
+        final parsed = lmStudioV1FromJson({
+          'models': [
+            {
+              'key': 'example/coder',
+              'type': 'llm',
+              'max_context_length': 131072,
+              'loaded_instances': instances,
+            }
+          ],
+        })!;
+        expect(parsed.installed.single.context, 131072);
+        expect(parsed.loaded, hasLength(2));
+        expect(parsed.loaded.map((model) => model.context),
+            unorderedEquals([4096, 65536]));
+        final quota = localRuntimeQuota(
+            id: 'lmstudio',
+            name: 'LM Studio',
+            asOf: 100,
+            installed: parsed.installed,
+            loaded: parsed.loaded);
+        expect(quota.models.single.loaded, isTrue);
+        expect(quota.models.single.contextTokens, 4096);
+        expect(quota.details.join(' '), contains('4K running context'));
+        expect(
+            buildModelRegistry([quota], 100,
+                requirements: const ModelRequirements(
+                  minContextTokens: 32768,
+                  budgetPolicy: ModelBudgetPolicy.local,
+                )),
+            isEmpty);
+      }
+    });
+
+    test('v1 unknown or invalid instance context cannot borrow the maximum',
+        () {
+      final unknownConfigs = <Object?>[
+        null,
+        {},
+        {'context_length': null},
+        {'context_length': 0},
+        {'context_length': -4096},
+        {'context_length': 4.5},
+        {'context_length': '32768'},
+        {'context_length': 100000001},
+      ];
+      for (final config in unknownConfigs) {
+        final unknown = {'id': 'unknown-instance', 'config': config};
+        final known = {
+          'id': 'known-instance',
+          'config': {'context_length': 65536},
+        };
+        for (final instances in [
+          [unknown],
+          [unknown, known],
+          [known, unknown]
+        ]) {
+          final parsed = lmStudioV1FromJson({
+            'models': [
+              {
+                'key': 'example/coder',
+                'max_context_length': 131072,
+                'loaded_instances': instances
+              }
+            ],
+          })!;
+          expect(parsed.installed.single.context, 131072);
+          final quota = localRuntimeQuota(
+              id: 'lmstudio',
+              name: 'LM Studio',
+              asOf: 100,
+              installed: parsed.installed,
+              loaded: parsed.loaded);
+          expect(quota.models.single.loaded, isTrue);
+          expect(quota.models.single.contextTokens, isNull);
+          expect(quota.details.join(' '), isNot(contains('running context')));
+          expect(
+              buildModelRegistry([quota], 100,
+                  requirements:
+                      const ModelRequirements(minContextTokens: 32768)),
+              isEmpty);
+        }
+      }
+    });
+
+    test('v0 separates model maximum from valid loaded context', () {
+      for (final context in <Object?>[4096, null, -1, 4.5, '65536']) {
+        final parsed = lmStudioNativeFromJson({
+          'data': [
+            {
+              'id': 'example/coder',
+              'state': 'loaded',
+              'max_context_length': 131072,
+              'loaded_context_length': context
+            },
+            {
+              'id': 'example/cold',
+              'state': 'not-loaded',
+              'max_context_length': 65536,
+              'loaded_context_length': 4096
+            },
+          ],
+        })!;
+        expect(parsed.installed.first.context, 131072);
+        expect(parsed.installed.last.context, 65536);
+        expect(parsed.loaded.single.context, context == 4096 ? 4096 : null);
+        final quota = localRuntimeQuota(
+            id: 'lmstudio',
+            name: 'LM Studio',
+            asOf: 100,
+            installed: parsed.installed,
+            loaded: parsed.loaded);
+        expect(quota.models.first.contextTokens, context == 4096 ? 4096 : null);
+        expect(quota.models.last.contextTokens, 65536);
+      }
     });
 
     test('v1 rejects an unexpected shape', () {
@@ -347,6 +478,28 @@ void main() {
       expect(ollamaShowFromJson({'model_info': <String, Object?>{}}), isNull);
       expect(ollamaShowFromJson({'capabilities': 'tools'}), isNull);
       expect(ollamaShowFromJson('nope'), isNull);
+    });
+
+    test('show rejects a capability declaration with an invalid sibling', () {
+      for (final invalid in <Object?>[17, null, '', '   ', <String>[]]) {
+        expect(
+            ollamaShowFromJson({
+              'capabilities': [
+                'completion',
+                'tools',
+                'vision',
+                'thinking',
+                invalid
+              ],
+              'model_info': {'test.context_length': 65536},
+            }),
+            isNull);
+      }
+      final empty = ollamaShowFromJson({'capabilities': <String>[]})!;
+      expect(empty.tools, isFalse);
+      expect(empty.vision, isFalse);
+      expect(empty.reasoning, isNull);
+      expect(empty.embedding, isNull);
     });
 
     test('show survives unusable context metadata', () {

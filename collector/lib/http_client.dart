@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -7,29 +8,61 @@ import 'package:http/http.dart' as http;
 /// The caller retains ownership of [client]. Track this original future when a
 /// guard must remain held until settlement; a caller timeout alone cannot cancel
 /// a custom client that ignores the abort trigger.
+/// [maxResponseBytes] bounds body accumulation before decoding. Local runtimes
+/// also disable [followRedirects] so a metadata path cannot change its scope.
 Future<http.Response> sendMetadataRequest(
   http.Client client,
   Uri uri, {
   String method = 'GET',
   Map<String, String> headers = const {},
   String? body,
+  bool followRedirects = true,
+  int? maxResponseBytes,
   required Duration timeout,
 }) async {
   if (timeout.inMicroseconds <= 0) {
     throw ArgumentError.value(timeout, 'timeout', 'must be positive');
   }
+  if (maxResponseBytes != null && maxResponseBytes <= 0) {
+    throw ArgumentError.value(
+        maxResponseBytes, 'maxResponseBytes', 'must be positive');
+  }
   final abort = Completer<void>();
   var expired = false;
   final timer = Timer(timeout, () {
     expired = true;
-    abort.complete();
+    if (!abort.isCompleted) abort.complete();
   });
   try {
     final request =
         http.AbortableRequest(method, uri, abortTrigger: abort.future)
+          ..followRedirects = followRedirects
           ..headers.addAll(headers);
     if (body != null) request.body = body;
-    final response = await client.send(request).then(http.Response.fromStream);
+    final streamed = await client.send(request);
+    final http.Response response;
+    if (maxResponseBytes == null) {
+      response = await http.Response.fromStream(streamed);
+    } else {
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in streamed.stream) {
+        if (chunk.length > maxResponseBytes - bytes.length) {
+          if (!abort.isCompleted) abort.complete();
+          throw http.ClientException(
+              'provider metadata response too large', uri);
+        }
+        bytes.add(chunk);
+      }
+      response = http.Response.bytes(
+        bytes.takeBytes(),
+        streamed.statusCode,
+        request: streamed.request,
+        headers: streamed.headers,
+        isRedirect: streamed.isRedirect,
+        persistentConnection: streamed.persistentConnection,
+        reasonPhrase: streamed.reasonPhrase,
+      );
+    }
     if (expired) throw TimeoutException('provider metadata deadline');
     return response;
   } on http.RequestAbortedException {

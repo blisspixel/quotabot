@@ -6,6 +6,10 @@ const ollamaDefaultPort = 11434;
 const lmStudioDefaultPort = 1234;
 const lemonadeDefaultPort = 13305;
 
+/// Maximum bytes accepted from one local runtime's metadata response. The
+/// limit applies while streaming, before JSON decoding or model normalization.
+const localRuntimeMetadataMaxResponseBytes = 4 * 1024 * 1024;
+
 typedef LocalRuntimeOrigin = ({
   String baseUrl,
   String scheme,

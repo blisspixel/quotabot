@@ -6,6 +6,147 @@ import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
 
 void main() {
+  group('local model load evidence', () {
+    for (final state in [
+      (loaded: true, known: true),
+      (loaded: false, known: true),
+      (loaded: false, known: false),
+    ]) {
+      test('round-trips loaded=${state.loaded}, known=${state.known}', () {
+        final model = ModelInfo(
+          id: 'model',
+          local: true,
+          loaded: state.loaded,
+          loadedStateKnown: state.known,
+        );
+        final json = model.toJson();
+        final back = ModelInfo.fromJson(json);
+        expect(json['loaded_state_known'], state.known);
+        expect(back.loaded, state.loaded);
+        expect(back.loadedStateKnown, state.known);
+      });
+    }
+
+    test('legacy snapshots retain only a positive load observation', () {
+      for (final loaded in [true, false, null]) {
+        final model = ModelInfo.fromJson({
+          'id': 'legacy',
+          'local': true,
+          if (loaded != null) 'loaded': loaded,
+        });
+        expect(model.loaded, loaded == true);
+        expect(model.loadedStateKnown, loaded == true);
+      }
+    });
+
+    test(
+        'parent runtime kind does not turn missing model load fields into cold',
+        () {
+      final provider = ProviderQuota.fromJson({
+        'provider': 'ollama',
+        'display_name': 'Ollama',
+        'account': 'default',
+        'kind': 'local',
+        'as_of': 123,
+        'models': [
+          {'id': 'legacy', 'context_tokens': 131072},
+        ],
+      });
+      expect(provider.hasEligibleLocalGenerationModel, isTrue);
+      expect(provider.localGenerationReadiness, isNull);
+      expect(provider.models.single.loadedStateKnown, isFalse);
+      final back = ProviderQuota.fromJson(provider.toJson());
+      expect(back.models.single.loadedStateKnown, isFalse);
+      final known = ProviderQuota(
+        provider: 'ollama',
+        displayName: 'Ollama',
+        account: 'default',
+        kind: ProviderQuotaKind.local,
+        asOf: 123,
+        models: const [ModelInfo(id: 'cold')],
+      );
+      expect(ProviderQuota.fromJson(known.toJson()).localGenerationReadiness,
+          'cold');
+    });
+
+    test('malformed or conflicting wire fields cannot prove residency', () {
+      for (final certainty in [false, null, 'true', 1]) {
+        final model = ModelInfo.fromJson({
+          'id': 'model',
+          'local': true,
+          'loaded': true,
+          'loaded_state_known': certainty,
+        });
+        expect(model.loaded, isFalse);
+        expect(model.loadedStateKnown, isFalse);
+      }
+      for (final loaded in [null, 'true', 1, <Object>[]]) {
+        final model = ModelInfo.fromJson({
+          'id': 'model',
+          'local': true,
+          'loaded': loaded,
+          'loaded_state_known': true,
+        });
+        expect(model.loaded, isFalse);
+        expect(model.loadedStateKnown, isFalse);
+      }
+      const inconsistent = ModelInfo(
+        id: 'model',
+        local: true,
+        loaded: true,
+        loadedStateKnown: false,
+      );
+      expect(inconsistent.loaded, isFalse);
+    });
+
+    test('sanitization and provider cache preserve unknown state', () {
+      final provider = ProviderQuota(
+        provider: 'ollama',
+        displayName: 'Ollama',
+        account: 'default',
+        kind: ProviderQuotaKind.local,
+        asOf: 123,
+        models: const [
+          ModelInfo(id: 'unknown', local: true, loadedStateKnown: false),
+        ],
+      );
+      final sanitized = sanitizeProviderQuota(provider);
+      final back = ProviderQuota.fromJson(sanitized.toJson());
+      expect(back.models.single.loadedStateKnown, isFalse);
+      expect(back.models.single.loaded, isFalse);
+      expect(back.hasEligibleLocalGenerationModel, isTrue);
+      expect(back.localGenerationReadiness, isNull);
+    });
+
+    test('eligible inventory does not require a load observation', () {
+      ProviderQuota quota(List<ModelInfo> models) => ProviderQuota(
+            provider: 'ollama',
+            displayName: 'Ollama',
+            account: 'default',
+            kind: ProviderQuotaKind.local,
+            asOf: 123,
+            models: models,
+          );
+      const unknown =
+          ModelInfo(id: 'unknown', local: true, loadedStateKnown: false);
+      const cold = ModelInfo(id: 'cold', local: true);
+      const loaded = ModelInfo(id: 'loaded', local: true, loaded: true);
+      expect(quota([cold]).localGenerationReadiness, 'cold');
+      expect(quota([unknown, cold]).localGenerationReadiness, isNull);
+      expect(quota([unknown, loaded]).localGenerationReadiness, 'loaded');
+      final excluded = quota(const [
+        ModelInfo(id: 'embedding', local: true, loaded: true, embedding: true),
+        ModelInfo(
+            id: 'remote', local: true, loaded: true, cloudOffloaded: true),
+        ModelInfo(id: 'image', local: true, textGeneration: false),
+      ]);
+      expect(excluded.hasEligibleLocalGenerationModel, isFalse);
+      expect(excluded.localGenerationReadiness, isNull);
+      expect(quota([unknown, ...excluded.models]).localGenerationReadiness,
+          isNull);
+    });
+  });
+
   group('QuotaWindow', () {
     test('uses usedPercent directly when present', () {
       expect(QuotaWindow(label: '5h', usedPercent: 42).percent, 42);

@@ -67,6 +67,8 @@ DecisionContext providerRouteDecisionContext(
     capabilityBudgetResetByQuotaKey: gates.budgetResetByQuotaKey,
     capabilityHeadroomByQuotaKey: gates.headroomByQuotaKey,
     capabilityRequestAdmissionByQuotaKey: gates.requestAdmissionByQuotaKey,
+    gateLocalCapabilities: routeRequirements != null,
+    capabilityLocalReadinessByQuotaKey: gates.localReadinessByQuotaKey,
     preferenceOrder: preferenceOrder,
     snapshotSource: snapshotSource,
     snapshotAsOf: snapshotAsOf,

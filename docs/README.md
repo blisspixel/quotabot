@@ -4,9 +4,10 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.11.7. It refreshes model evidence,
-hardens local metadata deadlines and deployment parsing, binds routing leases
-to exact accounts, and updates security dependencies. The
+The current verified stable release is 0.11.7. It refreshed model evidence,
+account-bound leases, and security dependencies. Unreleased source makes
+explicit model gates consistent across provider advice, keeps loaded context
+conservative, bounds metadata transport, and excludes unresolved composite scope. The
 [September 30 review](research/2026-09-30-review.md) records its evidence and
 remaining validation gaps. The preceding 0.11.6 corrects NVIDIA catalog
 evidence and expands native legacy MCP launch checks. The September 13 review

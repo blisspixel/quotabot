@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-09-30. This file is the forward plan. It records brief shipped
+Updated 2026-10-01. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -137,6 +137,19 @@ separate SDK credits; the September 13 billing conclusion is superseded.
 Preserve the priority on measured provider truth and bounded execution evidence
 rather than treating every newly announced model or router as an adapter task.
 
+Unreleased source strengthens explicit local capability gates, conservative running
+context, Lemonade composite exclusions, metadata deadlines and response bounds,
+and draft publication handling. These reproducible fixes do not supply native LM Link,
+forwarded-endpoint, idle-machine, or real-account proof. The second-round record
+is in the existing [code-quality review](docs/research/2026-09-30-code-quality.md#second-round-against-0117).
+
+**Maintenance release handoff:** prepare 0.11.8 with desktop build 63 after
+the Unreleased source is integrated. Require passing three-OS CI, the canonical
+owner publisher's fresh asset and provenance checks, immutable publication, and
+published install smoke. Artifact downloads and Sigstore initialization were
+unavailable during the September 30 review; retain those gates. Stable remains
+0.11.7 until the [owner publication procedure](docs/BUILDING.md#release-dry-run) completes.
+
 **Immediate compatibility maintenance:** the September 13
 [MCP and Agent Plugins review](docs/research/2026-09-13-mcp-agent-plugins.md)
 confirms that stable `mcp_dart` now implements the final July protocol and its
@@ -194,7 +207,9 @@ support. This maintenance does not wait for post-1.0 stabilization.
    showing their inventory. Verify Ollama's new list-level capabilities against
    the existing upstream-veto discovery before replacing detail reads. For
    Lemonade composites, require complete component scope rather than assuming
-   `collection.router` is local. No routing-classifier or validation inference
+   `collection.router` is local. The unreleased bounded resolver excludes cloud
+   and unresolved components; positive producer identity remains open.
+   No routing-classifier or validation inference
    belongs in a metadata probe.
 4. **Polish one consistent desktop language.** Build on the existing typography,
    theme and controls. Make the recommendation prominent, distinguish remaining
@@ -214,10 +229,23 @@ support. This maintenance does not wait for post-1.0 stabilization.
    at larger text sizes. Answer remains: what is eligible, what is loaded, which
    context and capabilities are known, why a model is eligible or excluded, and
    what to do when evidence is missing.
+   Unreleased desktop source adds name and ID filtering, explicit match counts,
+   and short-window search and Close controls. Widget and rendered-interface
+   checks cover narrow windows and 2x text; native OS interaction remains a
+   separate release check.
    Distinguish authentication required, unreachable, reachable but unloaded,
    malformed optional detail, and multiple loaded instances. A missing running
    context must not be relabeled as the advertised model maximum. Keep loaded
    state, observed activity, and host memory pressure separate.
+   Unreleased source now preserves unknown load state through the normalized
+   model and cached JSON, omits unproven readiness and fit, and rejects explicit
+   context floors when the running inventory is incomplete. Adapter, codec,
+   routing, and display regressions cover this distinction; native runtime
+   validation remains a separate release check.
+   Unreleased inventory probes now distinguish authentication, access denial,
+   invalid metadata, other HTTP failures, and transport failure with sanitized
+   fixture evidence. Native token-required server validation and optional
+   loaded-detail uncertainty remain open.
 6. **Make everyday native use dependable.** Prioritize honest GPU evidence and
    runtime reachability, Linux behavior when a tray host is absent, coalesced
    freshness recovery after sleep or foregrounding, and Windows/WSL/host scope.

@@ -101,7 +101,7 @@ account. Quota advice cannot switch a fixed deployment's credential.
      --no-header -o requirements.txt requirements.in
    ```
 
-   Keep `config.yaml` in the same folder as `quotabot_router.py`; current
+   Keep `config.yaml`, `quotabot_router.py`, and `local_metadata.py` together; current
    LiteLLM proxy releases resolve custom callback modules relative to the config
    file. Edit `config.yaml` so each `model_name` points at a real deployment,
    and edit `quotabot-routing.yaml` so each `deployment` matches one of those
@@ -114,6 +114,13 @@ account. Quota advice cannot switch a fixed deployment's credential.
    Set `account` whenever a provider has multiple accounts. Review LiteLLM's
    own retries and fallback deployments separately; they must preserve the
    same account and spend controls after this pre-call selection.
+
+   Loopback quota and lease exchanges use one two-second deadline across
+   connection, same-peer authentication, headers, and bounded response bodies.
+   A trickling or unavailable metadata server reaches the configured local
+   fallback or the managed model's no-safe-route error without holding later
+   routing requests indefinitely. Reads bypass environment proxies and never
+   follow redirects.
 
 3. Generate a local bearer key, then launch the proxy explicitly on loopback.
    The example config reads `LITELLM_MASTER_KEY` and refuses unauthenticated

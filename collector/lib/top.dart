@@ -893,7 +893,7 @@ List<String> _localRows(
   final reachable = isLocalRuntimeReachableAt(q, now) && q.error == null;
   final available = isLocalRuntimeAvailableAt(q, now);
   final status = reachable
-      ? (q.status?.isNotEmpty == true ? q.status! : 'ready')
+      ? localRuntimeStatusLabel(q)
       : (q.error?.isNotEmpty == true ? q.error! : 'unreachable');
   // The trust tag renders only when the whole row fits, so a long model list on
   // a narrow terminal keeps its status text intact instead of clipping the tag.
@@ -1150,9 +1150,11 @@ List<String> _modelInspectSection(
 
 String _modelInspectSummary(ModelEntry entry, bool inventoryCurrent) {
   final model = entry.model;
-  final residency = model.upstreamRouting != UpstreamRouting.notReported
-      ? (model.loaded ? 'reported-loaded' : 'no-residency')
-      : (model.loaded ? 'loaded' : 'cold');
+  final residency = !model.loadedStateKnown
+      ? 'load-unknown'
+      : model.upstreamRouting != UpstreamRouting.notReported
+          ? (model.loaded ? 'reported-loaded' : 'no-residency')
+          : (model.loaded ? 'loaded' : 'cold');
   final observed = inventoryCurrent ? residency : '$residency last-observed';
   final context = model.contextTokens == null
       ? 'ctx?'
@@ -1187,6 +1189,7 @@ String _modelInspectWhy(ModelEntry entry, bool inventoryCurrent) {
   final admission = requestAdmissionDetail(entry.requestAdmission);
   if (admission != null) return admission;
   if (!entry.available) return 'excluded';
+  if (!model.loadedStateKnown) return 'load state unknown; fit unknown';
   final fit = entry.hardwareFit;
   if (fit == null || fit.status == LocalHardwareFitStatus.unknown) {
     return 'fit unknown';

@@ -370,6 +370,9 @@ otherwise fails closed for the quota budget. Codex follows the same sparse rule:
 unmatched models inherit the shared window, while any represented
 GPT-5.3-Codex-Spark entry requires its current named `additional_rate_limits`
 row.
+For sparse overlays, when shared and scoped gates are both spent, recovery
+requires both: the later reset governs, and an unknown reset remains unknown.
+The remaining percentage still comes from the tighter quota gate.
 Stale remote entries keep last-known quota fields, and remote entries at or
 below the spent floor keep their measured quota fields, but both set
 `available: false`. A remote provider or model quota whose named reset has
@@ -382,7 +385,24 @@ snapshots but do not contribute `models` entries.
 Some provider models with temporary included-quota terms can include
 `quota_included_until`; after that epoch, quotabot no longer marks the model
 `quota_backed` for `--budget=quota` routing unless the provider exposes a normal
-quota-backed path for it. Eligible local-runtime entries also include
+quota-backed path for it.
+
+Unreleased source adds `loaded_state_known` to local-runtime entries. Stable
+0.11.7 does not emit this flag. The following load-certainty rules describe
+the Unreleased reader and outputs.
+When true, `loaded: true` is a positive observation and an omitted `loaded`
+means confirmed cold. When false, load state is unknown and `local_readiness`
+is omitted. Legacy snapshots without the certainty flag retain only a positive
+`loaded: true` observation; missing, malformed, or conflicting fields cannot
+establish cold or loaded readiness. A local provider's inventory can remain
+eligible for general advice with unknown readiness, but unknown load state
+cannot satisfy an explicit `min_context`. Known cold models retain declared
+maximum context; loaded models require coherent running-instance context.
+Execution-vetoed cloud and upstream entries have unknown load state, since
+discarded residency is not proof that a remote deployment is cold. Declared
+context remains inspectable under `any` but cannot satisfy a context floor
+from that discarded observation.
+Eligible local-runtime entries can also include
 `local_readiness` (`loaded` or `cold`), `size_bytes`, loaded-model
 `vram_bytes`, and `quant` when the runtime exposes them, so routers can
 distinguish ready-now models from installed models that may need a cold start.
@@ -390,9 +410,10 @@ An on-device local entry also carries advisory `hardware_fit` (`loaded`,
 `comfortable`, `tight`, `constrained`, or `unknown`), `hardware_fit_basis`, and,
 when known, `estimated_memory_bytes`, `fit_available_bytes`, `fit_total_bytes`,
 and `hardware_observed_at`. Fit is a metadata-only ranking signal, not an
-availability gate or performance claim. A local provider snapshot can carry the
-underlying `local_hardware` object with `as_of`, system-memory total/available
-bytes, largest-single-GPU total/available bytes, optional host-scoped
+availability gate or performance claim. Unknown load state yields unknown fit
+with `hardware_fit_basis: "load_state_unreported"`. A local provider snapshot
+can carry the underlying `local_hardware` object with `as_of`, system-memory
+total/available bytes, largest-single-GPU total/available bytes, optional host-scoped
 `gpu_utilization_percent`, `gpu_count`, and optional `gpu_name`. Separate GPU
 pools are not summed. Without usable `nvidia-smi` evidence, Windows can retain
 GPU names and count from `Win32_VideoController`, but it omits memory and
@@ -402,7 +423,10 @@ Capacity evidence is absent on subscription providers.
 `budget_policy` is `any`, `quota`, or `local`. A local-runtime model that the
 runtime executes in a cloud rather than on-device carries
 `cloud_offloaded: true`. Current evidence is an Ollama `-cloud` tag or a
-Lemonade `recipe: "cloud"` or `cloud_provider` field. Such a model is excluded
+Lemonade `recipe: "cloud"` or `cloud_provider` field, including a cloud component
+inside a supported composite. Composites with unresolved component scope are
+omitted from normalized inventory with a count-only provider detail. A
+cloud-offloaded model is excluded
 from `--budget=local` and free budgets, though it stays listed under
 `--budget=any`; it remains `local: true` because it is reached through the local
 daemon.

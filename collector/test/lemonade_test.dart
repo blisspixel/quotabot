@@ -32,6 +32,8 @@ void main() {
       expect(q.ok, isTrue);
       expect(q.account, contains('2'));
       expect(q.sourceClass.wireName, 'local_runtime');
+      expect(q.models.every((m) => !m.loadedStateKnown), isTrue);
+      expect(q.status, 'reachable - load state unknown');
     });
 
     test('reports loaded state and running context from health metadata',
@@ -93,11 +95,12 @@ void main() {
       );
     });
 
-    test('is not-running when the server is unreachable', () async {
+    test('reports metadata failure when the server returns HTTP 500', () async {
       final mock = MockClient((req) async => http.Response('down', 500));
       final q = await LemonadeAdapter(client: mock).collect();
       expect(q.ok, isFalse);
-      expect(q.error, 'not running');
+      expect(q.error, 'runtime metadata unavailable (HTTP 500)');
+      expect(q.httpStatus, 500);
       expect(q.isLocal, isTrue);
     });
 
@@ -205,7 +208,7 @@ void main() {
       expect(current, hasLength(1));
       expect(current!.single.name, 'coder');
       expect(current.single.context, 4096);
-      expect(legacy!.single.name, 'older');
+      expect(legacy, isEmpty);
       expect(
         lemonadeLoadedModelsFromJson({'all_models_loaded': <Object>[]}),
         isEmpty,

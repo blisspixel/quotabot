@@ -580,9 +580,11 @@ maintainer will consume it:
    --directory .agent/publish-vX.Y.Z`, choosing an empty download directory.
    The helper checks the successful workflow attempt, protected main and tag,
    attested handoff, all seven archive contracts and their provenance, and the
-   exact fourteen-file inventory. It creates an owner-authored draft, uploads
-   through that same login, freshly downloads and verifies every draft asset,
-   then checks the unchanged draft and publishes it immutably. No owner token
+   exact fourteen-file inventory. It validates the owner-authored draft directly
+   from the creation response and uploads through the same login using that
+   release ID, without a second listing or tag lookup. It freshly downloads and
+   verifies every draft asset, then checks the unchanged draft and publishes it
+   immutably. No owner token
    belongs in CI. A failed attempt can resume the matching owner draft using a
    new empty handoff directory; published assets are never replaced.
    Confirm that every CLI archive contains `lib/install.ps1` and

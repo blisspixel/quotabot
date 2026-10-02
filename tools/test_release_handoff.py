@@ -200,6 +200,7 @@ class PublicationTests(unittest.TestCase):
         self.created = 0
         self.assets = []
         self.published = False
+        self.creation_response = None
         self.run = {
             "id": 123,
             "run_attempt": 1,
@@ -211,7 +212,27 @@ class PublicationTests(unittest.TestCase):
             "conclusion": "success",
         }
 
-    def api(self, endpoint, *, payload=None):
+    def api(self, endpoint, *, payload=None, method=None):
+        if endpoint == "repos/blisspixel/quotabot/releases" and method == "POST":
+            self.assertEqual(
+                payload,
+                {
+                    "tag_name": self.record["tag"],
+                    "target_commitish": self.record["source_digest"],
+                    "name": self.record["title"],
+                    "body": self.record["body"],
+                    "draft": True,
+                    "prerelease": "-" in self.record["tag"],
+                    "make_latest": "false",
+                },
+            )
+            self.gh("release", "create")
+            self.release["target_commitish"] = payload["target_commitish"]
+            return copy.deepcopy(
+                self.release
+                if self.creation_response is None
+                else self.creation_response
+            )
         if endpoint == "user":
             return {"type": "User", "login": "blisspixel"}
         if endpoint.endswith("/immutable-releases"):
@@ -226,6 +247,8 @@ class PublicationTests(unittest.TestCase):
             return copy.deepcopy(self.release)
         if endpoint == "repos/blisspixel/quotabot/releases/latest":
             self.assertTrue(self.published)
+            if self.release["prerelease"]:
+                return {"id": 8}
             return copy.deepcopy(self.release)
         if endpoint == "repos/blisspixel/quotabot/releases/9":
             if payload:
@@ -261,10 +284,26 @@ class PublicationTests(unittest.TestCase):
                 "name": self.record["title"],
                 "body": notes,
                 "draft": True,
-                "prerelease": False,
+                "prerelease": "-" in self.record["tag"],
                 "author": {"login": "blisspixel"},
-                "html_url": "https://github.com/blisspixel/quotabot/releases/tag/v0.11.6",
+                "html_url": f"https://github.com/blisspixel/quotabot/releases/tag/{self.record['tag']}",
             }
+        elif arguments[:3] == ("api", "--method", "POST"):
+            name = Path(arguments[-1]).name
+            self.assertEqual(
+                arguments,
+                (
+                    "api",
+                    "--method",
+                    "POST",
+                    f"https://uploads.github.com/repos/blisspixel/quotabot/releases/9/assets?name={name}",
+                    "--header",
+                    "Content-Type: application/octet-stream",
+                    "--input",
+                    arguments[-1],
+                ),
+            )
+            self.gh("release", "upload", self.record["tag"], arguments[-1])
         elif arguments[:2] == ("release", "upload"):
             name = Path(arguments[3]).name
             expected = self.record["assets"][name]
@@ -305,11 +344,13 @@ class PublicationTests(unittest.TestCase):
             return subprocess.CompletedProcess(arguments, 0)
         raise AssertionError(arguments)
 
-    def publish(self, directory):
+    def publish(self, directory, *, source_checks=None):
         with (
             patch.object(publisher, "api", side_effect=self.api),
             patch.object(publisher, "gh", side_effect=self.gh),
-            patch.object(publisher, "require_current_source"),
+            patch.object(
+                publisher, "require_current_source", side_effect=source_checks
+            ),
             patch.object(publisher, "verify_provenance"),
             patch.object(publisher.subprocess, "run", side_effect=self.run_process),
             patch.object(handoff, "verify_cli_archive"),
@@ -367,22 +408,78 @@ class PublicationTests(unittest.TestCase):
         ):
             publisher.find_release("blisspixel/quotabot", "v0.11.6")
 
-    def test_missing_created_draft_stops_before_upload_or_publication(self):
+    def test_new_draft_uses_creation_response_when_listing_is_not_yet_updated(self):
         with (
             tempfile.TemporaryDirectory() as temporary,
-            patch.object(publisher, "find_release", return_value=None),
-            self.assertRaisesRegex(ValueError, "Created release draft was not found"),
+            patch.object(publisher, "find_release", return_value=None) as lookup,
         ):
             self.publish(Path(temporary))
+        lookup.assert_called_once_with("blisspixel/quotabot", self.record["tag"])
         self.assertEqual(self.created, 1)
-        self.assertEqual(self.assets, [])
-        self.assertFalse(self.published)
+        self.assertEqual(len(self.assets), 14)
+        self.assertTrue(self.published)
+
+    def test_prerelease_uses_known_draft_id_without_replacing_latest(self):
+        self.record.update(
+            tag="v0.11.7-rc.1",
+            title="v0.11.7-rc.1",
+            previous_tag="v0.11.6",
+            previous_digest="b" * 40,
+            initial_release=False,
+        )
+        self.run["head_branch"] = self.record["tag"]
+        with tempfile.TemporaryDirectory() as temporary:
+            self.assertTrue(self.publish(Path(temporary)).endswith("/v0.11.7-rc.1"))
+        self.assertTrue(self.release["prerelease"])
+        self.assertTrue(self.release["immutable"])
+        self.assertEqual(len(self.assets), 14)
+
+    def test_invalid_creation_response_stops_before_upload_or_publication(self):
+        self.gh("release", "create")
+        expected = copy.deepcopy(self.release)
+        for response in (
+            [],
+            {**expected, "id": True},
+            {**expected, "tag_name": "v0.11.60"},
+            {**expected, "body": "changed"},
+            {**expected, "draft": 1},
+            {**expected, "prerelease": 0},
+            {**expected, "author": {"login": "someone-else"}},
+            {**expected, "author": "blisspixel"},
+        ):
+            with self.subTest(response=response):
+                self.release = None
+                self.creation_response = response
+                with (
+                    tempfile.TemporaryDirectory() as temporary,
+                    self.assertRaises(ValueError),
+                ):
+                    self.publish(Path(temporary))
+                self.assertEqual(self.assets, [])
+                self.assertFalse(self.published)
 
     def test_wrong_workflow_attempt_never_creates_a_release(self):
         self.run["run_attempt"] = 2
         with tempfile.TemporaryDirectory() as temporary, self.assertRaises(ValueError):
             self.publish(Path(temporary))
         self.assertIsNone(self.release)
+
+    def test_changed_source_stops_before_creation_or_publication(self):
+        for checks, expected_created in (
+            ([ValueError("main or tag moved")], 0),
+            ([None, ValueError("main or tag moved")], 0),
+            ([None, None, ValueError("main or tag moved")], 1),
+        ):
+            with self.subTest(expected_created=expected_created, checks=len(checks)):
+                self.setUp()
+                with (
+                    tempfile.TemporaryDirectory() as temporary,
+                    self.assertRaisesRegex(ValueError, "main or tag moved"),
+                ):
+                    self.publish(Path(temporary), source_checks=checks)
+                self.assertEqual(self.created, expected_created)
+                self.assertFalse(self.published)
+                self.assertEqual(len(self.assets), 14 if expected_created else 0)
 
     def test_incomplete_failed_or_wrong_source_run_never_creates_a_release(self):
         for key, value in (

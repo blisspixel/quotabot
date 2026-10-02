@@ -96,7 +96,10 @@ def verify_provenance(path: Path, metadata: dict) -> None:
     )
 
 
-def require_draft(release: dict, metadata: dict, owner: str) -> None:
+def require_draft(release: object, metadata: dict, owner: str) -> None:
+    if not isinstance(release, dict):
+        raise ValueError("Release is not the owner's exact expected draft")
+    author = release.get("author")
     expected = {
         "tag_name": metadata["tag"],
         "name": metadata["title"],
@@ -107,7 +110,10 @@ def require_draft(release: dict, metadata: dict, owner: str) -> None:
     if (
         type(release.get("id")) is not int
         or release["id"] < 1
-        or release.get("author", {}).get("login") != owner
+        or not isinstance(author, dict)
+        or author.get("login") != owner
+        or type(release.get("draft")) is not bool
+        or type(release.get("prerelease")) is not bool
         or any(release.get(key) != value for key, value in expected.items())
     ):
         raise ValueError("Release is not the owner's exact expected draft")
@@ -197,29 +203,21 @@ def publish(repository: str, run_id: int, directory: Path) -> str:
 
     release = find_release(repository, metadata["tag"])
     if release is None:
-        with tempfile.TemporaryDirectory(prefix="quotabot-release-notes-") as temporary:
-            notes = Path(temporary) / "notes.md"
-            notes.write_text(metadata["body"], encoding="utf-8", newline="\n")
-            arguments = [
-                "release",
-                "create",
-                metadata["tag"],
-                "--repo",
-                repository,
-                "--draft",
-                "--verify-tag",
-                "--title",
-                metadata["title"],
-                "--notes-file",
-                str(notes),
-            ]
-            if "-" in metadata["tag"]:
-                arguments.extend(["--prerelease", "--latest=false"])
-            require_current_source(metadata)
-            gh(*arguments)
-        release = find_release(repository, metadata["tag"])
-        if release is None:
-            raise ValueError("Created release draft was not found")
+        # Validate the returned draft without relying on a second listing.
+        require_current_source(metadata)
+        release = api(
+            f"repos/{repository}/releases",
+            method="POST",
+            payload={
+                "tag_name": metadata["tag"],
+                "target_commitish": metadata["source_digest"],
+                "name": metadata["title"],
+                "body": metadata["body"],
+                "draft": True,
+                "prerelease": "-" in metadata["tag"],
+                "make_latest": "false",
+            },
+        )
     require_draft(release, metadata, owner)
     endpoint = f"repos/{repository}/releases/{release['id']}"
     assets = api(endpoint + "/assets?per_page=100")
@@ -227,12 +225,14 @@ def publish(repository: str, run_id: int, directory: Path) -> str:
     existing = {asset["name"] for asset in assets}
     for name in sorted(ASSETS - existing):
         gh(
-            "release",
-            "upload",
-            metadata["tag"],
+            "api",
+            "--method",
+            "POST",
+            f"https://uploads.github.com/repos/{repository}/releases/{release['id']}/assets?name={name}",
+            "--header",
+            "Content-Type: application/octet-stream",
+            "--input",
             str(directory / name),
-            "--repo",
-            repository,
         )
     assets = api(endpoint + "/assets?per_page=100")
     require_assets(assets, metadata, owner, complete=True)

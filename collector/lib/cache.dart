@@ -1797,7 +1797,19 @@ Map<String, dynamic> _emptyBucketCheckpoint() => {
       'buckets': const <Map<String, dynamic>>[],
     };
 
-({bool valid, List<HeadroomBucket> buckets}) _readBucketFile(File file) {
+void _requireRegularAnalyticsFile(File file) {
+  final type = FileSystemEntity.typeSync(file.path, followLinks: false);
+  if (type != FileSystemEntityType.file &&
+      type != FileSystemEntityType.notFound) {
+    throw FileSystemException('invalid analytics file', file.path);
+  }
+}
+
+({bool valid, List<HeadroomBucket> buckets}) _readBucketFile(
+  File file, {
+  bool propagateFileSystemErrors = false,
+}) {
+  if (propagateFileSystemErrors) _requireRegularAnalyticsFile(file);
   if (!file.existsSync()) return (valid: true, buckets: const []);
   if (file.lengthSync() > _maxJsonBytes) {
     return (valid: false, buckets: const []);
@@ -1816,13 +1828,23 @@ Map<String, dynamic> _emptyBucketCheckpoint() => {
     }
     buckets.sort((a, b) => a.start.compareTo(b.start));
     return (valid: true, buckets: buckets);
+  } on FileSystemException {
+    if (propagateFileSystemErrors) rethrow;
+    return (valid: false, buckets: const []);
   } catch (_) {
     return (valid: false, buckets: const []);
   }
 }
 
-Map<String, dynamic>? _bucketCheckpoint(File file) {
-  final read = _readBucketFile(file);
+Map<String, dynamic>? _bucketCheckpoint(
+  File file, {
+  bool propagateFileSystemErrors = false,
+}) {
+  final read = _readBucketFile(file,
+      propagateFileSystemErrors: propagateFileSystemErrors);
+  if (!read.valid && propagateFileSystemErrors) {
+    throw FileSystemException('invalid analytics bucket evidence', file.path);
+  }
   if (!read.valid || read.buckets.length > _maxAnalyticsCheckpointBuckets) {
     return null;
   }
@@ -1836,9 +1858,11 @@ Map<String, dynamic>? _bucketCheckpoint(File file) {
 
 Map<String, dynamic>? _readAnalyticsMigrationRecord(
   String provider,
-  String account,
-) {
+  String account, {
+  bool propagateFileSystemErrors = false,
+}) {
   final file = _analyticsMigrationFile(provider, account);
+  if (propagateFileSystemErrors) _requireRegularAnalyticsFile(file);
   if (!file.existsSync() || file.lengthSync() > _maxAnalyticsMigrationBytes) {
     return null;
   }
@@ -1853,6 +1877,9 @@ Map<String, dynamic>? _readAnalyticsMigrationRecord(
     }
     if (record['provider'] != provider) record['provider'] = provider;
     return record;
+  } on FileSystemException {
+    if (propagateFileSystemErrors) rethrow;
+    return null;
   } catch (_) {
     return null;
   }
@@ -2144,25 +2171,37 @@ bool _historyMigrationConflict(String provider, String account) {
   return true;
 }
 
-bool _bucketMigrationConflict(String provider, String account) {
+bool _bucketMigrationConflict(
+  String provider,
+  String account, {
+  bool propagateFileSystemErrors = false,
+}) {
   final canonical = _bucketsFile(provider, account: account);
   final legacy = _legacyBucketsFile(provider, account: account);
+  if (propagateFileSystemErrors) {
+    _requireRegularAnalyticsFile(canonical);
+    _requireRegularAnalyticsFile(legacy);
+  }
   if (canonical.path == legacy.path) return false;
   final marker = _analyticsMigrationFile(provider, account);
-  final record = _readAnalyticsMigrationRecord(provider, account);
+  final record = _readAnalyticsMigrationRecord(provider, account,
+      propagateFileSystemErrors: propagateFileSystemErrors);
   if (marker.existsSync() && record == null) return true;
   if (record?['buckets_conflict'] == true) return true;
   final legacyOwned = !legacy.existsSync() ||
-      _legacyBucketOwnerAllows(provider, account, claim: false);
+      _legacyBucketOwnerAllows(provider, account,
+          claim: false, propagateFileSystemErrors: propagateFileSystemErrors);
   if (record?.containsKey('buckets') == true) {
     if (!legacyOwned) return true;
-    final current = _bucketCheckpoint(legacy);
+    final current = _bucketCheckpoint(legacy,
+        propagateFileSystemErrors: propagateFileSystemErrors);
     return current == null || !_checkpointMatches(record?['buckets'], current);
   }
   if (!canonical.existsSync()) return false;
   if (!legacyOwned) return false;
   if (!legacy.existsSync()) return false;
-  final current = _bucketCheckpoint(legacy);
+  final current = _bucketCheckpoint(legacy,
+      propagateFileSystemErrors: propagateFileSystemErrors);
   return current == null || record != null || (current['count'] as int) > 0;
 }
 
@@ -2194,14 +2233,22 @@ List<HeadroomBucket>? _bucketsFromCheckpoint(Object? checkpoint) {
 
 List<HeadroomBucket> _trustedBucketsDuringConflict(
   String provider,
-  String account,
-) {
+  String account, {
+  bool propagateFileSystemErrors = false,
+}) {
   final canonical = _bucketsFile(provider, account: account);
+  if (propagateFileSystemErrors) _requireRegularAnalyticsFile(canonical);
   if (canonical.existsSync()) {
-    final read = _readBucketFile(canonical);
+    final read = _readBucketFile(canonical,
+        propagateFileSystemErrors: propagateFileSystemErrors);
     if (read.valid) return List<HeadroomBucket>.of(read.buckets);
+    if (propagateFileSystemErrors) {
+      throw FileSystemException(
+          'invalid analytics bucket evidence', canonical.path);
+    }
   }
-  final record = _readAnalyticsMigrationRecord(provider, account);
+  final record = _readAnalyticsMigrationRecord(provider, account,
+      propagateFileSystemErrors: propagateFileSystemErrors);
   return List<HeadroomBucket>.of(
     _bucketsFromCheckpoint(record?['buckets']) ?? const [],
   );
@@ -4614,8 +4661,10 @@ bool _legacyBucketOwnerAllows(
   String provider,
   String account, {
   required bool claim,
+  bool propagateFileSystemErrors = false,
 }) {
   final marker = _legacyBucketOwnerFile(provider, account);
+  if (propagateFileSystemErrors) _requireRegularAnalyticsFile(marker);
   final digest = accountIdentityDigest(account);
   if (marker.existsSync()) {
     try {
@@ -4625,6 +4674,9 @@ bool _legacyBucketOwnerAllows(
           decoded['schema'] == _legacyBucketOwnerSchema &&
           _persistedProviderMatches(decoded['provider'], provider) &&
           decoded['account_digest'] == digest;
+    } on FileSystemException {
+      if (propagateFileSystemErrors) rethrow;
+      return false;
     } catch (_) {
       return false;
     }
@@ -4756,19 +4808,38 @@ Map<String, BurnStat> recentBurnStatsByQuota(
     if (q.isManual || !q.hasWindows) continue;
     final key = quotaIdentityKeyFor(q);
     final accountScoped = hasSpecificQuotaAccount(q.account);
-    final accountBucketsConflicted =
-        accountScoped && _bucketMigrationConflict(q.provider, q.account);
-    var buckets = accountBucketsConflicted
-        ? _trustedBucketsDuringConflict(q.provider, q.account)
-        : accountScoped
-            ? loadBuckets(
-                q.provider,
-                account: q.account,
-                fallbackToProvider: false,
-              )
-            : loadBuckets(q.provider);
-    if (buckets.isEmpty && (measuredCounts[q.provider] ?? 0) == 1) {
-      buckets = loadBuckets(q.provider);
+    final bool accountBucketsConflicted;
+    List<HeadroomBucket> buckets;
+    try {
+      accountBucketsConflicted = accountScoped &&
+          _bucketMigrationConflict(q.provider, q.account,
+              propagateFileSystemErrors: true);
+      buckets = accountBucketsConflicted
+          ? _trustedBucketsDuringConflict(q.provider, q.account,
+              propagateFileSystemErrors: true)
+          : accountScoped
+              ? _loadBuckets(
+                  q.provider,
+                  account: q.account,
+                  fallbackToProvider: false,
+                  claimLegacyOwner: false,
+                  propagateFileSystemErrors: true,
+                )
+              : _loadBuckets(q.provider,
+                  fallbackToProvider: false,
+                  claimLegacyOwner: false,
+                  propagateFileSystemErrors: true);
+      if (buckets.isEmpty && (measuredCounts[q.provider] ?? 0) == 1) {
+        buckets = _loadBuckets(q.provider,
+            fallbackToProvider: false,
+            claimLegacyOwner: false,
+            propagateFileSystemErrors: true);
+      }
+    } on FileSystemException {
+      // Optional history is unavailable, not measured zero burn. Preserve the
+      // exact account's unknown fit without borrowing another account's data.
+      out[key] = const BurnStat();
+      continue;
     }
     if (accountBucketsConflicted) {
       final candidates = _conflictBurnCandidates(
@@ -4838,6 +4909,7 @@ List<HeadroomBucket> _loadBuckets(
   String? account,
   required bool fallbackToProvider,
   required bool claimLegacyOwner,
+  bool propagateFileSystemErrors = false,
 }) {
   try {
     final exactAccount =
@@ -4850,10 +4922,12 @@ List<HeadroomBucket> _loadBuckets(
       return [];
     }
     if (exactAccount != null &&
-        _bucketMigrationConflict(provider, exactAccount)) {
+        _bucketMigrationConflict(provider, exactAccount,
+            propagateFileSystemErrors: propagateFileSystemErrors)) {
       return [];
     }
     var f = _bucketsFile(provider, account: exactAccount);
+    if (propagateFileSystemErrors) _requireRegularAnalyticsFile(f);
     if (!f.existsSync() && exactAccount != null) {
       final legacy = _legacyBucketsFile(provider, account: exactAccount);
       if (legacy.existsSync() &&
@@ -4861,6 +4935,7 @@ List<HeadroomBucket> _loadBuckets(
             provider,
             exactAccount,
             claim: claimLegacyOwner,
+            propagateFileSystemErrors: propagateFileSystemErrors,
           )) {
         f = legacy;
       } else if (fallbackToProvider) {
@@ -4870,7 +4945,15 @@ List<HeadroomBucket> _loadBuckets(
         f = _bucketsFile(provider);
       }
     }
-    return List<HeadroomBucket>.of(_readBucketFile(f).buckets);
+    final read = _readBucketFile(f,
+        propagateFileSystemErrors: propagateFileSystemErrors);
+    if (!read.valid && propagateFileSystemErrors) {
+      throw FileSystemException('invalid analytics bucket evidence', f.path);
+    }
+    return List<HeadroomBucket>.of(read.buckets);
+  } on FileSystemException {
+    if (propagateFileSystemErrors) rethrow;
+    return [];
   } catch (_) {
     return [];
   }

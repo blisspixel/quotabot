@@ -74,7 +74,7 @@ the compiled CLI also validated three quota/routing tool results using synthetic
 data and isolated configuration. These are compatibility and maintenance checks,
 not an exploit reproduction or a comprehensive security audit.
 
-## Bounded Python gate
+## Original 0.11.7 bounded Python gate
 
 `mypy.ini` checks these maintained boundaries with normal import analysis,
 `strict = True`, Python 3.10 syntax compatibility, and
@@ -152,3 +152,88 @@ the correct seams. Strengthen their invariants with focused tests instead of
 adding parallel configuration, HTTP, persistence, or policy implementations.
 The remaining Python typing scope and local deadline evidence should be visible
 in the existing roadmap, with no second execution queue in this report.
+
+## Second round against 0.11.7
+
+The follow-up reviews the released source
+`c8aab69b3f2aefea2b07f59d7495248992034073`. Its
+[main CI](https://github.com/blisspixel/quotabot/actions/runs/36741772919),
+[immutable release](https://github.com/blisspixel/quotabot/releases/tag/v0.11.7),
+and [published install smoke](https://github.com/blisspixel/quotabot/actions/runs/36761142909)
+passed. That evidence establishes the starting release, not the new patch.
+
+| Confirmed defect | Correction and regression evidence |
+|---|---|
+| Explicit provider model requirements bypassed local fallback; an unrelated loaded model could supply readiness | Shared capability gates now include local entries only for explicit requirements and derive readiness from matching available models. Policy and live/cache MCP regressions preserve unfiltered compatibility and negative admission evidence. |
+| Sparse shared and scoped spent gates could report an earlier recovery reset | Select the latest spent reset, with unknown recovery dominating, while keeping minimum measured headroom. Tests cover unequal percentages within the spent floor and both unknown-reset orders. |
+| LM Studio loaded context fell back to advertised maximum and depended on first-instance order | Preserve model maximum separately; loaded instances contribute their declared context only. Missing or malformed context remains unknown, and coherent instances use the conservative minimum in display and routing. The [official model list](https://lmstudio.ai/docs/developer/rest/list) documents the distinct fields. |
+| Lemonade collections could hide remote components | Bounded traversal validates exact declared component identities against embedded model metadata. Known cloud scope vetoes local budgets; unresolved scope is omitted with a count-only diagnostic. The [tagged serializer](https://github.com/lemonade-sdk/lemonade/blob/v2026.39.1/src/cpp/server/server.cpp) and [recipe registry](https://github.com/lemonade-sdk/lemonade/blob/v2026.39.1/CMakeLists.txt) establish these fields. Complete supported non-cloud components retain legacy classification, not positive physical-device proof. |
+| Local metadata could follow redirects outside its loopback scope or accumulate an unbounded body | All three local adapters disable redirects and cap streamed bodies at 4 MiB. Real socket tests prove cancellation and reusable clients. Lemonade now shares the process client and abortable request seam, including retirement during fallback. |
+| Ollama partially accepted malformed capability arrays | Invalid siblings invalidate capability evidence as a whole; independent upstream exclusions remain. Pure and adapter regressions preserve valid empty declarations and prevent malformed arrays from qualifying a model. |
+| LiteLLM socket idle timeout could be extended indefinitely by trickling headers or bodies | One strict-checked standard-library transport owns the connection and cumulative deadline, including proof, TLS, framing and body. Native tests exercise slow reads, bounded caller wait, socket closure, cancellation, fallback and fail-closed managed routes. |
+| Reserve and release loaded credentials on the async event loop before their deadline | Credential preflight runs in the bounded worker. Heartbeat and expired-preflight regressions preserve responsiveness; rejected owned leases use the original credential for cleanup. |
+| Installed-proxy teardown depended on process enumeration and could leave a child holding its log | Test-only Windows job ownership starts before CLI work and checks descendant termination and exclusive log release. The [Windows job contract](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects) establishes inheritance and kill-on-close behavior. Native cleanup regressions retain the actual proxy authentication, routing and lease assertions. |
+| Release creation immediately depended on a second listing and upload tag lookup | Validate the POST creation response, then upload by numeric release ID. Preserve all exact owner/source, asset identity, fresh download and provenance gates. The [release API](https://docs.github.com/en/rest/releases/releases#create-a-release) returns the draft and the [asset API](https://docs.github.com/en/rest/releases/assets#upload-a-release-asset) accepts raw binary uploads for that ID. Regressions cover delayed listings, malformed draft identity, safe resume, and RC Latest preservation. |
+| Missing optional analytics storage made otherwise valid HTTP advice return 500 | The shared per-account history boundary retains an unknown fit on filesystem failure, preserving fresh measured quota and limited-confidence receipts. Synthetic unavailable-owned-storage tests retain quota, admission, drift and lease gates. |
+| Tests reached default user analytics storage and recursively listed generated caches | Local-server fixtures isolate per-case config. The audit prunes exact derived directories before descent, still detects violations across all maintained roots and extensions, and propagates maintained-source read failures. |
+
+The strict Python gate grows from five to six modules by extracting the actual
+loopback transport, replacing the previous implementation rather than adding
+a parallel client. Normal import analysis and explicit-`Any` rejection remain
+enabled. The SDK-facing router and other Python tooling still have typing debt;
+this is not whole-project strict typing.
+
+Independent review reran the release, transport and parser regressions. Tests
+use disposable local listeners and synthetic metadata, with no inference or
+host-credential mutations. Full-tree gates, native packaging, hosted CI, and
+published installation are subsequent evidence. Native runtime producer
+identity and live provider-account recovery remain open in ROADMAP Next.
+
+The suite passes 78 router tests, one installed fake-proxy test, and two
+Windows cleanup regressions on Python 3.13.15 and the supported Python 3.10.11
+floor with the unchanged hashed runtime. The proxy test copies both modules
+and isolates its import path. Three startup regressions confirmed that
+delayed token preflight or TLS context setup could start a fresh deadline after
+the caller expired. One absolute deadline now propagates through the worker and
+starts before transport construction; expired initialization cannot connect or
+dispatch. Reserve and release also keep token-file reads off the event loop.
+Independent review passes all 27 transport and lease tests, plus both Windows
+cleanup regressions and the installed proxy. Bundled SDK cost metadata avoids
+an unrelated network bootstrap in these synthetic fixtures.
+
+An OS filesystem or resolver call can outlive its asynchronous caller. The
+worker rejects later initialization and closes any expired eventual socket
+before TLS, metadata, or bearer dispatch. Active sockets are owned and closed
+by the cumulative deadline. This limit is distinct from bounded routing wait;
+Python threads cannot forcibly cancel that operating-system work.
+
+### Second-round local verification
+
+The frozen Unreleased source passed with Flutter 3.44.6, Dart 3.12.2, and
+Python 3.13.15. Dependency resolution used cached packages with enforced
+lockfiles because the managed network blocked the normal advisory request.
+The full portable script did not complete in that environment; its native
+analysis, test and coverage steps ran separately with unchanged checks.
+
+| Check | Result |
+|---|---|
+| Collector | Format and strict analysis clean; 2,183 passed, one Windows directory-link skip; 92.74 percent line coverage (16,710/18,019) |
+| Desktop | Format and strict analysis clean; 420 passed, one existing skip; 87.25 percent line coverage (5,521/6,328) |
+| Python static checks | Ruff lint and format clean; six strict modules with explicit `Any` forbidden; installed dependency checks pass |
+| Tools and release policy | 338 tests with 12 platform skips; final affected release/version/coverage checks pass 69 tests with one platform skip |
+| MCP snippets and plugin | Strict TypeScript no-emit check; 15 client tests; 17 plugin tests with one opt-in native-launch skip |
+| Compiled CLI and harness | Windows CLI build; isolated doctor, capability-filtered provider advice and local model schemas; real MCP 1.30.0 snapshot/provider/model calls; 26 harness tests |
+
+The full run found unisolated local-server history reads and generated audit
+directory traversal. The correction isolates owned test state, preserves every
+maintained source root, and makes optional failed account history explicit
+unknown evidence. Windows file-lock regressions exercise canonical buckets,
+legacy buckets, migration metadata and ownership markers, then prove recovery.
+The desktop regression retains incomplete storage and routed metrics while
+requiring exact-account zero samples, null burn and null uncertainty.
+
+Hosted three-OS CI, release packaging and published installation remain separate
+evidence. Stable is still 0.11.7. Preparation for 0.11.8 remains in ROADMAP Next:
+artifact downloads failed and the Sigstore verifier could not initialize in
+this environment. The canonical owner publisher must retain its fresh-download,
+attestation and immutable-publication gates.

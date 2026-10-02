@@ -1407,6 +1407,41 @@ void main() {
     expect(plain.last, contains('models:on'));
   });
 
+  for (final status in [null, 'ready - no model loaded']) {
+    test('legacy load state does not prove terminal readiness with $status',
+        () {
+      final quota = ProviderQuota.fromJson({
+        ..._q('ollama', const [], kind: ProviderQuotaKind.local).toJson(),
+        if (status != null) 'status': status,
+        'models': [
+          {'id': 'legacy', 'local': true},
+        ],
+      });
+      final plain = _frame([quota], width: 100).map(_plain).join('\n');
+      expect(plain, contains('reachable - load state unknown'));
+      expect(plain, isNot(contains('ready')));
+      expect(plain, isNot(contains('no model loaded')));
+    });
+  }
+
+  test('inspecting unknown load state does not imply cold or a host fit', () {
+    final plain = _frame([
+      _q(
+        'ollama',
+        const [],
+        kind: ProviderQuotaKind.local,
+        models: const [
+          ModelInfo(id: 'unobserved', local: true, loadedStateKnown: false),
+        ],
+      ),
+    ], width: 120, selected: 'ollama', inspectModels: true)
+        .map(_plain)
+        .join('\n');
+    expect(plain, contains('unobserved  load-unknown  ctx?'));
+    expect(plain, contains('load state unknown; fit unknown'));
+    expect(plain, isNot(contains('cold')));
+  });
+
   test('inspecting a non-text model explains its generation exclusion', () {
     final plain = _frame([
       _q(

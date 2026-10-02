@@ -10,6 +10,7 @@ import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
 import '../util.dart';
+import 'local_runtime_inventory.dart';
 
 /// One local model with whatever detail the runtime exposes. Fields are
 /// optional because runtimes differ (Ollama reports size and GPU residency; LM Studio
@@ -78,7 +79,7 @@ extension LocalModelExecutionEvidence on LocalModel {
 ///
 /// Reads `GET /api/tags` (installed), `GET /api/ps` (loaded), and, per model,
 /// `POST /api/show` for capabilities, maximum context, and upstream declarations.
-/// No login or token. Honors the standard OLLAMA_HOST override (default
+/// Sends no authentication token. Honors OLLAMA_HOST (default
 /// 127.0.0.1:11434).
 class OllamaAdapter {
   static const id = ollamaProviderId;
@@ -129,43 +130,50 @@ class OllamaAdapter {
     if (!isLoopbackRuntimeHost(_environment['OLLAMA_HOST'])) {
       return _nonLoopback(asOf);
     }
+    final diagnostics = LocalRuntimeInventoryDiagnostics();
     try {
       final installed = await _models(
         '/api/tags',
         timeout: inventoryRequestTimeout,
+        diagnostics: diagnostics,
       );
-      if (installed == null) return _notRunning(asOf);
-      final loaded = await _models('/api/ps') ?? const [];
+      if (installed == null) return _unavailable(asOf, diagnostics);
+      final loaded = await _models('/api/ps');
       return localRuntimeQuota(
         id: id,
         name: name,
         asOf: asOf,
-        installed: await _withDeclaredCapabilities(installed),
-        loaded: loaded,
+        installed: await _withDeclaredCapabilities(installed.models),
+        loaded: loaded?.models ?? const [],
+        loadedInventoryComplete: loaded?.complete ?? false,
       );
     } catch (_) {
-      return _notRunning(asOf);
+      return _unavailable(asOf, diagnostics);
     }
   }
 
-  /// Fetches and parses an Ollama model list endpoint, or null when the daemon
-  /// is unreachable.
-  Future<List<LocalModel>?> _models(
+  /// Fetches a model list, retaining inventory diagnostics when requested.
+  Future<({List<LocalModel> models, bool complete})?> _models(
     String path, {
     Duration timeout = detailRequestTimeout,
-  }) async {
-    try {
-      final resp = await sendMetadataRequest(
-        _http ?? sharedHttpClient,
-        Uri.parse('${baseUrl(environment: _environment)}$path'),
-        timeout: timeout,
-      ).timeout(timeout);
-      if (resp.statusCode != 200) return null;
-      return ollamaModelsFromJson(jsonDecode(resp.body));
-    } catch (_) {
-      return null;
-    }
-  }
+    LocalRuntimeInventoryDiagnostics? diagnostics,
+  }) =>
+      (diagnostics ?? LocalRuntimeInventoryDiagnostics()).read(
+        () => sendMetadataRequest(
+          _http ?? sharedHttpClient,
+          Uri.parse('${baseUrl(environment: _environment)}$path'),
+          followRedirects: false,
+          maxResponseBytes: localRuntimeMetadataMaxResponseBytes,
+          timeout: timeout,
+        ).timeout(timeout),
+        (data) {
+          if (data is! Map) return null;
+          final rawModels = data['models'];
+          if (rawModels is! List) return null;
+          final models = ollamaModelsFromJson(data);
+          return (models: models, complete: models.length == rawModels.length);
+        },
+      );
 
   /// Fills in the declared capabilities and maximum context that `/api/tags`
   /// omits, by reading each model's own metadata from `/api/show`.
@@ -235,6 +243,8 @@ class OllamaAdapter {
         method: 'POST',
         headers: const {'Content-Type': 'application/json'},
         body: jsonEncode({'model': model.name}),
+        followRedirects: false,
+        maxResponseBytes: localRuntimeMetadataMaxResponseBytes,
         timeout: detailRequestTimeout,
       ).timeout(detailRequestTimeout);
       if (resp.statusCode != 200) return null;
@@ -250,7 +260,11 @@ class OllamaAdapter {
     }
   }
 
-  ProviderQuota _notRunning(int asOf) => ProviderQuota(
+  ProviderQuota _unavailable(
+    int asOf,
+    LocalRuntimeInventoryDiagnostics diagnostics,
+  ) =>
+      ProviderQuota(
         provider: id,
         displayName: name,
         account: 'local',
@@ -258,7 +272,8 @@ class OllamaAdapter {
         kind: ProviderQuotaKind.local,
         asOf: asOf,
         ok: false,
-        error: 'not running',
+        error: diagnostics.error,
+        httpStatus: diagnostics.httpStatus,
       );
 
   ProviderQuota _nonLoopback(int asOf) => ProviderQuota(
@@ -393,7 +408,10 @@ final _upstreamInvalidCharacters = RegExp(r'[\s\x00-\x1f\x7f]');
 DeclaredModelCapabilities? ollamaShowFromJson(dynamic data) {
   if (data is! Map) return null;
   final capabilities = data['capabilities'];
-  if (capabilities is! List) return null;
+  if (capabilities is! List ||
+      capabilities.any((c) => c is! String || c.trim().isEmpty)) {
+    return null;
+  }
   final declared = <String>{
     for (final c in capabilities)
       if (c is String) c.trim().toLowerCase(),
@@ -401,8 +419,7 @@ DeclaredModelCapabilities? ollamaShowFromJson(dynamic data) {
   // Ollama declares its thinking capability in the same metadata array:
   // https://github.com/ollama/ollama/blob/main/types/model/capability.go
   // An empty or malformed list cannot newly qualify a reasoning route.
-  final validReasoningDeclaration = capabilities.isNotEmpty &&
-      capabilities.every((c) => c is String && c.trim().isNotEmpty);
+  final validReasoningDeclaration = capabilities.isNotEmpty;
   return (
     tools: declared.contains('tools'),
     vision: declared.contains('vision'),
@@ -537,6 +554,9 @@ ProviderQuota localRuntimeQuota({
   required int asOf,
   required List<LocalModel> installed,
   required List<LocalModel> loaded,
+  bool loadedInventoryComplete = true,
+  Set<String> unknownLoadModelNames = const {},
+  List<String> detailLines = const [],
   int? now,
 }) {
   String shortName(String n) => n.split(':').first;
@@ -572,6 +592,11 @@ ProviderQuota localRuntimeQuota({
     );
     final running =
         matches.isEmpty || veto || identityConflict ? null : matches.first;
+    // Positive coherent residency survives an incomplete list. Only exhaustive
+    // observations prove absence or a context bound across every instance.
+    final observationComplete = loadedInventoryComplete &&
+        !unknownLoadModelNames.contains(model.name) &&
+        !identityConflict;
     if (running != null) coherentLoaded[model.name] = running;
     models.add(ModelInfo(
       id: model.name,
@@ -579,9 +604,16 @@ ProviderQuota localRuntimeQuota({
       cloudOffloaded: cloud,
       upstreamRouting: upstream,
       loaded: running != null,
+      // Execution vetoes discard residency rather than establish absence; a
+      // daemon list cannot prove that an upstream deployment is cold.
+      loadedStateKnown: !veto && (running != null || observationComplete),
       sizeBytes: model.bytes,
       quant: model.quant,
-      contextTokens: running?.context ?? model.context,
+      contextTokens: !observationComplete
+          ? null
+          : running == null
+              ? model.context
+              : _minimumRunningContext(matches),
       vramBytes: running?.vramBytes,
       tools: model.tools,
       vision: model.vision,
@@ -599,10 +631,14 @@ ProviderQuota localRuntimeQuota({
       .any((model) => model.upstreamRouting == UpstreamRouting.unresolved);
   final hasUpstream =
       models.any((model) => model.upstreamRouting == UpstreamRouting.declared);
+  final hasUnknownLoadedState =
+      localInstalled.any((model) => !model.loadedStateKnown);
 
   final status = headline == null
       ? localInstalled.isNotEmpty
-          ? 'ready - no model loaded'
+          ? hasUnknownLoadedState
+              ? 'reachable - load state unknown'
+              : 'ready - no model loaded'
           : hasUnresolved
               ? 'reachable - upstream routing unresolved'
               : hasUpstream
@@ -620,7 +656,7 @@ ProviderQuota localRuntimeQuota({
           'loaded',
         ].join(' ');
 
-  final details = <String>[];
+  final details = <String>[...detailLines];
   if (hasUnresolved || hasUpstream) {
     details.add(
         'Upstream routing reported; execution location and cost unverified');
@@ -630,8 +666,9 @@ ProviderQuota localRuntimeQuota({
     if (headline.vramBytes != null) {
       bits.add('${formatCompactBytes(headline.vramBytes!)} GPU resident');
     }
-    if (headline.context != null) {
-      bits.add('${formatContextTokens(headline.context!)} running context');
+    final context = localLoaded.first.contextTokens;
+    if (context != null) {
+      bits.add('${formatContextTokens(context)} running context');
     }
     if (headline.expiresAt != null) {
       final secs = headline.expiresAt! - (now ?? nowEpoch());
@@ -664,6 +701,19 @@ ProviderQuota localRuntimeQuota({
     models: models,
     perMachine: true,
   );
+}
+
+/// Without an exact dispatch instance, only the smallest context shared by all
+/// coherent loaded instances can qualify a request. Missing or invalid running
+/// evidence never falls back to the model's advertised maximum.
+int? _minimumRunningContext(List<LocalModel> models) {
+  int? minimum;
+  for (final model in models) {
+    final context = model.context;
+    if (context == null || context < 1 || context > 100000000) return null;
+    if (minimum == null || context < minimum) minimum = context;
+  }
+  return minimum;
 }
 
 String _dur(int secs) {

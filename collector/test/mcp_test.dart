@@ -844,6 +844,64 @@ void main() {
           contains('execution location and cost are unverified'));
     });
 
+    test(
+        'unknown residency survives MCP tools and their declared output schema',
+        () async {
+      await connect([
+        ProviderQuota(
+          provider: 'ollama',
+          displayName: 'Ollama',
+          account: 'fixture',
+          asOf: _now,
+          kind: ProviderQuotaKind.local,
+          models: const [
+            ModelInfo(
+              id: 'unobserved',
+              local: true,
+              loadedStateKnown: false,
+              contextTokens: 131072,
+              tools: true,
+            ),
+          ],
+        ),
+      ]);
+      final tools = await client.listTools();
+      final listing =
+          tools.tools.singleWhere((tool) => tool.name == 'list_models');
+      final properties = listing.outputSchema!.toJson()['properties'] as Map;
+      final modelProperties = (((properties['models'] as Map)['items']
+          as Map)['properties'] as Map);
+      expect((modelProperties['loaded_state_known'] as Map)['type'], 'boolean');
+      expect((modelProperties['hardware_fit_basis'] as Map)['enum'],
+          contains('load_state_unreported'));
+      for (final name in ['list_models', 'suggest_model']) {
+        final result = await client.callTool(CallToolRequest(
+          name: name,
+          arguments: const {'budget': 'local', 'require_tools': true},
+        ));
+        expect(result.isError, isFalse);
+        final payload = result.structuredContent!;
+        final model = name == 'list_models'
+            ? (payload['models'] as List).single as Map
+            : payload['recommended'] as Map;
+        expect(model['loaded_state_known'], isFalse);
+        expect(model, isNot(contains('loaded')));
+        expect(model, isNot(contains('local_readiness')));
+        expect(model['available'], isTrue);
+        expect(model['hardware_fit'], 'unknown');
+        expect(model['hardware_fit_basis'], 'load_state_unreported');
+        final filtered = await client.callTool(CallToolRequest(
+          name: name,
+          arguments: const {'budget': 'local', 'min_context': 65536},
+        ));
+        expect(filtered.isError, isFalse);
+        expect(
+            filtered.structuredContent![
+                name == 'list_models' ? 'models' : 'recommended'],
+            name == 'list_models' ? isEmpty : isNull);
+      }
+    });
+
     test('tool annotations reflect live collection and local writes', () async {
       await connect(_fixture());
       final tools = await client.listTools();
@@ -1497,6 +1555,55 @@ void main() {
           .cast<Map<String, dynamic>>()
           .firstWhere((route) => route['provider'] == 'claude');
       expect(claude.containsKey('capability_limited'), isFalse);
+    });
+
+    test('live and cached provider profiles cannot bypass local capabilities',
+        () async {
+      final snapshot = _fixture();
+      await connect(
+        snapshot,
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: snapshot,
+          asOf: _now,
+          source: 'memory',
+        ),
+        catalog: const {
+          'claude': [
+            ModelInfo(
+              id: 'claude-test',
+              contextTokens: 200000,
+              vision: true,
+              reasoning: 'reasoning',
+              tier: 'standard',
+            ),
+          ],
+        },
+      );
+
+      for (final tool in const ['suggest_provider', 'decide_now']) {
+        for (final profile in const [
+          {'require_vision': true, 'local_first': true},
+          {'task': 'hard', 'local_first': true},
+        ]) {
+          final response = await client.callTool(
+            CallToolRequest(name: tool, arguments: profile),
+          );
+          expect(response.isError, isNot(true));
+          expect(
+            (response.structuredContent?['recommended'] as Map)['provider'],
+            'claude',
+          );
+          final local = (response.structuredContent?['ranked'] as List)
+              .cast<Map<String, dynamic>>()
+              .singleWhere((candidate) => candidate['local'] == true);
+          expect(local['available'], isFalse);
+          expect(local['capability_limited'], isTrue);
+          expect(
+            (response.structuredContent?['fallback'] as Map)['kind'],
+            isNot('local'),
+          );
+        }
+      }
     });
 
     test('suggest_model can prefer expiring included quota when requested',

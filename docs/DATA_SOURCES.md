@@ -624,6 +624,10 @@ format overhead can differ from the estimate.
   `capabilities` array carrying `tool_use`, and a `type` where `vlm` is a
   vision-language model), then the OpenAI-compatible `GET /v1/models` (names
   only, no load state, no capabilities).
+  Loaded context comes only from the instance configuration, never from
+  `max_context_length`. For multiple instances of one model, the smallest
+  coherent running context is used; a missing or malformed instance context
+  makes it unknown. Instance order cannot change context eligibility.
   Honors `LMSTUDIO_HOST`, default `http://127.0.0.1:1234`.
   The LM Studio local server must be started (Developer tab, or `lms server
   start`); loading a model in the chat window does not start it. Metadata only;
@@ -642,10 +646,58 @@ format overhead can differ from the estimate.
   omits an explicitly non-downloaded local catalog row, and marks
   `recipe: "cloud"` or `cloud_provider` entries `cloud_offloaded`. The optional
   matching `GET /api/v1/health` or `/v1/health` read supplies loaded model names
-  and each running `ctx_size`; failure leaves the inventory cold but intact. A
+  and each running `ctx_size`; failure keeps the inventory intact with load
+  state and context unknown. A
   valid empty list proves that the server is reachable but supplies no local
   capacity. Honors `LEMONADE_HOST` and `LEMONADE_PORT`; the default is
   `http://127.0.0.1:13305`.
+
+  Supported composites resolve only declared component names and embedded
+  model metadata, with depth and node limits. A cloud component marks the
+  composite cloud-offloaded. Missing, conflicting, cyclic, unsupported, or
+  truncated component scope omits the composite from admitted inventory and
+  adds a count-only diagnostic. Routing policies are never read or executed.
+  Complete non-cloud components preserve the existing runtime classification;
+  they do not prove physical on-device execution.
+
+All three runtime adapters disable redirects and cap each metadata response at
+4 MiB during streaming. The shared HTTP client aborts headers and response-body
+reads at each request's two-second deadline. Lemonade uses this same client and
+cannot create a new pool after process shutdown retires it. Caller-injected
+clients remain caller-owned; a custom client can ignore cancellation.
+
+Inventory failures preserve sanitized HTTP evidence: 401 means authentication
+required, 403 means access denied, a malformed successful response means invalid
+model metadata, and other HTTP failures mean metadata unavailable. Transport
+failure retains `not running` without an invented HTTP status. Failed fallback
+probes cannot replace authentication or invalid-metadata evidence with a later
+unsupported endpoint response. A valid fallback still supplies the inventory.
+These failures remain unavailable and expose neither response bodies nor
+exception text. Optional loaded-detail failures do not fail a valid inventory,
+but cannot establish cold readiness or a context requirement.
+
+As checked on 2026-10-01, [Ollama's running list](https://docs.ollama.com/api/ps)
+and [LM Studio's loaded instances](https://lmstudio.ai/docs/developer/rest/list)
+are distinct from installed inventory and advertised maximum context.
+[Lemonade v2026.39.1 health](https://github.com/lemonade-sdk/lemonade/blob/v2026.39.1/docs/api/lemonade.md)
+distinguishes `all_models_loaded` from the legacy most-recent `model_loaded`.
+A complete empty running list proves cold state; missing, failed, malformed,
+or incomplete load evidence does not. An unversioned legacy Lemonade
+`model_loaded` value alone has unverified older residency semantics and cannot
+prove siblings cold, so load state remains unknown. Current tagged health
+reports the complete field. Partial loaded
+instances retain usable positive observations while withholding context that
+an unseen smaller instance could invalidate. Digest conflicts remain unknown.
+The normalized `loaded_state_known` flag preserves this distinction through
+cache and model outputs. Unknown load state keeps general inventory advice,
+omits `local_readiness`, yields unknown host fit, and rejects explicit context
+floors rather than substituting an advertised maximum.
+
+As checked on 2026-10-01, [LM Studio authentication](https://lmstudio.ai/docs/developer/core/authentication)
+can require an API token on every REST request. quotabot's local-runtime probes
+do not send an authentication token or change the server's access settings.
+Token-required configurations therefore report the access failure; they are
+not evidence that the server is stopped.
 
 A runtime also states each model's kind, and quotabot uses it in the opposite
 direction from a capability. Ollama declares `completion` for every model that
@@ -674,6 +726,10 @@ absence and is recorded as such. An unloaded model can report a configured
 context or an advertised maximum; neither proves an active instance's context.
 Valid running context wins when the runtime declares it. An explicitly malformed
 current context remains unknown rather than falling back to the maximum.
+Provider advice with explicit model requirements applies these same gates to
+local fallback. A loaded sibling that does not match the requirements cannot
+make a matching cold model appear loaded. Advice without explicit model
+requirements retains the existing provider fallback behavior.
 
 Ollama's per-model capability read is bounded on purpose. Results are cached for
 the process by the runtime's own content digest, so a refresh loop re-probes

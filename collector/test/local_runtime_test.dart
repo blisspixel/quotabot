@@ -38,6 +38,37 @@ LocalModel _m(
 
 void main() {
   group('localRuntimeQuota', () {
+    test('missing running context never inherits installed maximum', () {
+      final quota = localRuntimeQuota(
+        id: 'ollama',
+        name: 'Ollama',
+        asOf: 100,
+        installed: [_m('test-chat', context: 131072)],
+        loaded: [_m('test-chat')],
+      );
+      expect(quota.models.single.loaded, isTrue);
+      expect(quota.models.single.contextTokens, isNull);
+      expect(quota.details.join(' '), isNot(contains('running context')));
+    });
+
+    test('invalid running context dominates every coherent instance', () {
+      for (final invalid in [0, -1, 100000001]) {
+        final quota = localRuntimeQuota(
+          id: 'ollama',
+          name: 'Ollama',
+          asOf: 100,
+          installed: [_m('test-chat', context: 131072)],
+          loaded: [
+            _m('test-chat', context: 65536),
+            _m('test-chat', context: invalid)
+          ],
+        );
+        expect(quota.models.single.loaded, isTrue);
+        expect(quota.models.single.contextTokens, isNull);
+        expect(quota.details.join(' '), isNot(contains('running context')));
+      }
+    });
+
     test('reports a loaded model with residency detail', () {
       final q = localRuntimeQuota(
         id: 'ollama',

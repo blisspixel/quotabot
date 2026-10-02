@@ -23,6 +23,7 @@ void main() {
                   'params_string': '7B',
                   'loaded_instances': [
                     {
+                      'id': 'qwen-instance',
                       'config': {'context_length': 4096},
                     },
                   ],
@@ -85,13 +86,17 @@ void main() {
       expect(q.models, hasLength(2));
       expect(q.active, isFalse, reason: 'compat listing has no load state');
       expect(q.models.every((m) => !m.loaded), isTrue);
+      expect(q.models.every((m) => !m.loadedStateKnown), isTrue);
+      expect(q.status, 'reachable - load state unknown');
     });
 
-    test('is not running when no endpoint answers', () async {
+    test('reports metadata failure when every endpoint returns HTTP 503',
+        () async {
       final client = MockClient((_) async => http.Response('down', 503));
       final q = await LmStudioAdapter(client: client).collect();
       expect(q.ok, isFalse);
-      expect(q.error, 'not running');
+      expect(q.error, 'runtime metadata unavailable (HTTP 503)');
+      expect(q.httpStatus, 503);
     });
 
     test('refuses a LAN host without contacting it', () async {
@@ -181,6 +186,7 @@ void main() {
     expect(parsed, isNotNull);
     expect(parsed!.installed.single.name, 'valid/model');
     expect(parsed.loaded, isEmpty);
+    expect(parsed.unknownLoadModelNames, {'valid/model'});
     expect(parsed.installed.single.bytes, isNull);
     expect(parsed.installed.single.param, isNull);
     expect(parsed.installed.single.quant, isNull);

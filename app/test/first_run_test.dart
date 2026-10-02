@@ -15,6 +15,7 @@ ProviderQuota _quota({
   String? suspect,
   String? driftReason,
   String? error,
+  int? httpStatus,
   List<QuotaWindow> windows = const [],
   List<ModelInfo> models = const [],
 }) {
@@ -27,6 +28,7 @@ ProviderQuota _quota({
     ok: ok,
     kind: local ? ProviderQuotaKind.local : ProviderQuotaKind.subscription,
     error: error,
+    httpStatus: httpStatus,
     stale: stale,
     suspect: suspect,
     driftReason: driftReason,
@@ -54,6 +56,84 @@ void main() {
     expect(claude.defaultSelected, isTrue);
     expect(claude.needsSetup, isFalse);
     expect(claude.statusLabel, 'live');
+  });
+
+  for (final provider in ['ollama', 'lmstudio', 'lemonade']) {
+    for (final status in [401, 403]) {
+      test('$provider HTTP $status gives metadata access setup guidance', () {
+        final entry = firstRunEntries([
+          _quota(
+            provider: provider,
+            name: provider,
+            local: true,
+            ok: false,
+            httpStatus: status,
+          ),
+        ], now).firstWhere((entry) => entry.id == provider);
+        expect(entry.presence, FirstRunPresence.found);
+        expect(entry.needsSetup, isTrue);
+        expect(
+          entry.statusLabel,
+          status == 401 ? 'authentication required' : 'metadata access denied',
+        );
+        expect(
+          entry.setupHint,
+          status == 401
+              ? 'The local server requires authentication. Review its metadata access settings.'
+              : 'The local server denied metadata access. Review its access settings.',
+        );
+        expect(entry.canConnect, isFalse);
+      });
+    }
+  }
+
+  test('offline local setup makes no authentication claim', () {
+    final entry = firstRunEntries([
+      _quota(provider: 'lmstudio', name: 'LM Studio', local: true, ok: false),
+    ], now).firstWhere((entry) => entry.id == 'lmstudio');
+    expect(entry.statusLabel, 'found on this machine');
+    expect(
+      entry.setupHint,
+      'Start the local server and enable metadata access.',
+    );
+  });
+
+  for (final failure in [
+    (
+      status: 200,
+      label: 'invalid model metadata',
+      hint:
+          'The local server returned invalid model metadata. Check its version and settings.',
+    ),
+    (
+      status: 503,
+      label: 'metadata unavailable',
+      hint:
+          'The local server\'s model metadata is unavailable. Check its status and settings.',
+    ),
+  ]) {
+    test('reached local HTTP ${failure.status} does not suggest startup', () {
+      final entry = firstRunEntries([
+        _quota(
+          provider: 'lmstudio',
+          name: 'LM Studio',
+          local: true,
+          ok: false,
+          httpStatus: failure.status,
+        ),
+      ], now).firstWhere((entry) => entry.id == 'lmstudio');
+      expect(entry.statusLabel, failure.label);
+      expect(entry.setupHint, failure.hint);
+      expect(entry.presence, FirstRunPresence.found);
+    });
+  }
+
+  test('cloud authentication keeps its own connection guidance', () {
+    final entry = firstRunEntries([
+      _quota(provider: 'claude', name: 'Claude', ok: false, httpStatus: 401),
+    ], now).firstWhere((entry) => entry.id == 'claude');
+    expect(entry.setupHint, 'Open Claude Code and sign in once.');
+    expect(entry.statusLabel, 'found on this machine');
   });
 
   test('best multi-account evidence wins regardless of snapshot order', () {

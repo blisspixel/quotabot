@@ -2392,7 +2392,7 @@ void main() {
       expect(v.resetsAt, 5000);
     });
 
-    test('a local runtime is never gated even with capability sets', () {
+    test('default local fallback is not gated by the subscription floor', () {
       final v = verdict(
           quota: _local('ollama'), known: const {}, available: const {});
       expect(v.blocked, isFalse);

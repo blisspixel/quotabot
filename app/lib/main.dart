@@ -4950,7 +4950,9 @@ class _DashboardState extends State<Dashboard>
       if (ready && q.localGenerationReadiness == 'loaded') {
         return ('loaded', green);
       }
-      return ready ? ('ready', blue) : ('reachable', blue);
+      return ready && q.localGenerationReadiness == 'cold'
+          ? ('ready', blue)
+          : ('reachable', blue);
     }
     if (q.driftReason != null) return ('provider drift', errorColor);
     if (!q.ok) {
@@ -6327,9 +6329,7 @@ class ProviderTile extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                ready
-                    ? quota.status ?? 'running'
-                    : 'No eligible generation model',
+                localRuntimeStatusLabel(quota),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -6343,7 +6343,7 @@ class ProviderTile extends StatelessWidget {
             Text(
               loaded
                   ? 'loaded'
-                  : ready
+                  : ready && quota.localGenerationReadiness == 'cold'
                   ? 'ready'
                   : 'reachable',
               style: TextStyle(fontSize: AppType.small, color: muted),
