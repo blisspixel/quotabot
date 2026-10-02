@@ -160,10 +160,11 @@ class _OwnedHTTPSConnection(http.client.HTTPSConnection):
 
     def __init__(self, host: str, port: int | None, timeout: float) -> None:
         self._deadline: _Deadline | None = None
-        self._tls_context = ssl.create_default_context()
-        self._tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
-        self._tls_context.set_alpn_protocols(["http/1.1"])
-        super().__init__(host, port, timeout=timeout, context=self._tls_context)
+        context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.set_alpn_protocols(["http/1.1"])
+        self._tls_context = context
+        super().__init__(host, port, timeout=timeout, context=context)
 
     def set_deadline(self, deadline: _Deadline) -> None:
         self._deadline = deadline
