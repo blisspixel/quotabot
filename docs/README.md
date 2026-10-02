@@ -4,12 +4,12 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.11.7. It refreshed model evidence,
-account-bound leases, and security dependencies. Source prepared for 0.11.8 makes
-explicit model gates consistent across provider advice, keeps loaded context
-conservative, bounds metadata transport, and excludes unresolved composite scope.
-Publication is pending; the published stable release remains 0.11.7. The
-[September 30 review](research/2026-09-30-review.md) records its evidence and
+The current verified stable release is 0.11.8. It makes explicit model gates
+consistent across provider advice, keeps loaded context conservative, bounds
+metadata transport, excludes unresolved composite scope, and improves settings
+navigation. The preceding 0.11.7 refreshed model evidence, account-bound leases,
+and security dependencies. The
+[September 30 review](research/2026-09-30-review.md) records the research and
 remaining validation gaps. The preceding 0.11.6 corrects NVIDIA catalog
 evidence and expands native legacy MCP launch checks. The September 13 review
 refreshes provider, runtime, and protocol priorities. Version 0.11.5 reads the live Claude weekly
