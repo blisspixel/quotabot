@@ -10,12 +10,15 @@ import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot/provider_display.dart';
 import 'package:quotabot/quota_loading_indicator.dart';
+import 'package:quotabot/settings_dialog.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot/update_check.dart';
 import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/webhook.dart';
+
+import 'support/settings_navigation.dart';
 
 Widget _wrap(
   Widget child, {
@@ -70,6 +73,7 @@ Future<void> _selectMenuValue(WidgetTester tester, String value) async {
     return;
   }
   if (value == 'webhook') {
+    await selectSettingsCategory(tester, SettingsCategory.alerts);
     final target = find.byKey(const ValueKey('settings-webhook'));
     await tester.ensureVisible(target);
     await tester.tap(target);
@@ -100,6 +104,12 @@ Future<void> _selectMenuValue(WidgetTester tester, String value) async {
       'text:medium' => 'settings-text-medium',
       _ => throw StateError('Unknown settings action $value'),
     };
+    await selectSettingsCategory(
+      tester,
+      value.startsWith('cad:') || value == 'notifications'
+          ? SettingsCategory.alerts
+          : SettingsCategory.display,
+    );
     if (value.startsWith('sort:')) {
       final target = find.byKey(const ValueKey('settings-sort'));
       await tester.ensureVisible(target);
@@ -803,6 +813,7 @@ void main() {
     expect(posts, 1);
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await selectSettingsCategory(tester, SettingsCategory.alerts);
     expect(find.text('Alert webhook: delivery failed'), findsOneWidget);
 
     await tester.tap(find.text('Alert webhook: delivery failed'));
@@ -819,6 +830,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await selectSettingsCategory(tester, SettingsCategory.alerts);
     expect(find.text('Alert webhook: delivery failed'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
@@ -2097,7 +2109,9 @@ void main() {
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await selectSettingsCategory(tester, SettingsCategory.display);
     expect(find.text('Provider order'), findsOneWidget);
+    await selectSettingsCategory(tester, SettingsCategory.alerts);
     expect(find.text('Configure alert webhook'), findsOneWidget);
     tester.state<NavigatorState>(find.byType(Navigator).first).pop();
     await tester.pumpAndSettle();
@@ -2210,11 +2224,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Profiles and providers'), findsOneWidget);
     expect(find.text('Display'), findsOneWidget);
-    expect(find.text('Refresh and alerts'), findsOneWidget);
+    expect(find.text('Alerts'), findsOneWidget);
     expect(find.text('Updates'), findsOneWidget);
-    expect(find.text('Installed build: $quotabotAppBuild'), findsOneWidget);
+    expect(find.text('Installed build: $quotabotAppBuild'), findsNothing);
     expect(checks, 0);
 
+    await selectSettingsCategory(tester, SettingsCategory.updates);
     final checkUpdates = find.byKey(const ValueKey('settings-check-updates'));
     await tester.ensureVisible(checkUpdates);
     await tester.tap(checkUpdates);
@@ -2276,6 +2291,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await selectSettingsCategory(tester, SettingsCategory.updates);
     final install = find.byKey(const ValueKey('settings-install-update'));
     await tester.ensureVisible(install);
     await tester.tap(install);
@@ -2322,6 +2338,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await selectSettingsCategory(tester, SettingsCategory.updates);
     final checkUpdates = find.byKey(const ValueKey('settings-check-updates'));
     await tester.ensureVisible(checkUpdates);
     await tester.tap(checkUpdates);
@@ -2379,6 +2396,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await selectSettingsCategory(tester, SettingsCategory.updates);
     final checkUpdates = find.byKey(const ValueKey('settings-check-updates'));
     await tester.ensureVisible(checkUpdates);
     await tester.tap(checkUpdates);
@@ -2420,6 +2438,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await selectSettingsCategory(tester, SettingsCategory.updates);
     final checkUpdates = find.byKey(const ValueKey('settings-check-updates'));
     await tester.ensureVisible(checkUpdates);
     await tester.tap(checkUpdates);
@@ -2472,16 +2491,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Settings'), findsOneWidget);
 
+    await selectSettingsCategory(tester, SettingsCategory.updates);
     final releases = find.byKey(const ValueKey('settings-open-releases'));
     await tester.ensureVisible(releases);
     await tester.pumpAndSettle();
     expect(releases, findsOneWidget);
-    expect(find.text('Connections'), findsOneWidget);
     expect(find.text('Install latest update'), findsOneWidget);
+    await selectSettingsCategory(tester, SettingsCategory.providers);
+    expect(find.text('Connections'), findsOneWidget);
     final connections = tester.widget<Text>(find.text('Connections'));
-    expect(connections.maxLines, 1);
-    expect(connections.overflow, TextOverflow.ellipsis);
-    expect(connections.softWrap, isFalse);
+    expect(connections.maxLines, isNull);
+    expect(connections.overflow, isNull);
+    expect(connections.softWrap, isNot(isFalse));
+    await tester.tap(find.byTooltip('Close settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Settings'), findsNothing);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox());
@@ -3079,6 +3103,7 @@ void main() {
 
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
+      await selectSettingsCategory(tester, SettingsCategory.alerts);
       await tester.tap(find.byKey(const ValueKey('settings-notifications')));
       await tester.pump();
       releaseSchedule.complete();

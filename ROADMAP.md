@@ -249,6 +249,9 @@ support. This maintenance does not wait for post-1.0 stabilization.
 6. **Make everyday native use dependable.** Prioritize honest GPU evidence and
    runtime reachability, Linux behavior when a tray host is absent, coalesced
    freshness recovery after sleep or foregrounding, and Windows/WSL/host scope.
+   Prepared 0.11.8 settings add direct section navigation, fixed Close, and
+   wrapping labels, with keyboard, resize, large-text, and rendered-layout
+   regression evidence. Native screen-reader validation remains separate.
    Quota refresh now completes independently of advisory analytics; the next
    recovery work must retain that separation and discard older completions.
    Extend supported AMD, NVIDIA, and Apple unified-memory probes only when a

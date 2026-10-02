@@ -3,8 +3,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/desktop_notification_policy.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
+import 'package:quotabot/settings_dialog.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/models.dart';
+
+import 'support/settings_navigation.dart';
 
 const _automationPolicies = {
   'screenshots': DesktopNotificationPolicy(screenshotCapture: true),
@@ -101,6 +104,7 @@ void _desktopSurface(WidgetTester tester) {
 Future<void> _toggleNotifications(WidgetTester tester) async {
   await tester.tap(find.byTooltip('Settings'));
   await tester.pumpAndSettle();
+  await selectSettingsCategory(tester, SettingsCategory.alerts);
   final toggle = find.byKey(const ValueKey('settings-notifications'));
   await tester.ensureVisible(toggle);
   await tester.tap(toggle);
