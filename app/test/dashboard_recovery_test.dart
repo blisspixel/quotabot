@@ -6,9 +6,12 @@ import 'package:quotabot/desktop_analytics.dart';
 import 'package:quotabot/desktop_refresh_recovery.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
+import 'package:quotabot/settings_dialog.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:window_manager/window_manager.dart';
+
+import 'support/settings_navigation.dart';
 
 class _Clock {
   DateTime now = DateTime.utc(2026, 9, 5, 12);
@@ -624,6 +627,7 @@ void main() {
     clock.advance(const Duration(minutes: 1));
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await selectSettingsCategory(tester, SettingsCategory.alerts);
     final cadence = find.byKey(const ValueKey('settings-cadence-15m'));
     await tester.ensureVisible(cadence);
     await tester.tap(cadence);

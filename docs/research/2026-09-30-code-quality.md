@@ -308,3 +308,34 @@ fixture also prepares its trusted context before timing the real handshake.
 Both runtime suites pass; 20 late-TCP repetitions pass on each Python version,
 and removing the pre-TLS deadline check is rejected. Constructor and worker
 preflight deadline regressions continue to test initialization separately.
+
+### Settings interaction follow-up
+
+The October 1 settings review rendered the actual dialog with synthetic data
+and real fonts. Its provider block consumed most of a normal window, leaving
+display, alert, and update controls below the visible area. Large text truncated
+action labels. A focused layout now uses typed Providers, Display, Alerts, and
+Updates categories, a narrow-window selector, fixed navigation and Close, and
+an owned visible scrollbar. Existing preference and update handlers remain in
+the dashboard; the presentation lives in `app/lib/settings_dialog.dart`.
+
+The pinned Flutter 3.44.6 analyzer and formatter pass. The full desktop suite
+passes 449 tests, with one existing Windows link-permission skip, and 87.46
+percent line coverage (5,627/6,434). Category selection, keyboard activation,
+resize continuity, one desktop scrollbar, scroll reset, narrow
+260x360 and 320x520 layouts at 2x text, account privacy, notification recovery,
+and manual update behavior retain regression coverage. Real-font dark, light,
+wide, hacker, and narrow renders were inspected. These are widget and synthetic-data
+checks, separate from native keyboard and screen-reader validation.
+
+The interaction choices follow current Flutter guidance for
+[single category selection](https://api.flutter.dev/flutter/material/ChoiceChip-class.html),
+[owned visible scrollbars](https://api.flutter.dev/flutter/material/Scrollbar/thumbVisibility.html),
+and [accessible targets and text scaling](https://docs.flutter.dev/ui/accessibility).
+The implementation uses the pinned toolchain rather than changing framework
+versions for this layout work.
+
+The native Windows release package also builds successfully. Its isolated
+readiness check reports a ready window and tray, stops the test process, and
+confirms the complete bundle stayed unchanged. This proves packaged startup,
+not Narrator behavior or native interaction on every supported platform.

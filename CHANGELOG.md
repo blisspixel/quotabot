@@ -16,6 +16,11 @@ owner publication.
   address current advisories while preserving unrelated pins.
 - Require TLS 1.2 or newer for the owned Python metadata HTTPS transport while
   preserving certificate and hostname verification.
+- Give Settings direct Providers, Display, Alerts, and Updates navigation, with
+  a compact section selector in narrow windows. Keep Close and navigation
+  outside the scrolling controls, show an owned scrollbar, and wrap action and
+  switch labels at larger text sizes. Preserve existing preference, account,
+  notification, and user-invoked update behavior.
 - Preserve unknown local-model load state across adapters, cache, routing,
   JSON, desktop detail, and terminal inspection. Failed or incomplete load
   metadata cannot become confirmed cold capacity, an advertised running

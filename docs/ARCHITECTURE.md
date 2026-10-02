@@ -79,6 +79,8 @@ integrations/mcp_clients/
 
 app/ (Flutter desktop)
   main.dart   imports collectAll(), renders cards, adaptive refresh
+  settings_dialog.dart  typed section navigation and owned scrolling; preference
+                        and update actions remain in the dashboard
   fleet.dart  the Quota Analytics screen (Now/7d/90d, charts, optional LiteLLM
               routed-request metrics)
   demo.dart   synthetic data for QUOTABOT_DEMO previews/screenshots

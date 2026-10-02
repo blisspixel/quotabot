@@ -5,12 +5,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/desktop_analytics.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
+import 'package:quotabot/settings_dialog.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/leases.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/profiles.dart';
 import 'package:quotabot_collector/webhook.dart';
+
+import 'support/settings_navigation.dart';
 
 const _account = 'codex-refresh-fixture';
 
@@ -122,6 +125,7 @@ class _NotificationProbe implements DesktopNotificationClient {
 Future<void> _toggleNotifications(WidgetTester tester) async {
   await tester.tap(find.byTooltip('Settings'));
   await tester.pumpAndSettle();
+  await selectSettingsCategory(tester, SettingsCategory.alerts);
   final toggle = find.byKey(const ValueKey('settings-notifications'));
   await tester.ensureVisible(toggle);
   await tester.tap(toggle);

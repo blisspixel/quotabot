@@ -28,9 +28,11 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   no-safe-route control beside the provider logos and status dots; expand to
   restore the full view. The route control opens the shared decision details,
   and keyboard traversal reaches horizontally clipped provider chips in order.
-- **Settings:** one responsive dialog groups profiles and visible-provider
-  chips, display choices, refresh and alert controls, and updates. It replaces
-  the long scrolling overflow menu. Choose or manage a named profile, hide or
+- **Settings:** Providers, Display, Alerts, and Updates have direct section
+  navigation, with a compact selector in narrow windows. Navigation and Close
+  stay reachable while the active section scrolls, and long action labels wrap.
+  This navigation is in prepared 0.11.8 source; publication is pending.
+  Choose or manage a named profile, hide or
   show provider cards, set cadence and provider order, select text size, and
   toggle always-on-top, taskbar visibility, notifications, and "Show account
   names". Collapsed quota cards keep the provider name; open a card to see its
