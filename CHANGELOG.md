@@ -4,6 +4,14 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- Report absent Cursor, Windsurf, Kiro, Antigravity, and Grok as undetected
+  when neither local configuration directories nor binaries exist on PATH.
+  Reserve the "installed, no data" state for when host application evidence
+  is present without a readable quota database. Verification marks truthful
+  absence as informative and fails unbacked installed-state claims.
+- Upgrade `@modelcontextprotocol/sdk` to 1.32.1, `proxy-addr` to 2.0.8, and
+  `multidict` to 6.9.1 with universal sha256 hashes across MCP client snippets
+  and LiteLLM integration requirements.
 - Add an Omarchy 4.0.4 bar widget that shows a redacted quotabot
   recommendation, per-account remaining headroom, reset time, and freshness.
   Refresh runs `quotabot --json` and `quotabot suggest --json`. It does not

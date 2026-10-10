@@ -558,7 +558,19 @@ class AntigravityAdapter {
       final accounts =
           _dedupeAccounts(_accountSource?.call() ?? _discoverAccounts());
       if (accounts.isEmpty) {
-        return [ProviderQuota.error(id, name, _emptyDiscoveryError(), asOf)];
+        final err = _emptyDiscoveryError();
+        final notInstalled = err == 'Antigravity not installed';
+        return [
+          ProviderQuota(
+            provider: id,
+            displayName: name,
+            account: notInstalled ? 'none' : 'unknown',
+            asOf: asOf,
+            ok: false,
+            status: notInstalled ? 'undetected' : null,
+            error: err,
+          ),
+        ];
       }
       // Overlap live account reads. Default-grant lending stays on the first
       // discovered identity, and Future.wait keeps that discovered order.

@@ -22,21 +22,43 @@ class WindsurfAdapter {
   final String? _dbPath;
   final bool? _hasDevinCli;
   final String? _devinConfigPath;
+  final bool Function()? _looksInstalledSource;
 
   WindsurfAdapter({
     String? dbPath,
     bool? hasDevinCli,
     String? devinConfigPath,
+    bool Function()? looksInstalled,
   })  : _dbPath = dbPath,
         _hasDevinCli = hasDevinCli,
-        _devinConfigPath = devinConfigPath;
+        _devinConfigPath = devinConfigPath,
+        _looksInstalledSource = looksInstalled;
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
     try {
       final dbPath = _dbPath ?? _findWindsurfDbPath();
       final hasDevinCli = _hasDevinCli ?? _hasDevinCliInstalled();
-      if (dbPath == null || !File(dbPath).existsSync()) {
+      final hasDb = dbPath != null && File(dbPath).existsSync();
+      if (!hasDb) {
+        final isInstalled = _looksInstalledSource?.call() ??
+            (hasDevinCli ||
+                (_dbPath != null
+                    ? File(_dbPath).parent.existsSync()
+                    : hasWindsurfInstallEvidence()));
+        if (!isInstalled) {
+          return ProviderQuota(
+            provider: id,
+            displayName: name,
+            account: 'none',
+            plan: null,
+            asOf: asOf,
+            ok: false,
+            status: 'undetected',
+            error: 'Windsurf not installed',
+            windows: const [],
+          );
+        }
         String account = hasDevinCli ? 'cli' : 'installed';
         if (hasDevinCli) {
           // Try to pull org/account from devin CLI config for better identification

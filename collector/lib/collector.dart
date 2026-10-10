@@ -901,9 +901,11 @@ ProviderQuota _cacheResult(
 }
 
 /// Keeps actionable provenance failures visible while hiding ordinary offline
-/// local runtimes from the product surface.
-bool retainCollectedProviderQuota(ProviderQuota quota) =>
-    !quota.isLocal || quota.ok || quota.sourceClassViolation != null;
+/// local runtimes and uninstalled tools from the product surface.
+bool retainCollectedProviderQuota(ProviderQuota quota) {
+  if (quota.status == 'undetected') return false;
+  return !quota.isLocal || quota.ok || quota.sourceClassViolation != null;
+}
 
 /// Loads the last-known snapshot for [result]'s provider and account.
 /// Account-scoped providers are loaded by account rather than from the generic

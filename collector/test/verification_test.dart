@@ -487,6 +487,76 @@ void main() {
       );
     });
 
+    test(
+        'claimed installed state requires local install evidence during live read',
+        () {
+      final passingReport = buildVerificationReport(
+        [
+          ProviderQuota(
+            provider: cursorProviderId,
+            displayName: 'Cursor',
+            account: 'installed',
+            asOf: now,
+            status: 'installed, no readable quota state',
+          ),
+        ],
+        now,
+        os: 'windows',
+        filtered: true,
+        checkInstallEvidence: (id) => true,
+      );
+      final passCheck =
+          checkById(passingReport.providers.single, 'install_evidence');
+      expect(passCheck.status, VerifyStatus.pass);
+
+      final failingReport = buildVerificationReport(
+        [
+          ProviderQuota(
+            provider: cursorProviderId,
+            displayName: 'Cursor',
+            account: 'installed',
+            asOf: now,
+            status: 'installed, no readable quota state',
+          ),
+        ],
+        now,
+        os: 'windows',
+        filtered: true,
+        checkInstallEvidence: (id) => false,
+      );
+      final failCheck =
+          checkById(failingReport.providers.single, 'install_evidence');
+      expect(failCheck.status, VerifyStatus.fail);
+      expect(failCheck.detail,
+          contains('without local binary or application files'));
+    });
+
+    test(
+        'undetected passive local tools, Antigravity, and Grok report truthful absence as info',
+        () {
+      final report = buildVerificationReport(
+        [],
+        now,
+        os: 'windows',
+        filtered: false,
+      );
+      final truthfulAbsenceIds = {
+        cursorProviderId,
+        windsurfProviderId,
+        kiroProviderId,
+        antigravityProviderId,
+        grokProviderId,
+        ollamaProviderId,
+      };
+      for (final id in truthfulAbsenceIds) {
+        final prov = report.providers.firstWhere((p) => p.provider == id);
+        expect(prov.state, 'undetected');
+        final coverage = checkById(prov, 'claimed_coverage');
+        expect(coverage.status, VerifyStatus.info, reason: id);
+        expect(coverage.detail, contains('truthful state'), reason: id);
+      }
+    });
+
     test('out-of-bounds percentages fail percent_bounds', () {
       final report = buildVerificationReport(
         [

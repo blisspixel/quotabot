@@ -80,6 +80,9 @@ class ProviderAdapterRegistration {
 
   bool get localRuntime => adapterClass.quotaKind.isLocal;
 
+  bool get isPassiveLocal =>
+      sourceClasses.contains(ProviderSourceClass.passiveLocalEvidence);
+
   bool get accountScopedCache => multiAccount && currentAccounts != null;
 
   bool allowsSourceClass(ProviderSourceClass value) =>

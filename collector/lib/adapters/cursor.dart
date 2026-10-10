@@ -18,14 +18,34 @@ class CursorAdapter {
   static const id = cursorProviderId;
   static const name = cursorProviderName;
   final String? _dbPath;
+  final bool Function()? _looksInstalledSource;
 
-  CursorAdapter({String? dbPath}) : _dbPath = dbPath;
+  CursorAdapter({String? dbPath, bool Function()? looksInstalled})
+      : _dbPath = dbPath,
+        _looksInstalledSource = looksInstalled;
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
     try {
       final dbPath = _dbPath ?? _cursorDbPath();
       if (!File(dbPath).existsSync()) {
+        final isInstalled = _looksInstalledSource?.call() ??
+            (_dbPath != null
+                ? File(dbPath).parent.existsSync()
+                : hasCursorInstallEvidence());
+        if (!isInstalled) {
+          return ProviderQuota(
+            provider: id,
+            displayName: name,
+            account: 'none',
+            plan: null,
+            asOf: asOf,
+            ok: false,
+            status: 'undetected',
+            error: 'Cursor not installed',
+            windows: const [],
+          );
+        }
         return ProviderQuota(
           provider: id,
           displayName: name,
