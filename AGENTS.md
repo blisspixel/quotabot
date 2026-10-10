@@ -321,7 +321,8 @@ remaining-percent value (0..100); higher means more budget left. The shapes:
   `projected_waste`), `provider`, `window`, `severity` (`amber`/`red`),
   `source_class`, `free_percent`, `as_of`, and, when a better route exists,
   `route_to` with `route_source_class`, `route_free_percent`, and
-  `route_is_local`. Projected-waste alerts add `projected_waste_percent` and
+  `route_is_local`. Optional `route_open_pool` marks that percent as an open
+  model pool when the account card is tighter. Projected-waste alerts add `projected_waste_percent` and
   `burn_percent_per_hour`. Metadata only; untrusted evidence cannot fire.
 - `quotas://alerts` is `quotabot.alerts.v1`: `generated_at`, `last_alert_at`,
   and the last fired `quotabot.alert.v1` objects. Subscribe to it to react to

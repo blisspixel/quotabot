@@ -154,7 +154,11 @@ String desktopRouteSignalLine(
 
 String _routeHeadroomPhrase(RouteCandidate candidate) {
   final prefix = candidate.stale ? 'cached ' : '';
-  final unit = candidate.isMeasuredQuotaPlan ? 'included' : 'free';
+  final unit = candidate.bindingPool == 'model_budget'
+      ? 'open pool'
+      : candidate.isMeasuredQuotaPlan
+      ? 'included'
+      : 'free';
   return '$prefix${candidate.headroom!.round()}% $unit';
 }
 
@@ -576,10 +580,11 @@ String desktopQuotaAlertNotificationMessage(
     account: alert.routeAccount,
     showAccounts: showAccounts,
   );
+  final routeUnit = alert.routeOpenPool ? 'open pool' : 'free';
   final detail = alert.routeIsLocal
       ? ' (local)'
       : alert.routeFreePercent != null
-      ? ' (${alert.routeFreePercent!.round()}% free)'
+      ? ' (${alert.routeFreePercent!.round()}% $routeUnit)'
       : '';
   return '$head - route next to $routeLabel$detail';
 }

@@ -204,6 +204,132 @@ void main() {
     });
   });
 
+  group('spent window copy', () {
+    const now = 1700000000;
+
+    QuotaWindow weekly(double used, int? resetsAt) => QuotaWindow(
+          label: 'weekly',
+          usedPercent: used,
+          resetsAt: resetsAt,
+        );
+
+    ProviderQuota claude({
+      required double used,
+      int? resetsAt,
+      bool stale = false,
+      String? error,
+      String? pipeHealth,
+      int? httpStatus,
+    }) =>
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: 'a',
+          asOf: now,
+          windows: [weekly(used, resetsAt)],
+          stale: stale,
+          error: error,
+          pipeHealth: pipeHealth,
+          httpStatus: httpStatus,
+        );
+
+    test('a far spent reset names the day and clock', () {
+      expect(
+        spentResetPhrase(now + 3 * 86400, now),
+        matches(
+          RegExp(
+            r'^resets (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}:\d{2} [AP]M$',
+          ),
+        ),
+      );
+    });
+
+    test('a near spent reset stays a countdown', () {
+      expect(
+        spentResetPhrase(now + 3 * 3600 + 20 * 60, now),
+        'resets 3h20m',
+      );
+    });
+
+    test('a spent reset a week out includes the date', () {
+      expect(
+        spentResetPhrase(now + 9 * 86400, now),
+        matches(
+          RegExp(
+            r'^resets (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}/\d{1,2} '
+            r'\d{1,2}:\d{2} [AP]M$',
+          ),
+        ),
+      );
+    });
+
+    test('a cached spent window names the spend and the reset', () {
+      final detail = doctorWindowDetail(
+        weekly(100.0, now + 3 * 86400),
+        now,
+        'cached',
+      );
+      expect(detail, startsWith('weekly spent; resets '));
+      expect(detail, isNot(contains('last known')));
+      expect(
+        detail,
+        matches(RegExp(r'resets (Mon|Tue|Wed|Thu|Fri|Sat|Sun) ')),
+      );
+    });
+
+    test('a cached percentage still says last known', () {
+      expect(
+        doctorWindowDetail(weekly(40.0, now + 3 * 86400), now, 'cached'),
+        contains('40% used (last known)'),
+      );
+    });
+
+    test('a passed cached reset still asks for confirmation', () {
+      expect(
+        doctorWindowDetail(weekly(100.0, now - 60), now, 'cached'),
+        'weekly spent (last known); reset passed, refresh to confirm',
+      );
+    });
+
+    test('a generic refresh note repeats a spent window', () {
+      final deferred = claude(
+        used: 100.0,
+        resetsAt: now + 3 * 86400,
+        stale: true,
+        error: 'Claude usage read deferred',
+      );
+      final limited = claude(
+        used: 100.0,
+        resetsAt: now + 3 * 86400,
+        stale: true,
+        error: 'HTTP 429',
+        pipeHealth: providerPipeHealthThrottled,
+        httpStatus: 429,
+      );
+      final open = claude(
+        used: 40.0,
+        resetsAt: now + 3 * 86400,
+        stale: true,
+        error: 'Claude usage read deferred',
+      );
+      final signIn = claude(
+        used: 100.0,
+        resetsAt: now + 3 * 86400,
+        stale: true,
+        error: 'token expired',
+      );
+
+      expect(staleRefreshRepeatsSpentWindow(deferred, now), isTrue);
+      expect(spentWindowRefreshNote(deferred, now), isNull);
+      expect(staleRefreshRepeatsSpentWindow(limited, now), isFalse);
+      expect(spentWindowRefreshNote(limited, now), 'quota check rate limited');
+      expect(staleRefreshRepeatsSpentWindow(open, now), isFalse);
+      expect(spentWindowRefreshNote(open, now), isNull);
+      expect(staleRefreshRepeatsSpentWindow(signIn, now), isFalse);
+      expect(spentWindowRefreshNote(signIn, now), isNull);
+    });
+  });
+
   group('local runtime glance details', () {
     const hardware = LocalHardwareInfo(
       asOf: 1000,

@@ -2,6 +2,8 @@ import 'package:quotabot_collector/alerts.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/provider_ids.dart';
+import 'package:quotabot_collector/registry.dart';
 import 'package:test/test.dart';
 
 const _now = 1782000000;
@@ -192,6 +194,99 @@ void main() {
       expect(alert.message, contains('route next to Codex (55% free)'));
       expect(alert.message, isNot(contains('(max)')));
       expect(alert.message, isNot(contains('(pro)')));
+    });
+
+    test('an open model pool is not called free', () {
+      final alert = QuotaAlert(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'default',
+        sourceClass: ProviderSourceClass.authoritativeLive,
+        window: 'weekly',
+        severity: AlertSeverity.red,
+        freePercent: 2,
+        asOf: _now,
+        routeTo: 'antigravity',
+        routeDisplayName: 'Antigravity',
+        routeSourceClass: ProviderSourceClass.authoritativeLive,
+        routeFreePercent: 100,
+        routeOpenPool: true,
+      );
+
+      expect(
+        alert.message,
+        'Codex weekly at 2% free - route next to Antigravity (100% open pool)',
+      );
+      expect(alert.toJson()['route_open_pool'], isTrue);
+    });
+
+    test(
+        'a spent Antigravity card still routes the next alert to its open pool',
+        () {
+      final codex = _q('codex', 98, resetsAt: _now + 86400);
+      final antigravity = ProviderQuota(
+        provider: antigravityProviderId,
+        displayName: 'Antigravity',
+        account: 'default',
+        asOf: _now,
+        sourceClass: ProviderSourceClass.authoritativeLive,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 100,
+            resetsAt: _now + 5 * 86400,
+          ),
+        ],
+        modelQuotas: const [
+          ModelQuota(
+            model: 'Gemini Models',
+            usedPercent: 100,
+            resetsAt: _now + 5 * 86400,
+            windowLabel: 'weekly',
+          ),
+          ModelQuota(
+            model: 'Claude and GPT models',
+            usedPercent: 0,
+            resetsAt: _now + 6 * 86400,
+            windowLabel: 'weekly',
+          ),
+        ],
+      );
+      const catalog = {
+        antigravityProviderId: [
+          ModelInfo(
+            id: 'claude-sonnet-4.6-thinking',
+            displayName: 'Claude Sonnet 4.6 (thinking)',
+            reasoning: 'reasoning',
+            tier: 'standard',
+          ),
+        ],
+      };
+      final gates = providerRouteCapabilityGates(
+        [codex, antigravity],
+        _now,
+        catalog: catalog,
+      );
+      final suggestion = suggestRoute(
+        [codex, antigravity],
+        _now,
+        capabilityKnownQuotaKeys: gates.knownQuotaKeys,
+        capabilityAvailableQuotaKeys: gates.availableQuotaKeys,
+        capabilityBudgetResetByQuotaKey: gates.budgetResetByQuotaKey,
+        capabilityHeadroomByQuotaKey: gates.headroomByQuotaKey,
+      );
+      final fired = computeAlerts(
+        snapshot: [codex, antigravity],
+        suggestion: suggestion,
+        now: _now,
+      ).fired;
+      final alert = fired.singleWhere((item) => item.provider == 'codex');
+
+      expect(suggestion.recommended?.bindingPool, 'model_budget');
+      expect(alert.routeOpenPool, isTrue);
+      expect(alert.message, contains('(100% open pool)'));
+      expect(alert.message, isNot(contains('100% free')));
+      expect(alert.toJson()['route_open_pool'], isTrue);
     });
 
     test('abbreviates opaque credential identities in alert copy', () {

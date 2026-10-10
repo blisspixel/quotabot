@@ -57,6 +57,170 @@ ProviderQuota _local(
     );
 
 void main() {
+  group('disagreementModelQuotas', () {
+    ProviderQuota split({
+      required List<ModelQuota> modelQuotas,
+      double accountUsed = 100,
+    }) =>
+        ProviderQuota(
+          provider: 'antigravity',
+          displayName: 'Antigravity',
+          account: 'a',
+          asOf: _now,
+          windows: [
+            QuotaWindow(
+              label: '5h',
+              usedPercent: 0,
+              resetsAt: _now + 3 * 3600,
+            ),
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: accountUsed,
+              resetsAt: _now + 5 * 86400,
+            ),
+          ],
+          modelQuotas: modelQuotas,
+        );
+
+    const gemini = ModelQuota(
+      model: 'Gemini Models',
+      usedPercent: 100,
+      resetsAt: _now + 5 * 86400,
+      windowLabel: 'weekly',
+    );
+    const claude = ModelQuota(
+      model: 'Claude and GPT models',
+      usedPercent: 0,
+      resetsAt: _now + 6 * 86400,
+      windowLabel: 'weekly',
+    );
+
+    test('names a short split and hides a single row or a long table', () {
+      final quota = split(modelQuotas: const [claude, gemini]);
+      final rows = disagreementModelQuotas(quota, _now);
+      expect(rows.map((row) => row.model).toList(), [
+        'Gemini Models',
+        'Claude and GPT models',
+      ]);
+      expect(
+        disagreementPoolSummary(rows),
+        'Gemini Models weekly: spent; '
+        'Claude and GPT models weekly: 100% left',
+      );
+      expect(
+        modelBudgetRouteClause(
+          quota: quota,
+          routeHeadroom: 100,
+          accountHeadroom: 0,
+          now: _now,
+        ),
+        'Claude and GPT models weekly: 100% left. '
+        'Gemini Models weekly is spent',
+      );
+      expect(
+        modelBudgetRouteClause(
+          quota: quota,
+          routeHeadroom: 0,
+          accountHeadroom: 0,
+          now: _now,
+        ),
+        isNull,
+      );
+      expect(
+        modelBudgetRouteClause(
+          quota: quota,
+          routeHeadroom: 100,
+          accountHeadroom: 0,
+          now: _now,
+          openSuffix: ', ~90% after burn',
+        ),
+        'Claude and GPT models weekly: 100% left, ~90% after burn. '
+        'Gemini Models weekly is spent',
+      );
+      expect(
+        disagreementModelQuotas(
+          split(modelQuotas: const [gemini]),
+          _now,
+        ),
+        isEmpty,
+      );
+      expect(
+        disagreementModelQuotas(
+          ProviderQuota(
+            provider: 'claude',
+            displayName: 'Claude',
+            account: 'a',
+            asOf: _now,
+            windows: [QuotaWindow(label: 'weekly', usedPercent: 10)],
+            modelQuotas: const [gemini, claude],
+          ),
+          _now,
+        ),
+        isEmpty,
+      );
+      expect(
+        disagreementModelQuotas(
+          split(
+            modelQuotas: [
+              for (var i = 0; i < 9; i++)
+                ModelQuota(
+                  model: 'model $i',
+                  usedPercent: i * 10,
+                  resetsAt: _now + 3600,
+                ),
+            ],
+          ),
+          _now,
+        ),
+        isEmpty,
+      );
+      expect(
+        modelBudgetRouteClause(
+          quota: split(
+            modelQuotas: [
+              for (var i = 0; i < 9; i++)
+                ModelQuota(
+                  model: 'model $i',
+                  usedPercent: i == 0 ? 0 : 100,
+                  resetsAt: _now + 3600,
+                ),
+            ],
+          ),
+          routeHeadroom: 100,
+          accountHeadroom: 0,
+          now: _now,
+        ),
+        'an open model pool has 100% left; the account card is tighter',
+      );
+    });
+
+    test('a pool within a point of its sibling is not a split', () {
+      expect(
+        disagreementModelQuotas(
+          split(
+            accountUsed: 50,
+            modelQuotas: const [
+              ModelQuota(
+                model: 'Gemini Models',
+                usedPercent: 50,
+                resetsAt: _now + 3600,
+                windowLabel: 'weekly',
+              ),
+              ModelQuota(
+                model: 'Claude and GPT models',
+                usedPercent: 50.4,
+                resetsAt: _now + 3600,
+                windowLabel: 'weekly',
+              ),
+            ],
+          ),
+          _now,
+        ),
+        isEmpty,
+      );
+    });
+  });
+
   group('sparseScopedModelQuotas', () {
     test('glance keeps Fable and hides Codex Spark', () {
       final claude = ProviderQuota(

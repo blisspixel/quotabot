@@ -4,6 +4,11 @@ quotabot's machine-readable quota snapshot is `quotabot.v1`. The frozen contract
 lives in `collector/lib/schema_contracts.dart` as a JSON Schema 2020-12 document
 plus a focused validator used by tests.
 
+The Omarchy bar widget writes a separate redacted display file,
+`quotabot.omarchy.v1`, documented in
+[integrations/omarchy/README.md](../integrations/omarchy/README.md).
+That file is not a snapshot, a suggestion, or an MCP response.
+
 ## `quotabot.v1`
 
 The root object contains:
@@ -728,7 +733,9 @@ endpoints.
 - For `low_quota`, optional `route_to`, `route_display_name`,
   `route_account`, `route_source_class`, and `route_free_percent`.
   `route_source_class` identifies the evidence behind the recommended route and
-  is present whenever `route_to` is present.
+  is present whenever `route_to` is present. Optional `route_open_pool` is
+  true when `route_free_percent` is an open model pool rather than the
+  provider's account card. Absent means the route percent is the account card.
 - For `projected_waste`, optional `projected_waste_percent` and
   `burn_percent_per_hour`.
 

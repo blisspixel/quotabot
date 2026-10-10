@@ -130,6 +130,9 @@ QUOTABOT_RUN_LITELLM_PROXY_TEST=1 python -m unittest \
 # Portable Agent Plugins package, using the same pinned Python dependencies
 cd ../..
 python -m unittest discover -s integrations/agent_plugin -p 'test_*.py'
+
+# Omarchy display snapshot and lifecycle fixtures
+python -m unittest discover -s integrations/omarchy -p 'test_*.py'
 ```
 
 After native CLI packaging, set `QUOTABOT_PLUGIN_TEST_EXECUTABLE` to the

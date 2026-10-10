@@ -63,6 +63,10 @@ class QuotaAlert {
   final String? routeAccount;
   final ProviderSourceClass? routeSourceClass;
   final double? routeFreePercent;
+
+  /// True when [routeFreePercent] is an open model pool, not the account card.
+  /// The account card can be spent while this route still has room.
+  final bool routeOpenPool;
   final bool routeIsLocal;
   final double? projectedWastePercent;
   final double? burnPercentPerHour;
@@ -83,6 +87,7 @@ class QuotaAlert {
     this.routeAccount,
     this.routeSourceClass,
     this.routeFreePercent,
+    this.routeOpenPool = false,
     this.routeIsLocal = false,
     this.projectedWastePercent,
     this.burnPercentPerHour,
@@ -110,10 +115,11 @@ class QuotaAlert {
     }
     if (routeTo == null) return head;
     final name = _displayLabel(routeDisplayName ?? routeTo!, routeAccount);
+    final routeUnit = routeOpenPool ? 'open pool' : 'free';
     final detail = routeIsLocal
         ? ' (local)'
         : routeFreePercent != null
-            ? ' (${routeFreePercent!.round()}% free)'
+            ? ' (${routeFreePercent!.round()}% $routeUnit)'
             : '';
     return '$head - route next to $name$detail';
   }
@@ -135,6 +141,7 @@ class QuotaAlert {
         if (routeFreePercent != null)
           'route_free_percent':
               double.parse(routeFreePercent!.toStringAsFixed(1)),
+        if (routeOpenPool) 'route_open_pool': true,
         'route_is_local': routeIsLocal,
         if (projectedWastePercent != null)
           'projected_waste_percent':
@@ -206,6 +213,8 @@ class QuotaAlert {
       routeAccount: route?.account,
       routeSourceClass: route?.sourceClass,
       routeFreePercent: route?.headroom,
+      routeOpenPool:
+          route?.available == true && route?.bindingPool == 'model_budget',
       routeIsLocal: route?.isLocal ?? false,
     ));
   }

@@ -49,6 +49,13 @@ String routeCandidateGlanceLine(
   if (c.pipeDiscount > 0) {
     qualifier += ' (-${c.pipeDiscount.round()}% degraded)';
   }
+  // Model-budget headroom is the open pool, not the account card. An available
+  // Antigravity route can read 100% here while its tightest weekly pool is spent.
+  if (c.available &&
+      c.bindingPool == 'model_budget' &&
+      qualifier.startsWith('free')) {
+    qualifier = 'open pool${qualifier.substring('free'.length)}';
+  }
   // A candidate can be unroutable for reasons other than being spent. Show the
   // real one, matching the distinctions suggestRoute's reason draws: drift or
   // staleness reads "unavailable"; a provider with headroom but no catalog model

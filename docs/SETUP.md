@@ -237,7 +237,11 @@ source class, spend class, account label when the provider exposes one, and
 capture age. Treat those labels as part of the number; a cached or
 machine-scoped read can still be useful, but it is not the same evidence as a
 fresh account-level live read. Cached cloud quota is shown as last-known evidence
-and is not treated as currently available for routing.
+and is not treated as currently available for routing. A spent cached window
+names the spend and when it resets. It does not also mark that line last known
+and repeat that the refresh failed. A rate limit or outage is one short note,
+without "last known". A sign-in repair, and a reset that has already passed,
+still get their own note. A percentage that is not spent still says last known.
 
 For Claude, read the shared session and weekly windows separately from any
 model-scoped Fable row. A spent or missing Fable pool does not mean the whole

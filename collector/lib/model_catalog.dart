@@ -221,11 +221,13 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
     ModelInfo(
       id: 'claude-sonnet-4.6-thinking',
       displayName: 'Claude Sonnet 4.6 (thinking)',
+      reasoning: 'reasoning',
       tier: 'standard',
     ),
     ModelInfo(
       id: 'claude-opus-4.6-thinking',
       displayName: 'Claude Opus 4.6 (thinking)',
+      reasoning: 'reasoning',
       tier: 'flagship',
     ),
     ModelInfo(

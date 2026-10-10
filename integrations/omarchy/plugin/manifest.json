@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "blisspixel.quotabot",
+  "name": "quotabot",
+  "version": "0.1.0",
+  "author": "blisspixel",
+  "license": "Apache-2.0",
+  "description": "Remaining quota headroom, freshness, and a quotabot recommendation. Reading status does not run a model or switch an account.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "quotabot",
+    "description": "Compact recommendation and per-account remaining headroom from the local quotabot CLI.",
+    "category": "Status",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 900
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 30,
+        "max": 3600,
+        "step": 30,
+        "defaultValue": 900
+      }
+    ]
+  }
+}

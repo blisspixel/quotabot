@@ -736,12 +736,28 @@ class AntigravityAdapter {
         }
       }
 
+      // An empty retrieveUserQuotaSummary body is the stale all-available
+      // shape. Injected catalog tests skip the summary on purpose; a live
+      // read with no project must not send that body or trust the model table.
+      final injectedSummarySkip = _fetchQuotaSummaryFn == null &&
+          _http == null &&
+          (_loadCodeAssistFn != null ||
+              _fetchModelsFn != null ||
+              _onboardUserFn != null);
+      if (project == null && !injectedSummarySkip) {
+        return offline(
+          source.localModel != null
+              ? 'connected (this machine only); Antigravity local status is available, but live quota needs an onboarded project'
+              : 'connected (this machine only); Antigravity live quota needs an onboarded project',
+        );
+      }
+
       final summary = await _quotaSummary(access, project);
       final models = await (_fetchModelsFn ?? _fetchAvailableModels)(
         access,
         project,
       );
-      final summaryWindows = antigravityQuotaSummaryWindows(summary);
+      final summaryWindows = antigravityQuotaSummaryWindows(summary, now: asOf);
       if (summary != null && summaryWindows == null) {
         return offline(
           source.localModel != null
@@ -913,6 +929,7 @@ class AntigravityAdapter {
             _onboardUserFn != null)) {
       return Future<Map<String, dynamic>?>.value(null);
     }
+    if (project == null) return Future<Map<String, dynamic>?>.value(null);
     return _retrieveUserQuotaSummary(access, project);
   }
 

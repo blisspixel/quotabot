@@ -185,6 +185,15 @@ included quota; a harness chooses through its supported access under provider
 terms. Local-model suggestions are optional, and no integration overrides a
 provider limit or silently enables paid fallback.
 
+The [Omarchy widget](integrations/omarchy/) is a separate compact bar panel
+for Omarchy 4.0.4. The stable Agents collector cannot show remaining
+headroom, freshness, unknown quota, and a recommendation that includes a
+local runtime without writing a misleading usage record or switching an
+account. The widget reads `quotabot --json` and `quotabot suggest --json`
+and keeps credentials out of its display file. It is source in this
+repository, not a claim that an Omarchy desktop was installed or that a
+release archive was published.
+
 ## Privacy and trust boundary
 
 - No quotabot account, hosted service, advertising, or telemetry.

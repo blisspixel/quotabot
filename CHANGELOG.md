@@ -4,6 +4,61 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- Add an Omarchy 4.0.4 bar widget that shows a redacted quotabot
+  recommendation, per-account remaining headroom, reset time, and freshness.
+  Refresh runs `quotabot --json` and `quotabot suggest --json`. It does not
+  write stock agent usage records, switch an account, or run a model. A
+  failed CLI read keeps the previous snapshot. This is source in the
+  repository. A built Linux archive, a published release, and a rendered
+  Omarchy installation are separate evidence.
+- A spent window says which window is spent and when it resets. A cached
+  weekly spend no longer adds "was spent (last known)" beside "quota above
+  is last known - refresh failed". A rate limit or outage is one short note,
+  without "last known" or the raw deferral line. A sign-in repair, and a
+  reset that has already passed, still get their own note.
+- Name an Antigravity pool split when the account card is tighter than the
+  route. Doctor, top, and the desktop card list two to eight disagreeing
+  pools. The suggestion names the open pool and the spent pools instead of
+  calling the provider free. A route candidate, the desktop route line, and a
+  low-quota alert say "open pool" for that headroom. The `model_budget`
+  binding value is unchanged. Alert JSON adds optional `route_open_pool`
+  when that headroom is an open model pool.
+- Read a fresh Grok included window when the credits response omits a zero
+  `creditUsagePercent` after the period resets. An explicit product
+  `usagePercent` of 0 agrees with that omitted aggregate; a positive or
+  unusable product percent does not. Billing and account reads send the
+  installed Grok CLI version and the current client mode.
+- Route Antigravity catalog models through the grouped quota summary. A spent
+  Gemini pool no longer hides a Claude or GPT-OSS pool that the summary still
+  reports as available. The Claude thinking rows declare reasoning, so an open
+  Claude/GPT pool can win the default route.
+- Omit a disabled Antigravity summary bucket from the account card. A
+  non-binding five-hour fraction no longer becomes the five-hour bar, and an
+  older per-model summary keeps each model instead of failing the read. Live
+  summary requests wait for an onboarded project so an empty body cannot look
+  like a full balance.
+- Deny Codex request admission when `spend_control.reached` is true. The
+  credit amounts on that cap stay out of included quota.
+- Keep a legacy Claude read that includes `seven_day_sonnet` or
+  `seven_day_cowork`, and accept a weekly scoped row named by `scope.surface`
+  when `scope.model` is absent.
+- Deny Codex request admission when `rate_limit_reached_type.type` names a
+  rate-limit, workspace credit, or workspace usage denial. The measured
+  windows stay unchanged, and an unknown type fails the read.
+- Keep Claude's routines aliases as one Routines model quota, including beside
+  a canonical `limits` array. The tighter alias wins. That lane does not
+  replace the shared weekly bar, and `seven_day_oauth_apps` does not reject
+  the shared read.
+- Reject an omitted Grok `creditUsagePercent` when `productUsage` is not a
+  list of objects, or when a product row reports a positive percent under
+  `usagePercent` or `creditUsagePercent`. An explicit shared percent stays
+  the included window.
+- Keep an Antigravity model id such as `gemini-2.5h`, or an allowance id
+  such as `15h`, off the five-hour account bar. `gemini-5h` still names that
+  bar when the bucket omits `window`.
+- Split the quota parser into a library of provider parts under
+  `collector/lib/src/parsing/` without changing the `parsing.dart` import.
+
 ## 0.11.8 - 2026-10-01
 
 Conservative model eligibility, bounded metadata operations, and reliable

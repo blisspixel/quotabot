@@ -3740,36 +3740,6 @@ String _doctorState(ProviderQuota q, int now) {
   return headroom <= kSpentHeadroomFloor ? 'OUT OF QUOTA' : 'live';
 }
 
-String _doctorWindowDetail(
-  QuotaWindow window,
-  int now,
-  String state,
-) {
-  final percent = window.percent;
-  final valid =
-      percent != null && percent.isFinite && percent >= 0 && percent <= 100;
-  final usage = !valid
-      ? 'usage unavailable'
-      : window.exhausted
-          ? 'spent'
-          : '${percent.round()}% used';
-  final qualifier = switch (state) {
-    'PROVIDER DRIFT' => 'last trusted',
-    'cached' => 'last known',
-    'NEEDS REVIEW' || 'UNVERIFIED' => 'unverified',
-    _ => null,
-  };
-  final resetAt = window.resetsAt;
-  final reset = resetAt == null
-      ? ''
-      : qualifier != null && resetAt <= now
-          ? '; reset passed, refresh to confirm'
-          : qualifier == null
-              ? '; resets ${countdown(resetAt, now)}'
-              : '; reset ${countdown(resetAt, now)}';
-  return '${window.label} $usage${qualifier == null ? '' : ' ($qualifier)'}$reset';
-}
-
 String doctorModelSummary(
   String provider,
   List<ModelQuota> quotas,
@@ -3877,7 +3847,7 @@ void _printDoctor(
             // error, not status, so an ERROR row still shows the failure.
             ? (q.status ?? q.error ?? '')
             : doctorVisibleWindows(q, now)
-                .map((w) => _doctorWindowDetail(w, now, state))
+                .map((w) => doctorWindowDetail(w, now, state))
                 .join(', ');
     final namePart =
         '${q.displayName}${_doctorAccountSuffix(q, accountCounts)}';
@@ -3901,6 +3871,12 @@ void _printDoctor(
         : q.details;
     for (final d in details) {
       print('  $indent ${_stateColumn('')} $d');
+    }
+    final poolSplit = disagreementModelQuotas(q, now);
+    if (poolSplit.isNotEmpty) {
+      print(
+        '  $indent ${_stateColumn('pools')} ${disagreementPoolSummary(poolSplit)}',
+      );
     }
     final modelQuotas = doctorVisibleModelQuotas(q, now: now);
     if (modelQuotas.isNotEmpty) {
@@ -3931,8 +3907,16 @@ void _printDoctor(
         '${style.yellow('! suspect: ${q.suspect}')}',
       );
     }
+    final spentNote = spentWindowRefreshNote(q, now);
     final hint = doctorRecoveryHint(q, state);
-    if (hint != null) print('  $indent ${_stateColumn('')} -> $hint');
+    // A spent window already names the spend and its reset. A rate limit or
+    // outage is one short note. A generic "read deferred" line is not added
+    // on top of that.
+    if (spentNote != null) {
+      print('  $indent ${_stateColumn('')} -> $spentNote');
+    } else if (hint != null && !staleRefreshRepeatsSpentWindow(q, now)) {
+      print('  $indent ${_stateColumn('')} -> $hint');
+    }
     final storageWarning =
         analyticsStorageWarningForQuota(q, storageNoticesByIdentity);
     if (storageWarning != null) {
@@ -5200,20 +5184,5 @@ String? doctorRecoveryHint(ProviderQuota q, String state) {
   return null;
 }
 
-bool _looksLikeCredentialFailure(String message) {
-  final value = message.toLowerCase();
-  return const [
-    'auth',
-    'credential',
-    'forbidden',
-    'login',
-    'sign in',
-    'signed out',
-    'signed-out',
-    'signed_out',
-    'token',
-    'unauthorized',
-    '401',
-    '403',
-  ].any(value.contains);
-}
+bool _looksLikeCredentialFailure(String message) =>
+    quotaFailureNeedsSignIn(message);

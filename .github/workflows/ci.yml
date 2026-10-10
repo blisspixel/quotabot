@@ -352,3 +352,6 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then executable="${executable}.exe"; fi
           QUOTABOT_PLUGIN_TEST_EXECUTABLE="$executable" python -m unittest discover \
             -s integrations/agent_plugin -p 'test_*.py'
+
+      - name: Omarchy display snapshot tests
+        run: python -m unittest discover -s integrations/omarchy -p 'test_*.py'

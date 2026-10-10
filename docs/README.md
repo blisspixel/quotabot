@@ -81,6 +81,9 @@ Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
   OpenClaw, Hermes, and OpenCode 1 configuration without opening a host config
   or reading a credential. It includes pi and NemoClaw CLI recipes and explicit
   version and transport limits.
+- [Omarchy bar widget](../integrations/omarchy/README.md) maps quotabot JSON
+  into a redacted Omarchy 4.0.4 panel. It does not write stock agent usage
+  records. Unit fixtures are not an installed-shell proof.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): code boundaries and data flow.
 - [PRODUCT-STRATEGY.md](PRODUCT-STRATEGY.md): product choices and current

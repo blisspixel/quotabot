@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-10-01. This file is the forward plan. It records brief shipped
+Updated 2026-10-10. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -287,6 +287,19 @@ support. This maintenance does not wait for post-1.0 stabilization.
    status from primary sources before claiming support; model API compatibility
    alone is insufficient. Add only patterns that improve an explicit quotabot
    workflow and preserve the zero-inference collection contract.
+   Omarchy 4.0.4 (`c668141`, Quickshell 0.3.1) now has a source integration in
+   [integrations/omarchy](integrations/omarchy/). The stable `omarchy.agents`
+   collector cannot show multi-account remaining headroom, per-provider
+   freshness, unknown quota, and a local recommendation without a misleading
+   usage record or an account switch. The separate `blisspixel.quotabot` bar
+   widget reads a redacted display file produced from `quotabot --json` and
+   `quotabot suggest --json`. Fixture tests cover refresh, one provider
+   failure, a failed CLI read that keeps the previous snapshot, reload after
+   a process restart, and uninstall that leaves stock agent usage records in
+   place. A built Linux archive, an installed Omarchy shell, and a rendered
+   panel remain separate evidence. Do not treat this source increment as a
+   release or as a marketplace listing. The unreleased quattro agents panel
+   is not the contract: its account rows can switch the harness account.
 8. **Broaden insights from demonstrated decisions.** Add shared local model
    comparisons, supported hardware evidence, and a bounded llama.cpp metadata
    adapter when the preceding steps show a real need. Passive availability and
@@ -1223,8 +1236,10 @@ the full three-OS matrix authoritative.
 
 After behavior locks and boundary tests are in place, extract the desktop entry
 point, cache and migration store, and MCP transport into bounded modules with
-explicit ports. Move one seam per pull request and require contract-equivalent
-tests, rather than attempting a high-risk rewrite or changing public schemas.
+explicit ports. The quota parser is already a library of provider parts behind
+`collector/lib/parsing.dart`; that split is not this item. Move one remaining
+seam per pull request and require contract-equivalent tests, rather than
+attempting a high-risk rewrite or changing public schemas.
 
 ### P2. Expand distribution
 

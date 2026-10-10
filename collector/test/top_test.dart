@@ -76,6 +76,39 @@ List<String> _frame(
 }
 
 void main() {
+  test('an Antigravity pool split stays on the unselected top row', () {
+    final quota = ProviderQuota(
+      provider: 'antigravity',
+      displayName: 'Antigravity',
+      account: 'a',
+      asOf: _now,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: _now + 86400),
+      ],
+      modelQuotas: const [
+        ModelQuota(
+          model: 'Claude and GPT models',
+          usedPercent: 0,
+          resetsAt: _now + 86400,
+          windowLabel: 'weekly',
+        ),
+        ModelQuota(
+          model: 'Gemini Models',
+          usedPercent: 100,
+          resetsAt: _now + 86400,
+          windowLabel: 'weekly',
+        ),
+      ],
+    );
+    final text = _plain(_frame([quota], width: 120).join('\n'));
+    expect(
+      text,
+      contains(
+        'Gemini Models weekly: spent; Claude and GPT models weekly: 100% left',
+      ),
+    );
+  });
+
   for (final value in ['denied', 'future-admission']) {
     test('$value remains visible on ordinary-width measured top rows', () {
       final quota = ProviderQuota.fromJson({
@@ -372,6 +405,60 @@ void main() {
     );
     expect(_plain(lines.join('\n')), contains('80% last'));
     expect(_plain(lines.join('\n')), isNot(contains('80% free')));
+  });
+
+  test('a cached spent weekly names the reset without a second last-known line',
+      () {
+    final lines = _frame([
+      _q(
+        'claude',
+        [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 100,
+            resetsAt: _now + 3 * 86400,
+          ),
+        ],
+        stale: true,
+        error: 'Claude usage read deferred',
+      ),
+    ], width: 120);
+    final text = lines.map(_plain).join('\n');
+    expect(text, contains('spent'));
+    expect(text, isNot(contains('was spent')));
+    expect(text, isNot(contains('last known')));
+    expect(text, isNot(contains('live read failed')));
+    expect(
+      text,
+      matches(RegExp(r'resets (Mon|Tue|Wed|Thu|Fri|Sat|Sun) ')),
+    );
+  });
+
+  test('a cached spent weekly still names a rate limit', () {
+    final text = _plain(
+      _frame([
+        _q(
+          'claude',
+          [
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: 100,
+              resetsAt: _now + 3 * 86400,
+            ),
+          ],
+          stale: true,
+          error: 'HTTP 429',
+          pipeHealth: providerPipeHealthThrottled,
+          httpStatus: 429,
+        ),
+      ], width: 140)
+          .join('\n'),
+    );
+    expect(text, contains('spent'));
+    expect(text, isNot(contains('was spent')));
+    expect(text, contains('quota check rate limited'));
+    expect(text, isNot(contains('showing last known')));
+    expect(text, isNot(contains('HTTP 429')));
   });
 
   test('a stale cloud provider shows the failed live-read reason', () {

@@ -800,6 +800,37 @@ void main() {
     expect(q.single.retryAfterSeconds, 30);
   });
 
+  test('a missing project does not query the empty quota summary', () async {
+    final methods = <String>[];
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('unprovisioned@example.com')],
+      tokenResolver: (_, __) async => 'unprovisioned-token',
+      emailResolver: (_, __, ___) async => null,
+      client: MockClient((request) async {
+        final method = request.url.toString().split(':').last;
+        methods.add(method);
+        if (method == 'loadCodeAssist') {
+          return http.Response(jsonEncode(load()), 200);
+        }
+        if (method == 'onboardUser') {
+          return http.Response(
+            jsonEncode({'done': true, 'response': <String, Object?>{}}),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode(summary(1)),
+          200,
+        );
+      }),
+    ).collectAccounts();
+
+    expect(methods, ['loadCodeAssist', 'onboardUser']);
+    expect(q.single.ok, isTrue);
+    expect(q.single.windows, isEmpty);
+    expect(q.single.error, contains('onboarded project'));
+  });
+
   test('onboarding picks the first tier when none is marked default', () async {
     final tiers = <String?>[];
 

@@ -26,7 +26,7 @@ Map<String, dynamic> _billing([num percent = 73]) => {
         'onDemandCap': {'val': 5000},
         'onDemandUsed': {'val': 10},
         'productUsage': [
-          {'creditUsagePercent': 4}
+          {'product': 'GrokBuild', 'usagePercent': percent == 0 ? 0 : 4}
         ],
       },
     };
@@ -141,6 +141,11 @@ void main() {
       expect(request.followRedirects, isFalse);
       expect(request.headers['Authorization'], 'Bearer host-token');
       expect(request.headers['X-XAI-Token-Auth'], 'xai-grok-cli');
+      expect(request.headers['x-grok-client-mode'], 'interactive');
+      expect(
+          request.headers['x-grok-client-version'],
+          anyOf(GrokAdapter.fallbackClientVersion,
+              matches(RegExp(r'^[0-9]+(?:\.[0-9]+){1,3}$'))));
       expect(request.headers['x-userid'], 'user-a');
       expect(await request.finalize().toBytes(), isEmpty);
       return http.StreamedResponse(
@@ -717,6 +722,87 @@ void main() {
           grokBillingWindowFromJson(
               {'config': oldConfig()..['currentPeriod'] = <String, dynamic>{}}),
           isNull);
+    });
+    test('an omitted proto3 zero percent is an empty included window', () {
+      final config = Map<String, dynamic>.from(_billing()['config'] as Map)
+        ..remove('creditUsagePercent')
+        ..remove('productUsage');
+      final window = grokBillingWindowFromJson({'config': config})!;
+      expect(window.usedPercent, 0);
+      expect(window.label, 'weekly');
+      expect(window.resetsAt, 1789171200);
+    });
+    test('an omitted percent does not borrow deprecated included cents', () {
+      final config = oldConfig()
+        ..['currentPeriod'] = {
+          'type': 'USAGE_PERIOD_TYPE_WEEKLY',
+          'start': '2026-09-05T00:00:00Z',
+          'end': _reset,
+        };
+      final window = grokBillingWindowFromJson({'config': config})!;
+      expect(window.usedPercent, 0);
+      expect(window.label, 'weekly');
+    });
+    test('a null percent on a valid period is not a confirmed zero', () {
+      final config = Map<String, dynamic>.from(_billing()['config'] as Map);
+      config['creditUsagePercent'] = null;
+      expect(grokBillingWindowFromJson({'config': config}), isNull);
+    });
+    test('a product percent without the aggregate is not an empty pool', () {
+      final config = Map<String, dynamic>.from(_billing()['config'] as Map)
+        ..remove('creditUsagePercent');
+      config['productUsage'] = [
+        {'product': 'GrokBuild', 'usagePercent': 12}
+      ];
+      expect(grokBillingWindowFromJson({'config': config}), isNull);
+    });
+    test('an explicit zero product percent agrees with an omitted aggregate',
+        () {
+      final config = Map<String, dynamic>.from(_billing()['config'] as Map)
+        ..remove('creditUsagePercent');
+      config['productUsage'] = [
+        {'product': 'GrokBuild', 'usagePercent': 0}
+      ];
+      final window = grokBillingWindowFromJson({'config': config})!;
+      expect(window.usedPercent, 0);
+      expect(window.label, 'weekly');
+    });
+    test('a mislabeled product credit percent is not an empty pool', () {
+      final config = Map<String, dynamic>.from(_billing()['config'] as Map)
+        ..remove('creditUsagePercent');
+      config['productUsage'] = [
+        {'product': 'GrokBuild', 'creditUsagePercent': 4}
+      ];
+      expect(grokBillingWindowFromJson({'config': config}), isNull);
+    });
+    test('a malformed product breakdown is not an empty pool', () {
+      for (final productUsage in [
+        <String, dynamic>{'usagePercent': 0},
+        'GrokBuild',
+        [4],
+        [
+          {'product': 'GrokBuild', 'usagePercent': '0'}
+        ],
+      ]) {
+        final config = Map<String, dynamic>.from(_billing()['config'] as Map)
+          ..remove('creditUsagePercent');
+        config['productUsage'] = productUsage;
+        expect(grokBillingWindowFromJson({'config': config}), isNull,
+            reason: '$productUsage');
+      }
+    });
+    test('the live credits period offset and fraction parse', () {
+      final config = Map<String, dynamic>.from(_billing()['config'] as Map)
+        ..remove('creditUsagePercent')
+        ..remove('productUsage');
+      config['currentPeriod'] = {
+        'type': 'USAGE_PERIOD_TYPE_WEEKLY',
+        'start': '2026-10-05T23:06:19.170678+00:00',
+        'end': '2026-10-12T23:06:19.170678+00:00',
+      };
+      final window = grokBillingWindowFromJson({'config': config})!;
+      expect(window.usedPercent, 0);
+      expect(window.resetsAt, 1791846379);
     });
     for (final end in [
       '2026-02-30T00:00:00Z',

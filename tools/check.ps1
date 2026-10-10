@@ -208,6 +208,16 @@ try {
     Pop-Location
   }
 
+  Write-Gate 'Omarchy display snapshot'
+  Push-Location $root
+  try {
+    Invoke-CheckedCommand -Command 'python' -Arguments @(
+      '-m', 'unittest', 'discover', '-s', 'integrations/omarchy', '-p', 'test_*.py'
+    )
+  } finally {
+    Pop-Location
+  }
+
   Write-Host 'All quotabot Windows gates passed.' -ForegroundColor Green
 } finally {
   Disable-QuotabotSpaceSafeDart -State $toolchain
