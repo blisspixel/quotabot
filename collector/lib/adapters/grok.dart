@@ -40,6 +40,13 @@ class GrokAdapter {
       Uri.parse('https://cli-chat-proxy.grok.com/v1/user?include=subscription');
   static const _maxAuthBytes = 256 * 1024;
   static const _maxResponseBytes = 128 * 1024;
+  static const _maxVersionBytes = 4096;
+
+  /// Current stable Grok CLI, used only when this machine has no version file.
+  /// The billing proxy version-gates clients; keep this aligned with
+  /// https://x.ai/cli/stable when the installed CLI cannot be read.
+  static const fallbackClientVersion = '1.0.46';
+  static final _clientVersionPattern = RegExp(r'^[0-9]+(?:\.[0-9]+){1,3}$');
   final File? _authFile;
   final GrokUsageFetcher? _usageFetcher;
   final GrokTokenResolver? _tokenResolver;
@@ -330,6 +337,10 @@ class GrokAdapter {
               'Authorization': 'Bearer $token',
               'Accept': 'application/json',
               'X-XAI-Token-Auth': 'xai-grok-cli',
+              'x-grok-client-version': _clientVersion(),
+              // The first-party billing fetch sends the process mode. The
+              // interactive default is what `grok` uses for this metadata read.
+              'x-grok-client-mode': 'interactive',
               if (userId != null) 'x-userid': userId,
             });
       final response = await (_http ?? sharedHttpClient).send(request);
@@ -494,18 +505,44 @@ class GrokAdapter {
     return null;
   }
 
+  /// Installed Grok CLI version from `GROK_HOME` or `~/.grok/version.json`.
+  /// A missing or unusable file falls back to [fallbackClientVersion].
+  static String _clientVersion() {
+    for (final root in [
+      Platform.environment['GROK_HOME'],
+      '${home()}/.grok',
+    ]) {
+      if (root == null || root.isEmpty) continue;
+      final version = _versionFile(File(
+          root.endsWith('/') || root.endsWith(r'\')
+              ? '${root}version.json'
+              : '$root${Platform.pathSeparator}version.json'));
+      if (version != null) return version;
+    }
+    return fallbackClientVersion;
+  }
+
+  static String? _versionFile(File file) {
+    try {
+      if (!file.existsSync() || file.lengthSync() > _maxVersionBytes) {
+        return null;
+      }
+      final raw = jsonDecode(file.readAsStringSync());
+      final version = raw is Map ? raw['version'] : null;
+      if (version is String && _clientVersionPattern.hasMatch(version)) {
+        return version;
+      }
+    } catch (_) {
+      // A missing or unreadable CLI version must not fail the quota read.
+    }
+    return null;
+  }
+
   static QuotaWindow? _includedWindow(Map<dynamic, dynamic> config) {
     if (config.containsKey('creditUsagePercent') ||
         config.containsKey('currentPeriod')) {
-      final percent = config['creditUsagePercent'];
       final period = config['currentPeriod'];
-      if (percent is! num ||
-          !percent.isFinite ||
-          percent < 0 ||
-          percent > 100 ||
-          period is! Map) {
-        return null;
-      }
+      if (period is! Map) return null;
       final label = switch (period['type']) {
         'USAGE_PERIOD_TYPE_WEEKLY' => 'weekly',
         'USAGE_PERIOD_TYPE_MONTHLY' => 'monthly',
@@ -518,8 +555,9 @@ class GrokAdapter {
           (period['start'] != null && (start == null || start >= end))) {
         return null;
       }
-      return QuotaWindow(
-          label: label, usedPercent: percent.toDouble(), resetsAt: end);
+      final percent = _modernIncludedPercent(config);
+      if (percent == null) return null;
+      return QuotaWindow(label: label, usedPercent: percent, resetsAt: end);
     }
     // The pinned billing client retains these deprecated INCLUDED cents. A
     // present-invalid modern field never falls through to the older evidence.
@@ -542,6 +580,57 @@ class GrokAdapter {
         used: used,
         limit: limit,
         resetsAt: end);
+  }
+
+  /// Proto3 JSON omits a zero `creditUsagePercent`. The first-party credits
+  /// response does that at the start of a window. A present invalid percent,
+  /// or a product row whose percent is positive or unusable while the
+  /// aggregate is absent, is not that confirmed zero. An explicit product 0
+  /// agrees with the omitted aggregate. A present aggregate stays the included
+  /// percent: product rows are a breakdown, and a higher product percent is
+  /// not a second copy of the shared pool.
+  static double? _modernIncludedPercent(Map<dynamic, dynamic> config) {
+    if (!config.containsKey('creditUsagePercent')) {
+      return _productUsageContradictsZero(config) ? null : 0;
+    }
+    final percent = config['creditUsagePercent'];
+    if (percent is! num || !percent.isFinite || percent < 0 || percent > 100) {
+      return null;
+    }
+    return percent.toDouble();
+  }
+
+  static bool _productUsageContradictsZero(Map<dynamic, dynamic> config) {
+    if (!config.containsKey('productUsage') || config['productUsage'] == null) {
+      return false;
+    }
+    final rows = config['productUsage'];
+    // A present breakdown that is not a list is unusable. Skipping it would
+    // turn the omitted aggregate into a full included window.
+    if (rows is! List) return true;
+    for (final row in rows) {
+      if (row is! Map) return true;
+      final percent = _productRowPercent(row);
+      if (percent == null) {
+        if (_productRowNamesPercent(row)) return true;
+        continue;
+      }
+      if (percent > 0) return true;
+    }
+    return false;
+  }
+
+  /// Product rows in the credits response use `usagePercent`. A row that
+  /// instead carries `creditUsagePercent` is the same breakdown figure.
+  static bool _productRowNamesPercent(Map<dynamic, dynamic> row) =>
+      row.containsKey('usagePercent') || row.containsKey('creditUsagePercent');
+
+  static double? _productRowPercent(Map<dynamic, dynamic> row) {
+    final raw = row.containsKey('usagePercent')
+        ? row['usagePercent']
+        : row['creditUsagePercent'];
+    if (raw is! num || !raw.isFinite || raw < 0 || raw > 100) return null;
+    return raw.toDouble();
   }
 
   static int? _cents(Object? raw) {

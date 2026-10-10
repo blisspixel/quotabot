@@ -329,6 +329,80 @@ void main() {
     expect(flash.headroomPercent, 80);
   });
 
+  test('Antigravity summary group names cover their catalog pools', () {
+    final antigravity = _cloud(
+      antigravityProviderId,
+      100,
+      resetsAt: _now + 5 * 86400,
+      modelQuotas: [
+        ModelQuota(
+          model: 'Gemini Models',
+          usedPercent: 100,
+          resetsAt: _now + 5 * 86400,
+          windowLabel: 'weekly',
+        ),
+        ModelQuota(
+          model: 'Claude and GPT models',
+          usedPercent: 0,
+          resetsAt: _now + 6 * 86400,
+          windowLabel: 'weekly',
+        ),
+      ],
+    );
+    const catalog = {
+      antigravityProviderId: [
+        ModelInfo(
+          id: 'gemini-3.1-pro',
+          displayName: 'Gemini 3.1 Pro',
+          reasoning: 'reasoning',
+          tier: 'flagship',
+        ),
+        ModelInfo(
+          id: 'claude-sonnet-4.6-thinking',
+          displayName: 'Claude Sonnet 4.6 (thinking)',
+          reasoning: 'reasoning',
+          tier: 'standard',
+        ),
+        ModelInfo(
+          id: 'gpt-oss-120b',
+          displayName: 'GPT-OSS-120B',
+          tier: 'standard',
+        ),
+      ],
+    };
+
+    expect(providerAvailability(antigravity, _now).available, isFalse);
+    final registry = buildModelRegistry(
+      [antigravity],
+      _now,
+      catalog: catalog,
+    );
+    final gemini = registry.singleWhere(
+      (entry) => entry.model.id == 'gemini-3.1-pro',
+    );
+    final claude = registry.singleWhere(
+      (entry) => entry.model.id == 'claude-sonnet-4.6-thinking',
+    );
+    final gpt = registry.singleWhere(
+      (entry) => entry.model.id == 'gpt-oss-120b',
+    );
+    expect(gemini.available, isFalse);
+    expect(gemini.headroomPercent, 0);
+    expect(claude.available, isTrue);
+    expect(claude.headroomPercent, 100);
+    expect(gpt.available, isTrue);
+    expect(gpt.headroomPercent, 100);
+
+    final gates = modelCapabilityGates(
+      [antigravity],
+      _now,
+      catalog: catalog,
+    );
+    final key = quotaIdentityKey(antigravityProviderId, 'a');
+    expect(gates.availableQuotaKeys, contains(key));
+    expect(gates.headroomByQuotaKey[key], 100);
+  });
+
   test('Antigravity capability route uses conservative eligible headroom', () {
     final antigravity = _cloud(
       antigravityProviderId,
@@ -398,6 +472,13 @@ void main() {
     expect(route.recommended?.headroom, 60);
     expect(route.recommended?.bindingPool, 'model_budget');
     expect(route.recommended?.resetsAt, isNull);
+    expect(
+        route.reason,
+        'Use antigravity - Gemini 3.1 Pro: 60% left. '
+        'Gemini 3 Flash is spent.');
+    expect(route.reason, isNot(contains('60% free')));
+    expect(route.reason, isNot(contains('Gemini 3.2 Pro')));
+    expect(route.explanation, isNot(contains('Binding pool: model_budget')));
 
     final staleRoute = suggestRoute(
       [antigravity.asStale('cached')],
@@ -410,6 +491,64 @@ void main() {
     expect(staleRoute.recommended, isNull);
     expect(staleRoute.ranked.single.available, isFalse);
     expect(staleRoute.ranked.single.headroom, 0);
+  });
+
+  test('a low Antigravity model pool does not read as provider percent free',
+      () {
+    final antigravity = _cloud(
+      antigravityProviderId,
+      100,
+      resetsAt: _now + 7200,
+      modelQuotas: const [
+        ModelQuota(
+          model: 'Gemini 3.1 Pro',
+          usedPercent: 90,
+          resetsAt: _now + 3600,
+        ),
+        ModelQuota(
+          model: 'Gemini 3 Flash',
+          usedPercent: 100,
+          resetsAt: _now + 7200,
+        ),
+      ],
+    );
+    const catalog = {
+      antigravityProviderId: [
+        ModelInfo(
+          id: 'gemini-3.1-pro',
+          displayName: 'Gemini 3.1 Pro',
+          reasoning: 'reasoning',
+          tier: 'flagship',
+        ),
+        ModelInfo(
+          id: 'gemini-3-flash',
+          displayName: 'Gemini 3 Flash',
+          tier: 'standard',
+        ),
+      ],
+    };
+    final gates = providerRouteCapabilityGates(
+      [antigravity],
+      _now,
+      catalog: catalog,
+    );
+    final route = suggestRoute(
+      [antigravity],
+      _now,
+      capabilityKnownQuotaKeys: gates.knownQuotaKeys,
+      capabilityAvailableQuotaKeys: gates.availableQuotaKeys,
+      capabilityBudgetResetByQuotaKey: gates.budgetResetByQuotaKey,
+      capabilityHeadroomByQuotaKey: gates.headroomByQuotaKey,
+    );
+
+    expect(route.recommended?.headroom, 10);
+    expect(route.decisionCode, RouteDecisionCode.lowQuota);
+    expect(
+      route.reason,
+      'All subscriptions are low; antigravity still has an open pool - '
+      'Gemini 3.1 Pro: 10% left. Gemini 3 Flash is spent.',
+    );
+    expect(route.reason, isNot(contains('% free')));
   });
 
   test('equal-best Antigravity variants aggregate independently of order', () {

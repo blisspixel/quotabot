@@ -78,6 +78,24 @@ New-Item -ItemType Directory -Force -Path $packagedLib | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'install.ps1') -Destination $packagedLib -Force
 Copy-Item -LiteralPath (Join-Path $root 'install.sh') -Destination $packagedLib -Force
 
+# Ship the Omarchy panel sources beside the CLI. Extra files under lib/ are
+# part of the archive contract. Copying them does not publish a release.
+$omarchySource = Join-Path $root 'integrations\omarchy\plugin'
+if (Test-Path -LiteralPath $omarchySource) {
+  $omarchyDest = Join-Path $packagedLib 'omarchy'
+  if (Test-Path -LiteralPath $omarchyDest) {
+    Remove-Item -LiteralPath $omarchyDest -Recurse -Force
+  }
+  New-Item -ItemType Directory -Force -Path $omarchyDest | Out-Null
+  Copy-Item -Path (Join-Path $omarchySource '*') -Destination $omarchyDest -Recurse -Force
+  $omarchyReadme = Join-Path $root 'integrations\omarchy\README.md'
+  if (Test-Path -LiteralPath $omarchyReadme) {
+    Copy-Item -LiteralPath $omarchyReadme -Destination (Join-Path $omarchyDest 'README.md') -Force
+  }
+  Get-ChildItem -LiteralPath $omarchyDest -Recurse -Directory -Filter '__pycache__' |
+    Remove-Item -Recurse -Force
+}
+
 if ($NoArchive) {
   Write-Host "CLI bundle ready: $bundle"
   return

@@ -867,6 +867,119 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a collapsed Antigravity card names both disagreeing pools', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: antigravityProviderId,
+      displayName: antigravityProviderName,
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: '5h', usedPercent: 0, resetsAt: now + 3 * 3600),
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 100,
+          resetsAt: now + 5 * 86400,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'Gemini Models',
+          usedPercent: 100,
+          resetsAt: now + 5 * 86400,
+          windowLabel: 'weekly',
+        ),
+        ModelQuota(
+          model: 'Claude and GPT models',
+          usedPercent: 0,
+          resetsAt: now + 6 * 86400,
+          windowLabel: 'weekly',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        SizedBox(
+          width: 360,
+          child: ProviderTile(
+            quota: quota,
+            cardColor: const Color(0xFF1A1A1A),
+            onToggle: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Gemini Models weekly'), findsOneWidget);
+    expect(find.text('Claude and GPT models weekly'), findsOneWidget);
+    expect(find.text('Named pools'), findsNothing);
+    expect(find.text('Model-specific quota (separate)'), findsNothing);
+    expect(find.text('Fable'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('an opened Antigravity card calls the split named pools', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: antigravityProviderId,
+      displayName: antigravityProviderName,
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 100,
+          resetsAt: now + 5 * 86400,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'Gemini Models',
+          usedPercent: 100,
+          resetsAt: now + 5 * 86400,
+          windowLabel: 'weekly',
+        ),
+        ModelQuota(
+          model: 'Claude and GPT models',
+          usedPercent: 0,
+          resetsAt: now + 6 * 86400,
+          windowLabel: 'weekly',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        SizedBox(
+          width: 360,
+          child: ProviderTile(
+            quota: quota,
+            cardColor: const Color(0xFF1A1A1A),
+            expanded: true,
+            onToggle: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Named pools'), findsOneWidget);
+    expect(find.text('Model-specific quota (separate)'), findsNothing);
+    expect(
+      find.bySemanticsLabel(RegExp('account bar is the tighter pool')),
+      findsOneWidget,
+    );
+    expect(find.text('Gemini Models weekly'), findsOneWidget);
+    expect(find.text('Claude and GPT models weekly'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('shows a redeemable reset as a prominent green banner', (
     tester,
   ) async {
@@ -1149,6 +1262,70 @@ void main() {
 
     expect(find.text('40% last known'), findsOneWidget);
     expect(find.textContaining('% free'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'a spent cached window names the reset without a second last-known line',
+    (tester) async {
+      final far = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3 * 86400;
+      final stale = ProviderQuota(
+        provider: claudeProviderId,
+        displayName: 'Claude',
+        account: 'default',
+        asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        windows: [
+          QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: far),
+        ],
+      ).asStale('Claude usage read deferred');
+
+      await tester.pumpWidget(
+        _wrap(ProviderTile(quota: stale, cardColor: Colors.white)),
+      );
+      await tester.pump();
+
+      expect(find.text('weekly spent'), findsOneWidget);
+      expect(find.textContaining('was spent'), findsNothing);
+      expect(
+        find.text('quota above is last known - refresh failed'),
+        findsNothing,
+      );
+      expect(
+        find.textContaining(
+          RegExp(r'resets (Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s\d'),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('a spent cached window still names a rate limit', (tester) async {
+    final far = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3 * 86400;
+    final throttled = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: 'Claude',
+      account: 'default',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      stale: true,
+      error: 'Claude usage read returned HTTP 429',
+      pipeHealth: providerPipeHealthThrottled,
+      httpStatus: 429,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: far)],
+    );
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: throttled, cardColor: Colors.white)),
+    );
+    await tester.pump();
+
+    expect(find.text('weekly spent'), findsOneWidget);
+    expect(find.text('quota check rate limited'), findsOneWidget);
+    expect(find.textContaining('showing last known'), findsNothing);
+    expect(
+      find.text('quota above is last known - refresh failed'),
+      findsNothing,
+    );
     expect(tester.takeException(), isNull);
   });
 

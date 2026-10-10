@@ -675,18 +675,25 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
         _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
         _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
       ], width, s),
-      ..._detailRows(q, width, s, selected: selected),
+      ..._detailRows(q, width, s, now: now, selected: selected),
     ];
   }
   if (binding != null && headroom <= kSpentHeadroomFloor) {
+    // A cached spend with its reset still ahead is the same fact as a live
+    // spend: name the window as spent and say when it resets. "was spent
+    // (last known)" plus a second refresh-failed line says that twice.
+    final knownSpend = evidenceLabel == 'last known' &&
+        binding.resetsAt != null &&
+        binding.resetsAt! > now;
     final reset = !columns.reset || binding.resetsAt == null
         ? ''
         : !trusted && binding.resetsAt! <= now
             ? 'refresh to confirm'
-            : trusted
-                ? 'resets ${countdown(binding.resetsAt!, now)}'
+            : knownSpend || trusted
+                ? spentResetPhrase(binding.resetsAt!, now)
                 : 'reset ${countdown(binding.resetsAt!, now)}';
-    final state = trusted ? 'spent' : 'was spent (${evidenceLabel!})';
+    final state =
+        trusted || knownSpend ? 'spent' : 'was spent (${evidenceLabel!})';
     final text = '$state${reset.isEmpty ? '' : '   $reset'}';
     final visibleTags = _visibleInlineTags(
       width: width,
@@ -742,7 +749,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
       first: false,
       selected: selected,
     );
-    rows.addAll(_detailRows(q, width, s, selected: selected));
+    rows.addAll(_detailRows(q, width, s, now: now, selected: selected));
     return rows;
   }
 
@@ -810,7 +817,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     first: first,
     selected: selected,
   );
-  lines.addAll(_detailRows(q, width, s, selected: selected));
+  lines.addAll(_detailRows(q, width, s, now: now, selected: selected));
   return lines;
 }
 
@@ -916,7 +923,7 @@ List<String> _localRows(
       ],
     ], width, s),
   ];
-  lines.addAll(_detailRows(q, width, s, selected: selected));
+  lines.addAll(_detailRows(q, width, s, now: now, selected: selected));
   return lines;
 }
 
@@ -931,6 +938,7 @@ List<String> _detailRows(
   ProviderQuota q,
   int width,
   AnsiStyle s, {
+  required int now,
   bool selected = false,
 }) {
   final rows = <String>[];
@@ -942,6 +950,17 @@ List<String> _detailRows(
   String fit(String text) => _fitReason(text, detailRoom);
   // A redeemable off-cycle reset leads in green: it is the way to keep working
   // now, so it must not read as one more dim note under a spent card.
+  final poolSplit = disagreementModelQuotas(q, now);
+  if (poolSplit.isNotEmpty) {
+    for (final line
+        in _wrapReason(disagreementPoolSummary(poolSplit), detailRoom)) {
+      rows.add(_line([
+        const _Cell('  '),
+        _Cell(' ' * (_nameW + _labelW)),
+        _Cell(line, (s, t) => s.dim(t)),
+      ], width, s));
+    }
+  }
   final reset = resetAvailableMessage(q);
   if (reset != null) {
     rows.add(_line([
@@ -953,10 +972,18 @@ List<String> _detailRows(
   if (!q.isLocal &&
       q.stale &&
       q.driftReason == null &&
-      q.error?.isNotEmpty == true) {
-    final retry = providerRetrySummary(q, showingLastKnown: true);
-    final text =
-        retry != null ? '$retry: ${q.error}' : 'live read failed: ${q.error}';
+      q.error?.isNotEmpty == true &&
+      !staleRefreshRepeatsSpentWindow(q, now)) {
+    final quietSpend = spentResetStillAhead(q, now);
+    final retry = providerRetrySummary(
+      q,
+      showingLastKnown: !quietSpend,
+    );
+    final text = retry == null
+        ? 'live read failed: ${q.error}'
+        : quietSpend
+            ? retry
+            : '$retry: ${q.error}';
     // The repair step is the payload of this row, so it wraps rather than
     // losing its second half to an ellipsis.
     for (final line in _wrapReason(text, detailRoom)) {

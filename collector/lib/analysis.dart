@@ -17,7 +17,8 @@ export 'route_receipt.dart';
 /// Claude Fable is a plan-gated family pool, so it belongs on the glance.
 /// Codex Spark is an extra named `additional_rate_limit` on the shared weekly
 /// and waits for opened detail, selected `top`, and doctor. Antigravity's
-/// exhaustive model table is never a glance bar.
+/// exhaustive model table is never a glance bar. A short grouped split, where
+/// one named pool is open and another is spent, is a separate glance line.
 List<ModelQuota> sparseScopedModelQuotas(
   ProviderQuota quota, {
   bool glance = true,
@@ -63,6 +64,125 @@ List<ModelQuota> doctorVisibleModelQuotas(
   int? now,
 }) =>
     sparseScopedModelQuotas(quota, now: now);
+
+/// Named Antigravity pools that disagree with each other.
+///
+/// The account card keeps the tightest shared window. Two to eight current
+/// model rows with different remaining percents are the grouped summary, not
+/// an exhaustive model table, so glance surfaces may name them. A longer list
+/// stays off the glance.
+List<ModelQuota> disagreementModelQuotas(ProviderQuota quota, int now) {
+  if (quota.provider != antigravityProviderId || quota.windows.isEmpty) {
+    return const [];
+  }
+  final rows = <ModelQuota>[
+    for (final row in quota.modelQuotas)
+      if (row.remainingPercent != null &&
+          row.model.trim().isNotEmpty &&
+          isCurrentModelQuotaEvidenceAt(row, now))
+        row,
+  ];
+  if (rows.length < 2 || rows.length > 8) return const [];
+  var lowest = rows.first.remainingPercent!;
+  var highest = lowest;
+  for (final row in rows.skip(1)) {
+    final remaining = row.remainingPercent!;
+    if (remaining < lowest) lowest = remaining;
+    if (remaining > highest) highest = remaining;
+  }
+  if (highest - lowest < 1) return const [];
+  rows.sort((a, b) {
+    final byRemaining = a.remainingPercent!.compareTo(b.remainingPercent!);
+    if (byRemaining != 0) return byRemaining;
+    return _disagreementPoolName(a).compareTo(_disagreementPoolName(b));
+  });
+  return rows;
+}
+
+String _disagreementPoolName(ModelQuota row) {
+  final window = row.windowLabel;
+  if (window == null || window.isEmpty) return row.model;
+  return '${row.model} $window';
+}
+
+/// One glance line for [disagreementModelQuotas].
+String disagreementPoolSummary(List<ModelQuota> rows) => rows.map((row) {
+      final remaining = row.remainingPercent!;
+      final name = _disagreementPoolName(row);
+      if (remaining <= kSpentHeadroomFloor) return '$name: spent';
+      return '$name: ${remaining.round()}% left';
+    }).join('; ');
+
+String _cappedPoolNames(List<String> names) {
+  if (names.length <= 3) return names.join(', ');
+  return '${names.take(3).join(', ')}, and others';
+}
+
+/// Plain route clause when model-budget headroom is looser than the account
+/// card. Null when the route and the card describe the same remaining quota.
+///
+/// [openSuffix] attaches to the open percent, for example a burn note, so it
+/// does not stick to the spent-pool sentence.
+String? modelBudgetRouteClause({
+  required ProviderQuota quota,
+  required double routeHeadroom,
+  required double? accountHeadroom,
+  required int now,
+  String openSuffix = '',
+}) {
+  if (accountHeadroom != null && routeHeadroom <= accountHeadroom + 0.5) {
+    return null;
+  }
+  final open = <String>[];
+  final spent = <String>[];
+  for (final row in disagreementModelQuotas(quota, now)) {
+    final remaining = row.remainingPercent!;
+    final name = _disagreementPoolName(row);
+    if (remaining <= kSpentHeadroomFloor) {
+      if (!spent.contains(name)) spent.add(name);
+    } else if ((remaining - routeHeadroom).abs() <= 0.5) {
+      if (!open.contains(name)) open.add(name);
+    }
+  }
+  if (open.isEmpty) {
+    return 'an open model pool has ${routeHeadroom.round()}% left$openSuffix; '
+        'the account card is tighter';
+  }
+  final openClause =
+      '${_cappedPoolNames(open)}: ${routeHeadroom.round()}% left$openSuffix';
+  if (spent.isEmpty) return openClause;
+  final verb = spent.length == 1 ? 'is' : 'are';
+  return '$openClause. ${_cappedPoolNames(spent)} $verb spent';
+}
+
+/// Route clause for a model-budget winner, or null when that winner's
+/// headroom is the same number the account card already shows.
+String? _modelBudgetRouteClauseForCandidate({
+  required RouteCandidate candidate,
+  required List<ProviderQuota> quotas,
+  required int now,
+  String openSuffix = '',
+}) {
+  if (candidate.bindingPool != 'model_budget' || candidate.headroom == null) {
+    return null;
+  }
+  ProviderQuota? matched;
+  for (final quota in quotas) {
+    if (quota.provider == candidate.provider &&
+        quota.account == candidate.account) {
+      matched = quota;
+      break;
+    }
+  }
+  if (matched == null) return null;
+  return modelBudgetRouteClause(
+    quota: matched,
+    routeHeadroom: candidate.headroom!,
+    accountHeadroom: providerHeadroom(matched, now),
+    now: now,
+    openSuffix: openSuffix,
+  );
+}
 
 /// Installed-tool footnotes for doctor. Skip anything already in the table or
 /// hidden, so a cancelled Kiro does not keep advertising itself after hide.
@@ -889,7 +1009,7 @@ class RouteSuggestion {
       parts.add(
         'Evidence: $state ${winner.sourceClass.label}, $ageLabel.',
       );
-      if (winner.bindingPool != null) {
+      if (winner.bindingPool != null && winner.bindingPool != 'model_budget') {
         parts.add('Binding pool: ${winner.bindingPool}.');
       }
       parts.add(switch (winner.spendRisk) {
@@ -1953,6 +2073,12 @@ RouteSuggestion suggestRoute(
     final best = preferred ?? comfy.first;
     final note = best.stale ? ' (cached)' : '';
     final burnNote = _effectiveHeadroomNote(best);
+    final poolClause = _modelBudgetRouteClauseForCandidate(
+      candidate: best,
+      quotas: quotas,
+      now: now,
+      openSuffix: burnNote,
+    );
     // Name the preference only when it actually changed the pick - when the
     // preferred candidate differs from the one the risk-adjusted score would
     // have chosen. If preference merely agreed with the top score, it decided
@@ -1966,9 +2092,19 @@ RouteSuggestion suggestRoute(
         ? 'Quota-stretch policy: $lead; effective headroom meets the '
             '${boundedStretchThreshold.round()}% stretch threshold'
         : lead;
+    final reason = poolClause == null
+        ? '$policyLead (${best.headroom!.round()}% free$burnNote).'
+        : useQuotaStretch
+            ? 'Quota-stretch policy: Use ${best.provider}$note - '
+                '$poolClause. Effective headroom meets the '
+                '${boundedStretchThreshold.round()}% stretch threshold.'
+            : byPreference
+                ? 'Use ${best.provider}$note - first by your preference - '
+                    '$poolClause.'
+                : 'Use ${best.provider}$note - $poolClause.';
     return result(
       best,
-      '$policyLead (${best.headroom!.round()}% free$burnNote).',
+      reason,
       decisionCode: byPreference
           ? RouteDecisionCode.preferredProvider
           : RouteDecisionCode.bestRunway,
@@ -2016,15 +2152,33 @@ RouteSuggestion suggestRoute(
   if (withAny.isNotEmpty) {
     final best = withAny.first;
     final adjustmentNote = _effectiveHeadroomNote(best);
-    return result(
-      best,
-      useQuotaStretch
+    final poolClause = _modelBudgetRouteClauseForCandidate(
+      candidate: best,
+      quotas: quotas,
+      now: now,
+      openSuffix: adjustmentNote,
+    );
+    final String reason;
+    if (poolClause == null) {
+      reason = useQuotaStretch
           ? 'Quota-stretch policy: no on-device runtime is available, so use '
               '${best.provider} below the ${boundedStretchThreshold.round()}% '
               'stretch threshold (${best.headroom!.round()}% free'
               '$adjustmentNote).'
           : 'All subscriptions are low; ${best.provider} has the best runway '
-              '(${best.headroom!.round()}% free$adjustmentNote).',
+              '(${best.headroom!.round()}% free$adjustmentNote).';
+    } else if (useQuotaStretch) {
+      reason = 'Quota-stretch policy: no on-device runtime is available, so '
+          'use ${best.provider} below the '
+          '${boundedStretchThreshold.round()}% stretch threshold - '
+          '$poolClause.';
+    } else {
+      reason = 'All subscriptions are low; ${best.provider} still has an open '
+          'pool - $poolClause.';
+    }
+    return result(
+      best,
+      reason,
       decisionCode: RouteDecisionCode.lowQuota,
     );
   }

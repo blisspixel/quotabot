@@ -317,6 +317,8 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       reads: [
         _file(join(h, '.grok/auth.json'), 'Grok CLI account and bearer token',
             dataClass: 'credential'),
+        _file(join(h, '.grok/version.json'),
+            'installed Grok CLI version for the billing client header'),
         _file(join(config, 'quotabot/auth/grok*.json'),
             'quotabot stored Grok OAuth grant',
             dataClass: 'credential'),

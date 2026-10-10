@@ -864,6 +864,78 @@ void main() {
       expect(detail, contains('Fallback:'));
     });
 
+    test(
+      'names an open Antigravity pool instead of calling the provider free',
+      () {
+        const now = 1782046566;
+        final antigravity = ProviderQuota(
+          provider: antigravityProviderId,
+          displayName: 'Antigravity',
+          account: 'a',
+          asOf: now,
+          windows: [
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: 100,
+              resetsAt: now + 5 * 86400,
+            ),
+          ],
+          modelQuotas: const [
+            ModelQuota(
+              model: 'Gemini Models',
+              usedPercent: 100,
+              resetsAt: now + 5 * 86400,
+              windowLabel: 'weekly',
+            ),
+            ModelQuota(
+              model: 'Claude and GPT models',
+              usedPercent: 0,
+              resetsAt: now + 6 * 86400,
+              windowLabel: 'weekly',
+            ),
+          ],
+        );
+        const catalog = {
+          antigravityProviderId: [
+            ModelInfo(
+              id: 'claude-sonnet-4.6-thinking',
+              displayName: 'Claude Sonnet 4.6 (thinking)',
+              reasoning: 'reasoning',
+              tier: 'standard',
+            ),
+          ],
+        };
+        final gates = providerRouteCapabilityGates(
+          [antigravity],
+          now,
+          catalog: catalog,
+        );
+        final suggestion = suggestRoute(
+          [antigravity],
+          now,
+          capabilityKnownQuotaKeys: gates.knownQuotaKeys,
+          capabilityAvailableQuotaKeys: gates.availableQuotaKeys,
+          capabilityBudgetResetByQuotaKey: gates.budgetResetByQuotaKey,
+          capabilityHeadroomByQuotaKey: gates.headroomByQuotaKey,
+        );
+        final line = desktopRouteSignalLine(suggestion, [antigravity], now);
+
+        expect(line, contains('Next: Antigravity'));
+        expect(line, contains('100% open pool'));
+        expect(line, isNot(contains('100% free')));
+        expect(line, isNot(contains('100% included')));
+        expect(
+          suggestion.reason,
+          contains('Claude and GPT models weekly: 100% left'),
+        );
+        expect(suggestion.reason, contains('Gemini Models weekly is spent'));
+        expect(
+          suggestion.explanation,
+          isNot(contains('Binding pool: model_budget')),
+        );
+      },
+    );
+
     test('names only the route discounts that actually reduced headroom', () {
       const now = 1782046566;
       final claude = _quota('claude', 'Claude', 'solo@example.com');

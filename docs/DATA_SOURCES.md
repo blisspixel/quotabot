@@ -140,7 +140,13 @@ PROV-DM conformance.
   weekly pool in `primary_window` and explicitly set `secondary_window` to null.
   That null is an absent pool, not a malformed response. Admission flags
   (`allowed`, `limit_reached`) say whether ChatGPT will take a new request.
-  A valid negative becomes `request_admission: denied` and vetoes advice and
+  `spend_control.reached: true` is the same veto for a workspace credit cap.
+  The cap's limit, used, and remaining amounts are not included quota and do
+  not change `used_percent`. `rate_limit_reached_type.type` is the same kind of
+  veto when it names `rate_limit_reached`, a workspace credit depletion, or a
+  workspace usage-limit denial. `unknown`, an absent field, and JSON null leave
+  the window admission alone. An unreadable type rejects the observation.
+  Credit balances still do not become included quota. A valid negative becomes `request_admission: denied` and vetoes advice and
   reservations while preserving the measured percent. They are not a second
   encoding of `used_percent`. A Plus weekly window at
   100% used with `allowed: true` is a live spent observation. Internally
@@ -209,7 +215,18 @@ PROV-DM conformance.
   disappearing entirely is still drift.
   Older responses expose equivalent `five_hour`, `seven_day`, and per-model
   blocks with `utilization`; those remain a compatibility fallback only when
-  the combined observation proves both shared binding pools. Admission is
+  the combined observation proves both shared binding pools. Legacy
+  `seven_day_sonnet` is a model quota on that fallback, same as
+  `seven_day_opus`. `seven_day_routines`, `seven_day_claude_routines`,
+  `claude_routines`, `routines`, `routine`, `seven_day_cowork`, and `cowork`
+  are one Routines model quota, using the tighter percent when more than one
+  alias is present. A generic `routines`, `routine`, or `cowork` value counts
+  only when it has `utilization`. That lane does not replace the shared weekly
+  bar. `seven_day_oauth_apps` is recognized and ignored, so it cannot reject
+  the read or stand in for the weekly pool. None of those blocks reject the
+  5h and weekly rows. A `weekly_scoped` row may name its pool with `scope.surface` when
+  `scope.model` is absent. A present but unusable `scope.model` still rejects
+  the row. Admission is
   atomic for the canonical rows: every recognized `limits` row and every present
   known legacy block must be structurally complete, so a valid session or Fable
   row cannot survive a malformed sibling. A null optional legacy Opus block means
@@ -314,14 +331,29 @@ PROV-DM conformance.
   403, 429, and service errors retain their own recovery state.
 - Live usage: `GET
   https://cli-chat-proxy.grok.com/v1/billing?format=credits` with bearer auth,
-  `X-XAI-Token-Auth: xai-grok-cli`, and the same principal's user id. Reads reject
-  redirects and cap response bodies before accumulation. The modern JSON
+  `X-XAI-Token-Auth: xai-grok-cli`, the same principal's user id,
+  `x-grok-client-version`, and `x-grok-client-mode: interactive`. The version
+  is the installed Grok CLI `version` from `GROK_HOME/version.json` or
+  `~/.grok/version.json` when that file names a numeric version; otherwise it
+  is the current stable CLI version `1.0.46`. Reads reject redirects and cap
+  response bodies before accumulation. The modern JSON
   `config.creditUsagePercent` and typed `currentPeriod` yield the included
-  weekly or monthly window. Deprecated included `monthlyLimit`/`used` fields
-  are considered only when modern fields are absent. Present-invalid modern
-  evidence never falls back to a guessed balance. Prepaid, on-demand, product
-  breakdowns and history never increase remaining included quota.
-  This follows the [pinned first-party billing client](https://github.com/xai-org/grok-build/blob/72a61251fcffb464bcc687aeb5a998e5a98ec0c9/crates/codegen/xai-grok-shell/src/extensions/billing.rs).
+  weekly or monthly window. Proto3 omits a zero `creditUsagePercent`. A valid
+  `currentPeriod` with that field absent is 0% included usage for the new
+  window. A present invalid percent, an invalid period, or a product
+  `usagePercent` that is positive or unusable is not that zero and never
+  falls back to deprecated cents. Product rows report `usagePercent`. A row
+  that instead reports `creditUsagePercent` is that same breakdown figure, so
+  a mislabeled positive row cannot confirm an empty pool. A `productUsage`
+  value that is present and is not a list of objects is unusable and is not
+  that zero. JSON null means the breakdown is absent. An explicit product
+  `usagePercent` of 0 agrees with the omitted aggregate. A present aggregate
+  remains the included percent; a higher product breakdown is not a second
+  copy of the shared pool. Deprecated included
+  `monthlyLimit`/`used` fields are considered only when modern fields are
+  absent. Prepaid, on-demand, product breakdowns and history never increase
+  remaining included quota.
+  This follows the [current first-party billing client](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-shell/src/extensions/billing.rs).
 - A plan name requires provider metadata. Missing plan evidence remains unknown.
   The old gRPC parser stays covered by historical fixtures, but runtime failures
   do not fall back to that transport. There is no inference or usage-token cost.
@@ -365,13 +397,32 @@ State lives in the Antigravity globalStorage SQLite database at
   `:retrieveUserQuotaSummary`, then `:fetchAvailableModels`). The grouped
   summary is the pool Antigravity spends: named Gemini and Claude/GPT groups,
   each with a weekly bucket and a five-hour bucket carrying
-  `remainingFraction`, `resetTime`, and a `window` of `weekly` or `5h`. The
+  `remainingFraction`, `resetTime`, and a `window` of `weekly` or `5h`. When
+  `window` is absent, a bucket id or display name identifies the five-hour
+  bar only by a bounded `5h` token, such as `gemini-5h` or "five hour". A
+  model id such as `gemini-2.5h`, or an allowance id such as `15h`, is not
+  that bar. A bucket with `disabled: true` is not the active limiter and is
+  omitted, so a non-binding five-hour fraction cannot become the account's
+  five-hour bar.
+  An older summary with no `window` field keeps one row per model display
+  name, the tighter of that model's caps, and the account card shows the
+  tightest in-horizon row as one weekly window. A summary request is not sent
+  until `loadCodeAssist` or onboarding has produced a project, because an
+  empty summary body can report a stale full balance. The
   non-prefixed `cloudcode-pa.googleapis.com` host reports `remainingFraction`
   1.0 for those Gemini buckets, which is the Cloud Code Assist allowance, not
   the shared `agy` pool, so it is not used. These are quota metadata calls, not
   generation, so they cost no tokens. Until typed shared pools, the account card
-  shows one `5h` and one `weekly` window: the most-constrained bucket of each
-  kind. A spent longer window still binds routing. Per-model
+  shows one `5h` and one `weekly` window: the most-constrained active bucket
+  of each kind. That card is the tightest pool, not a single allowance. Model routing
+  still follows the named group: `Gemini Models` covers Gemini catalog ids,
+  and `Claude and GPT models` covers Claude and GPT-OSS catalog ids. A spent
+  Gemini weekly window does not spend the Claude/GPT pool. When two to eight
+  current named pools disagree, doctor, top, and the desktop card name that
+  split. The suggestion names the open pool and any spent pools, and does not
+  call the whole provider free. A longer table stays off the glance; the
+  suggestion then says an open model pool remains while the account card is
+  tighter. Per-model
   `fetchAvailableModels` rows remain model-facing gates and are never added
   together. A present `isExhausted` that is not a boolean rejects that live
   table. `isExhausted: true` on a row with a reset is 100% used, even when

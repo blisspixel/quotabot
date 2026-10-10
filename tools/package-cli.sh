@@ -96,6 +96,20 @@ cp "$root/install.ps1" "$packaged_lib/install.ps1"
 cp "$root/install.sh" "$packaged_lib/install.sh"
 chmod 755 "$packaged_lib/install.sh"
 
+# Ship the Omarchy panel sources beside the CLI. The archive contract allows
+# extra files under lib/. This does not publish a release by itself.
+omarchy_src="$root/integrations/omarchy/plugin"
+if [ -d "$omarchy_src" ]; then
+  omarchy_dest="$packaged_lib/omarchy"
+  rm -rf "$omarchy_dest"
+  mkdir -p "$omarchy_dest"
+  cp -R "$omarchy_src"/. "$omarchy_dest"/
+  if [ -f "$root/integrations/omarchy/README.md" ]; then
+    cp "$root/integrations/omarchy/README.md" "$omarchy_dest/README.md"
+  fi
+  find "$omarchy_dest" -type d -name '__pycache__' -prune -exec rm -rf {} +
+fi
+
 if [ "$archive" -eq 0 ]; then
   echo "CLI bundle ready: $bundle"
   exit 0

@@ -46,7 +46,28 @@ int _matchScore(String quotaKey, Set<String> modelKeys,
       )) {
     return 1;
   }
+  // retrieveUserQuotaSummary names shared pools by display name. Those rows
+  // are the pools agy spends when the per-model table is absent. They must
+  // cover the catalog ids in that pool, or an open Claude/GPT allowance is
+  // invisible beside a spent Gemini weekly window.
+  if (provider == antigravityProviderId &&
+      _antigravitySharedPoolCovers(quotaKey, modelKeys)) {
+    return 1;
+  }
   return 0;
+}
+
+bool _antigravitySharedPoolCovers(String quotaKey, Set<String> modelKeys) {
+  bool covers(bool Function(String modelKey) test) => modelKeys.any(test);
+  switch (quotaKey) {
+    case 'geminimodels':
+      return covers((key) => key.startsWith('gemini'));
+    case 'claudeandgptmodels':
+      return covers(
+          (key) => key.startsWith('claude') || key.startsWith('gptoss'));
+    default:
+      return false;
+  }
 }
 
 const Set<String> claudeScopedQuotaFamilies = {

@@ -129,7 +129,8 @@ subscription entitlement nor the harness's supported transport.
 Inspect what already exists before adding another.
 
 - **Pure core, thin adapters.** Parsing, windowing, routing, drift, and
-  forecasts live in `collector/lib/parsing.dart`, `analysis.dart`,
+  forecasts live in `collector/lib/parsing.dart` (provider parts under
+  `collector/lib/src/parsing/`), `analysis.dart`,
   `decision.dart`, and `drift.dart` with no I/O. Adapters under
   `collector/lib/adapters/` fetch bytes and delegate. Do not put HTTP, disk, or
   subprocess calls in the pure core, and do not re-derive routing in an adapter

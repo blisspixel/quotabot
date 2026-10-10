@@ -9,6 +9,6 @@
     "prepaidBalance": {"val": 9000},
     "onDemandCap": {"val": 5000},
     "onDemandUsed": {"val": 12},
-    "productUsage": [{"creditUsagePercent": 5}]
+    "productUsage": [{"product": "GrokBuild", "usagePercent": 5}]
   }
 }

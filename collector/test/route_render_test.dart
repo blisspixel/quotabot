@@ -14,6 +14,7 @@ RouteCandidate _candidate({
   double? strandProbability,
   bool capabilityLimited = false,
   bool capabilityBudgetLimited = false,
+  String? bindingPool,
 }) =>
     RouteCandidate(
       provider: provider,
@@ -34,6 +35,7 @@ RouteCandidate _candidate({
       strandProbability: strandProbability,
       capabilityLimited: capabilityLimited,
       capabilityBudgetLimited: capabilityBudgetLimited,
+      bindingPool: bindingPool,
     );
 
 void main() {
@@ -137,5 +139,20 @@ void main() {
     );
     expect(line, contains('last trusted'));
     expect(line, isNot(contains('free')));
+  });
+
+  test('an available model-budget route reads as an open pool', () {
+    final line = routeCandidateGlanceLine(
+      _candidate(
+        provider: 'antigravity',
+        headroom: 100,
+        bindingPool: 'model_budget',
+      ),
+      style: plain,
+      provenance: '[live]',
+    );
+    expect(line, contains('100% open pool'));
+    expect(line, isNot(contains('100% free')));
+    expect(line, isNot(contains('spent')));
   });
 }

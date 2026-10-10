@@ -5568,14 +5568,21 @@ class ProviderTile extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 6),
                   child: LocalModelDetailsButton(quota: quota, now: now),
                 ),
-              // Retained trusted quota is the useful primary signal. Keep a
-              // failed refresh visible, but below the quota bars it qualifies.
+              // Retained quota is the useful primary signal. A spent window
+              // already names the spend and its reset, so a generic "last
+              // known, refresh failed" line under it only repeats that fact.
+              // A rate limit, outage, or sign-in repair still gets its note.
               if (!quota.isLocal &&
                   quota.hasWindows &&
                   quota.stale &&
                   quota.driftReason == null &&
-                  quota.error?.isNotEmpty == true)
-                _providerStaleFailureRow(quota, driftColor),
+                  quota.error?.isNotEmpty == true &&
+                  !staleRefreshRepeatsSpentWindow(quota, now))
+                _providerStaleFailureRow(
+                  quota,
+                  driftColor,
+                  showingLastKnown: !spentResetStillAhead(quota, now),
+                ),
               if (showDetail &&
                   !quota.isLocal &&
                   quota.hasWindows &&
@@ -5595,7 +5602,10 @@ class ProviderTile extends StatelessWidget {
                     ),
                   ),
               if (scopedModelQuotas.isNotEmpty) ...[
-                if (showDetail) _scopedQuotaHeading(quota, muted),
+                if (showDetail)
+                  quota.provider == antigravityProviderId
+                      ? _namedPoolHeading(muted)
+                      : _scopedQuotaHeading(quota, muted),
                 ...scopedModelQuotas.map((modelQuota) {
                   final spendEvidence = claudeFableSpendEvidenceAt(
                     quota,
@@ -5616,6 +5626,7 @@ class ProviderTile extends StatelessWidget {
                       ),
                       showMeter: hasDisplayableStaleMeterAt(quota, now),
                       showCaption: showDetail,
+                      qualifyWindow: quota.provider == antigravityProviderId,
                     ),
                   );
                 }),
@@ -5695,6 +5706,43 @@ class ProviderTile extends StatelessWidget {
     );
   }
 
+  Widget _namedPoolHeading(Color muted) {
+    const detail =
+        'Named Antigravity pools. The account bar is the tighter pool. '
+        'An open pool can still take the route.';
+    return Padding(
+      padding: const EdgeInsets.only(top: 1, bottom: 5),
+      child: Semantics(
+        container: true,
+        label: detail,
+        excludeSemantics: true,
+        child: Tooltip(
+          message: detail,
+          excludeFromSemantics: true,
+          child: Row(
+            children: [
+              Icon(Icons.layers_outlined, size: 12, color: muted),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  'Named pools',
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppType.small,
+                    fontWeight: FontWeight.w600,
+                    color: muted,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _scopedModelQuotaRow(
     ModelQuota modelQuota, {
     required Color muted,
@@ -5703,6 +5751,7 @@ class ProviderTile extends StatelessWidget {
     required String? evidenceLabel,
     required bool showMeter,
     bool showCaption = true,
+    bool qualifyWindow = false,
   }) {
     final model = modelQuota.model.trim();
     final modelLabel = model.isEmpty ? 'Unnamed model' : model;
@@ -5732,7 +5781,7 @@ class ProviderTile extends StatelessWidget {
             ),
           ),
         WindowBar(
-          view: _modelQuotaView(modelQuota),
+          view: _modelQuotaView(modelQuota, qualifyWindow: qualifyWindow),
           muted: muted,
           fg: fg,
           evidenceLabel: evidenceLabel,
@@ -5827,8 +5876,15 @@ class ProviderTile extends StatelessWidget {
     );
   }
 
-  Widget _providerStaleFailureRow(ProviderQuota quota, Color color) {
-    final retryLabel = providerRetrySummary(quota, showingLastKnown: true);
+  Widget _providerStaleFailureRow(
+    ProviderQuota quota,
+    Color color, {
+    bool showingLastKnown = true,
+  }) {
+    final retryLabel = providerRetrySummary(
+      quota,
+      showingLastKnown: showingLastKnown,
+    );
     final retrying = retryLabel != null;
     // Temporary provider pushback stays amber and self-recovering, while the
     // label preserves whether the evidence is throttling or service degradation.
@@ -5953,7 +6009,14 @@ class ProviderTile extends StatelessWidget {
     required bool largeText,
   }) {
     const red = Color(0xFFF85149);
-    final status = evidenceLabel == null
+    // Cached spend with the reset still ahead uses the same present-tense
+    // line as a live spend. The day and time (or a near countdown) is the
+    // second fact. Last-known and a failed refresh are not stacked on it.
+    final knownSpend =
+        evidenceLabel == 'last known' &&
+        v.resetsAt != null &&
+        v.resetsAt! > now;
+    final status = evidenceLabel == null || knownSpend
         ? '${v.label} spent'
         : '${v.label} was spent ($evidenceLabel)';
     final resetPassedWithoutCurrentEvidence =
@@ -5962,6 +6025,8 @@ class ProviderTile extends StatelessWidget {
         ? ''
         : resetPassedWithoutCurrentEvidence
         ? 'refresh to confirm'
+        : knownSpend
+        ? resetsLabel(v.resetsAt, now)
         : evidenceLabel == null && !requestsBlocked
         ? 'available ${backLabel(v.resetsAt, now)}'
         : 'reset ${backLabel(v.resetsAt, now)}';
@@ -6196,10 +6261,15 @@ WinView _view(ProviderQuota quota, QuotaWindow w, int now) {
   return WinView(w.label, rem, rolled, w.resetsAt);
 }
 
-WinView _modelQuotaView(ModelQuota modelQuota) {
+WinView _modelQuotaView(ModelQuota modelQuota, {bool qualifyWindow = false}) {
   final model = modelQuota.model.trim();
+  final base = model.isEmpty ? 'quota' : model;
+  final window = modelQuota.windowLabel;
+  final label = qualifyWindow && window != null && window.isNotEmpty
+      ? '$base $window'
+      : base;
   return WinView(
-    model.isEmpty ? 'quota' : model,
+    label,
     modelQuota.remainingPercent!,
     false,
     modelQuota.resetsAt,
@@ -6207,17 +6277,28 @@ WinView _modelQuotaView(ModelQuota modelQuota) {
 }
 
 /// Claude Fable is a plan-gated family pool, so it stays on the collapsed card.
-/// Codex Spark waits for opened detail. Antigravity's model-quota list is
-/// exhaustive and remains available only through model-routing surfaces.
+/// Codex Spark waits for opened detail. A short Antigravity pool split stays
+/// on the card too. An exhaustive Antigravity model table does not.
 @visibleForTesting
-List<ModelQuota> desktopScopedModelQuotas(ProviderQuota quota, {int? now}) =>
-    sparseScopedModelQuotas(quota, now: now);
+List<ModelQuota> desktopScopedModelQuotas(ProviderQuota quota, {int? now}) {
+  final sparse = sparseScopedModelQuotas(quota, now: now);
+  if (now == null) return sparse;
+  final split = disagreementModelQuotas(quota, now);
+  if (split.isEmpty) return sparse;
+  return [...sparse, ...split];
+}
 
 @visibleForTesting
 List<ModelQuota> desktopDetailScopedModelQuotas(
   ProviderQuota quota, {
   int? now,
-}) => sparseScopedModelQuotas(quota, glance: false, now: now);
+}) {
+  final sparse = sparseScopedModelQuotas(quota, glance: false, now: now);
+  if (now == null) return sparse;
+  final split = disagreementModelQuotas(quota, now);
+  if (split.isEmpty) return sparse;
+  return [...sparse, ...split];
+}
 
 /// Evidence qualifier for a sparse Claude model-family allowance. A passed
 /// scoped reset does not prove a fresh 100% pool, but it also does not make the

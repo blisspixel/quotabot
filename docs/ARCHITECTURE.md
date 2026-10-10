@@ -11,7 +11,8 @@ points, not every helper or command.
 ```
 collector/ (Dart package)
   models.dart        normalized ProviderQuota / QuotaWindow / ModelInfo / BurnStat
-  parsing.dart       pure response/window parsing (no I/O)
+  parsing.dart       pure response/window parsing (no I/O); parts in
+                     src/parsing/ share one public import
   analysis.dart      pure routing: headroom, risk-adjusted headroom, strand
                      probability, suggestRoute, the shared forward-looking
                      forecast (classifyForecast/WindowForecast, used by both top
@@ -112,8 +113,11 @@ collapse.
 ## Separation of pure logic from I/O
 
 The bulk of the logic lives in `parsing.dart` and `analysis.dart` with no
-network or disk access, so it is unit tested directly against fixtures. Adapters
-are thin shells: they fetch bytes (file, SQLite, or HTTP) and delegate parsing.
+network or disk access, so it is unit tested directly against fixtures.
+`parsing.dart` is the library file. Each provider parser is a part under
+`src/parsing/`, sharing private wire helpers without a second public import.
+Adapters are thin shells: they fetch bytes (file, SQLite, or HTTP) and delegate
+parsing.
 This is why the core has high test coverage even though the adapters do I/O.
 `simulation.dart` follows the same rule: it produces deterministic
 `ProviderQuota` snapshots for CLI tests without adapter calls, history reads,
@@ -696,6 +700,17 @@ the compact local headroom histogram and reports breach probability plus optiona
 monthly delta only when prices are supplied on the command line. The result is
 analytics-only: it is not persisted, does not affect routing, and does not infer
 provider price catalogs.
+
+## Omarchy shell panel
+
+`integrations/omarchy/` is a Linux bar widget for stable Omarchy 4.0.4.
+A collector process runs `quotabot --json` and `quotabot suggest --json`,
+redacts the result, and writes one display file under quotabot's own state
+directory. The QML widget reads that file. It does not reimplement `decide()`,
+does not write Omarchy agent usage records, and does not switch accounts.
+The pure mapping lives in `integrations/omarchy/plugin/display.py`. Process
+and file behavior lives in `collect.py`. Fixture tests cover the mapping and
+the file lifecycle. They do not render the Omarchy shell.
 
 ## LiteLLM proxy integration
 

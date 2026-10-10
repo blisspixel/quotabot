@@ -511,6 +511,137 @@ void main() {
       expect(codexLiveUsage(nearLimitAllowed), isNotNull);
     });
 
+    test('a reached spend control denies admission without adding credits', () {
+      final blocked = _validCodexLiveResponse(usedPercent: 10);
+      blocked['spend_control'] = {
+        'reached': true,
+        'individual_limit': {
+          'source': 'workspace_spend_controls',
+          'limit': '1000',
+          'used': '36.8',
+          'used_percent': 4,
+        },
+      };
+
+      final usage = codexLiveUsage(blocked);
+      expect(usage, isNotNull);
+      expect(usage!.requestAdmission, RequestAdmission.denied);
+      expect(usage.windows.single.usedPercent, 10);
+
+      final scoped = _validCodexLiveResponse(
+        usedPercent: 10,
+        additionalRateLimits: [
+          {
+            'limit_name': 'GPT-5.3-Codex-Spark',
+            'rate_limit': {
+              'allowed': true,
+              'limit_reached': false,
+              'primary_window': _codexLiveWindow(usedPercent: 0),
+            },
+          },
+        ],
+      );
+      scoped['spend_control'] = {'reached': true};
+      final scopedUsage = codexLiveUsage(scoped);
+      expect(scopedUsage, isNotNull);
+      expect(scopedUsage!.modelQuotas.single.usedPercent, 0);
+      expect(
+        scopedUsage.modelQuotas.single.requestAdmission,
+        RequestAdmission.denied,
+      );
+
+      final open = _validCodexLiveResponse(usedPercent: 10);
+      open['spend_control'] = {
+        'reached': false,
+        'individual_limit': {'used_percent': 99, 'limit': '1000'},
+      };
+      final allowed = codexLiveUsage(open);
+      expect(allowed, isNotNull);
+      expect(allowed!.requestAdmission, RequestAdmission.allowed);
+      expect(allowed.windows.single.usedPercent, 10);
+
+      final absent = _validCodexLiveResponse(usedPercent: 10);
+      absent['spend_control'] = null;
+      expect(
+        codexLiveUsage(absent)!.requestAdmission,
+        RequestAdmission.allowed,
+      );
+
+      final malformed = _validCodexLiveResponse(usedPercent: 10);
+      malformed['spend_control'] = {'reached': 'yes'};
+      expect(codexLiveUsage(malformed), isNull);
+    });
+
+    test('a named rate-limit denial blocks admission without changing percent',
+        () {
+      const denialTypes = [
+        'rate_limit_reached',
+        'workspace_owner_credits_depleted',
+        'workspace_member_credits_depleted',
+        'workspace_owner_usage_limit_reached',
+        'workspace_member_usage_limit_reached',
+      ];
+      for (final type in denialTypes) {
+        final blocked = _validCodexLiveResponse(usedPercent: 10);
+        blocked['rate_limit_reached_type'] = {'type': type};
+        final usage = codexLiveUsage(blocked);
+        expect(usage, isNotNull, reason: type);
+        expect(usage!.requestAdmission, RequestAdmission.denied, reason: type);
+        expect(usage.windows.single.usedPercent, 10, reason: type);
+      }
+
+      final scoped = _validCodexLiveResponse(
+        usedPercent: 10,
+        additionalRateLimits: [
+          {
+            'limit_name': 'GPT-5.3-Codex-Spark',
+            'rate_limit': {
+              'allowed': true,
+              'limit_reached': false,
+              'primary_window': _codexLiveWindow(usedPercent: 0),
+            },
+          },
+        ],
+      );
+      scoped['rate_limit_reached_type'] = {
+        'type': 'workspace_member_usage_limit_reached',
+      };
+      final scopedUsage = codexLiveUsage(scoped);
+      expect(scopedUsage, isNotNull);
+      expect(scopedUsage!.windows.single.usedPercent, 10);
+      expect(scopedUsage.modelQuotas.single.usedPercent, 0);
+      expect(
+        scopedUsage.modelQuotas.single.requestAdmission,
+        RequestAdmission.denied,
+      );
+
+      final unknown = _validCodexLiveResponse(usedPercent: 10);
+      unknown['rate_limit_reached_type'] = {'type': 'unknown'};
+      expect(
+        codexLiveUsage(unknown)!.requestAdmission,
+        RequestAdmission.allowed,
+      );
+
+      final absent = _validCodexLiveResponse(usedPercent: 10);
+      absent['rate_limit_reached_type'] = null;
+      expect(
+        codexLiveUsage(absent)!.requestAdmission,
+        RequestAdmission.allowed,
+      );
+
+      for (final raw in <Object?>[
+        'rate_limit_reached',
+        {'type': 'new_denial'},
+        {'type': 1},
+        <String, Object?>{},
+        {'type': ' rate_limit_reached'},
+      ]) {
+        final malformed = _validCodexLiveResponse(usedPercent: 10);
+        malformed['rate_limit_reached_type'] = raw;
+        expect(codexLiveUsage(malformed), isNull, reason: '$raw');
+      }
+    });
+
     test('a Plus weekly-full live payload with open admission parses', () {
       final usage = codexLiveUsage({
         'plan_type': 'plus',
@@ -750,8 +881,9 @@ void main() {
       expect(w.map((e) => e.label), ['5h', 'weekly']);
       expect(w.firstWhere((e) => e.label == '5h').usedPercent, 4);
       expect(w.firstWhere((e) => e.label == 'weekly').usedPercent, 56);
-      expect(models.map((m) => m.model), contains('Fable'));
+      expect(models.map((m) => m.model), containsAll(['Fable', 'Sonnet']));
       expect(models.firstWhere((m) => m.model == 'Fable').usedPercent, 83);
+      expect(models.firstWhere((m) => m.model == 'Sonnet').usedPercent, 12);
       expect(claudeUsageDetails(data), isEmpty);
     });
 
@@ -1203,6 +1335,202 @@ void main() {
       expect(models.single.usedPercent, 12);
       expect(models.single.resetsAt, isNotNull);
       expect(models.single.windowLabel, 'weekly');
+    });
+
+    test('legacy Sonnet and Routines blocks stay model quotas', () {
+      final usage = claudeLiveUsage({
+        'five_hour': {'utilization': 18},
+        'seven_day': {'utilization': 23},
+        'seven_day_sonnet': {'utilization': 40},
+        'seven_day_cowork': {'utilization': 5},
+      });
+
+      expect(usage, isNotNull);
+      expect(usage!.windows.map((window) => window.label), ['5h', 'weekly']);
+      expect(usage.windows.map((window) => window.usedPercent), [18, 23]);
+      expect(usage.modelQuotas.map((quota) => quota.model),
+          ['Sonnet', 'Routines']);
+      expect(
+        usage.modelQuotas
+            .firstWhere((quota) => quota.model == 'Sonnet')
+            .usedPercent,
+        40,
+      );
+      expect(
+        usage.modelQuotas
+            .firstWhere((quota) => quota.model == 'Routines')
+            .usedPercent,
+        5,
+      );
+    });
+
+    test('routines aliases share one model quota and keep the weekly bar', () {
+      final usage = claudeLiveUsage({
+        'five_hour': {'utilization': 18},
+        'seven_day': {'utilization': 23},
+        'seven_day_routines': {'utilization': 40},
+        'seven_day_cowork': {'utilization': 90},
+      });
+
+      expect(usage, isNotNull);
+      expect(usage!.windows.map((window) => window.usedPercent), [18, 23]);
+      expect(usage.modelQuotas.map((quota) => quota.model), ['Routines']);
+      expect(usage.modelQuotas.single.usedPercent, 90);
+      expect(usage.modelQuotas.single.windowLabel, 'weekly');
+    });
+
+    test('a routines alias beside canonical limits stays a model quota', () {
+      final usage = claudeLiveUsage({
+        'limits': [
+          {
+            'kind': 'session',
+            'group': 'session',
+            'scope': null,
+            'percent': 10,
+            'resets_at': '2026-07-18T17:00:00Z',
+          },
+          {
+            'kind': 'weekly_all',
+            'group': 'weekly',
+            'scope': null,
+            'percent': 20,
+            'resets_at': '2026-07-24T09:00:00Z',
+          },
+        ],
+        'seven_day_claude_routines': {'utilization': 100},
+      });
+
+      expect(usage, isNotNull);
+      expect(usage!.windows.map((window) => window.usedPercent), [10, 20]);
+      expect(usage.modelQuotas.single.model, 'Routines');
+      expect(usage.modelQuotas.single.usedPercent, 100);
+    });
+
+    test('a generic routines utilization is the same lane', () {
+      final usage = claudeLiveUsage({
+        'five_hour': {'utilization': 18},
+        'seven_day': {'utilization': 23},
+        'routine': {'utilization': 15},
+      });
+
+      expect(usage, isNotNull);
+      expect(usage!.windows.map((window) => window.usedPercent), [18, 23]);
+      expect(usage.modelQuotas.single.model, 'Routines');
+      expect(usage.modelQuotas.single.usedPercent, 15);
+    });
+
+    test('an unrelated routines object does not reject shared windows', () {
+      final usage = claudeLiveUsage({
+        'five_hour': {'utilization': 18},
+        'seven_day': {'utilization': 23},
+        'routine': {'title': 'morning'},
+      });
+
+      expect(usage, isNotNull);
+      expect(usage!.windows.map((window) => window.usedPercent), [18, 23]);
+      expect(usage.modelQuotas, isEmpty);
+    });
+
+    test('oauth apps usage does not replace or reject shared windows', () {
+      final usage = claudeLiveUsage({
+        'five_hour': {'utilization': 18},
+        'seven_day': {'utilization': 23},
+        'seven_day_oauth_apps': {'utilization': 100},
+      });
+
+      expect(usage, isNotNull);
+      expect(usage!.windows.map((window) => window.usedPercent), [18, 23]);
+      expect(usage.modelQuotas, isEmpty);
+    });
+
+    test('a malformed routines alias rejects the legacy read', () {
+      expect(
+        claudeLiveUsage({
+          'five_hour': {'utilization': 18},
+          'seven_day': {'utilization': 23},
+          'seven_day_routines': {'utilization': 'nope'},
+        }),
+        isNull,
+      );
+    });
+
+    test('a malformed legacy Sonnet block rejects the legacy read', () {
+      expect(
+        claudeLiveUsage({
+          'five_hour': {'utilization': 18},
+          'seven_day': {'utilization': 23},
+          'seven_day_sonnet': {'utilization': 'nope'},
+        }),
+        isNull,
+      );
+    });
+
+    test('a surface name scopes a weekly row when model is absent', () {
+      final usage = claudeLiveUsage({
+        'limits': [
+          {
+            'kind': 'session',
+            'group': 'session',
+            'scope': null,
+            'percent': 10,
+            'resets_at': '2026-07-18T17:00:00Z',
+          },
+          {
+            'kind': 'weekly_all',
+            'group': 'weekly',
+            'scope': null,
+            'percent': 20,
+            'resets_at': '2026-07-24T09:00:00Z',
+          },
+          {
+            'kind': 'weekly_scoped',
+            'group': 'weekly',
+            'percent': 30,
+            'resets_at': '2026-07-24T09:00:00Z',
+            'scope': {
+              'surface': {'display_name': 'Claude Sonnet 4.6'},
+            },
+          },
+        ],
+      });
+
+      expect(usage, isNotNull);
+      expect(usage!.windows.map((window) => window.label), ['5h', 'weekly']);
+      expect(usage.modelQuotas.single.model, 'Sonnet');
+      expect(usage.modelQuotas.single.usedPercent, 30);
+    });
+
+    test('an unusable model scope does not fall through to surface', () {
+      final usage = claudeLiveUsage({
+        'limits': [
+          {
+            'kind': 'session',
+            'group': 'session',
+            'scope': null,
+            'percent': 10,
+            'resets_at': '2026-07-18T17:00:00Z',
+          },
+          {
+            'kind': 'weekly_all',
+            'group': 'weekly',
+            'scope': null,
+            'percent': 20,
+            'resets_at': '2026-07-24T09:00:00Z',
+          },
+          {
+            'kind': 'weekly_scoped',
+            'group': 'weekly',
+            'percent': 30,
+            'resets_at': '2026-07-24T09:00:00Z',
+            'scope': {
+              'model': {'display_name': 'Fable\u0000hidden'},
+              'surface': {'display_name': 'Opus'},
+            },
+          },
+        ],
+      });
+
+      expect(usage, isNull);
     });
 
     test('an explicit null legacy Opus block means no optional scoped pool',
@@ -1678,6 +2006,71 @@ void main() {
       expect(windows.last.usedPercent, closeTo(80, 0.01));
     });
 
+    test('gemini-5h without a window field is still the five-hour bar', () {
+      final windows = antigravityQuotaSummaryWindows({
+        'groups': [
+          {
+            'displayName': 'Gemini Models',
+            'buckets': [
+              {
+                'bucketId': 'gemini-5h',
+                'displayName': 'Five hour',
+                'remainingFraction': 0.5,
+                'resetTime': now + 3600,
+              },
+            ],
+          },
+        ],
+      }, now: now);
+      expect(windows, isNotNull);
+      expect(windows!.single.label, '5h');
+      expect(windows.single.usedPercent, closeTo(50, 0.01));
+    });
+
+    test('a model id that contains 5h is not the five-hour bar', () {
+      final windows = antigravityQuotaSummaryWindows({
+        'groups': [
+          {
+            'displayName': 'Gemini Models',
+            'buckets': [
+              {
+                'bucketId': 'gemini-2.5h',
+                'displayName': 'Gemini 2.5h',
+                'remainingFraction': 0.25,
+                'resetTime': now + 5 * 86400,
+              },
+              {
+                'bucketId': 'allowance-15h',
+                'displayName': 'Allowance 15h',
+                'remainingFraction': 0.5,
+                'resetTime': now + 4 * 86400,
+              },
+            ],
+          },
+        ],
+      }, now: now);
+      expect(windows, isNotNull);
+      expect(windows!.map((window) => window.label), ['weekly']);
+      expect(
+        antigravityQuotaSummaryModelQuotas({
+          'groups': [
+            {
+              'displayName': 'Gemini Models',
+              'buckets': [
+                {
+                  'bucketId': 'gemini-2.5h',
+                  'displayName': 'Gemini 2.5h',
+                  'remainingFraction': 0.25,
+                  'resetTime': now + 5 * 86400,
+                },
+              ],
+            },
+          ],
+        }).map((quota) => quota.model),
+        ['Gemini 2.5h'],
+      );
+    });
+
     test('quota summary rejects a consumed bucket with no window identity', () {
       expect(
         antigravityQuotaSummaryWindows({
@@ -1719,6 +2112,135 @@ void main() {
       expect(windows, isNotNull);
       expect(windows!.single.label, 'weekly');
       expect(windows.single.usedPercent, closeTo(50, 0.01));
+    });
+
+    test('a disabled 5h bucket is not the account 5h window', () {
+      final body = {
+        'groups': [
+          {
+            'displayName': 'Gemini Models',
+            'buckets': [
+              {
+                'window': 'weekly',
+                'remainingFraction': 1,
+                'resetTime': now + 5 * 86400,
+              },
+              {
+                'window': '5h',
+                'remainingFraction': 1,
+                'resetTime': now + 3600,
+              },
+            ],
+          },
+          {
+            'displayName': 'Claude and GPT models',
+            'buckets': [
+              {
+                'window': 'weekly',
+                'remainingFraction': 0,
+                'resetTime': now + 3 * 86400,
+              },
+              {
+                'window': '5h',
+                'disabled': true,
+                'remainingFraction': 0.1085196,
+                'resetTime': now + 1800,
+              },
+            ],
+          },
+        ],
+      };
+
+      final windows = antigravityQuotaSummaryWindows(body, now: now);
+      expect(windows, isNotNull);
+      expect(windows!.map((window) => window.label), ['5h', 'weekly']);
+      expect(windows.first.usedPercent, 0);
+      expect(windows.last.usedPercent, 100);
+      final claude = antigravityQuotaSummaryModelQuotas(body)
+          .firstWhere((quota) => quota.model == 'Claude and GPT models');
+      expect(claude.usedPercent, 100);
+      expect(claude.windowLabel, 'weekly');
+    });
+
+    test('a non-boolean disabled flag rejects the summary', () {
+      expect(
+        antigravityQuotaSummaryWindows({
+          'groups': [
+            {
+              'displayName': 'Gemini Models',
+              'buckets': [
+                {
+                  'window': 'weekly',
+                  'disabled': 'yes',
+                  'remainingFraction': 0.5,
+                  'resetTime': now + 86400,
+                },
+              ],
+            },
+          ],
+        }),
+        isNull,
+      );
+    });
+
+    test('an unlabeled per-model summary keeps each model', () {
+      final reset = now + 6 * 86400;
+      final body = {
+        'groups': [
+          {
+            'displayName': 'All Models',
+            'buckets': [
+              {
+                'displayName': 'Claude Sonnet 4.6 (Thinking)',
+                'remainingFraction': 0.25,
+                'resetTime': reset,
+              },
+              {
+                'displayName': 'Gemini 3.1 Pro (High)',
+                'remainingFraction': 1,
+                'resetTime': reset,
+              },
+            ],
+          },
+        ],
+      };
+
+      final windows = antigravityQuotaSummaryWindows(body, now: now);
+      expect(windows, isNotNull);
+      expect(windows!.single.label, 'weekly');
+      expect(windows.single.usedPercent, closeTo(75, 0.01));
+      expect(windows.single.resetsAt, reset);
+      final models = antigravityQuotaSummaryModelQuotas(body);
+      expect(models.map((quota) => quota.model), [
+        'Claude Sonnet 4.6 (Thinking)',
+        'Gemini 3.1 Pro (High)',
+      ]);
+      expect(models.first.windowLabel, isNull);
+      expect(models.first.usedPercent, closeTo(75, 0.01));
+    });
+
+    test('a per-model cap past the weekly horizon is not an account window',
+        () {
+      final body = {
+        'groups': [
+          {
+            'displayName': 'All Models',
+            'buckets': [
+              {
+                'displayName': 'Claude Sonnet 4.6 (Thinking)',
+                'remainingFraction': 0.25,
+                'resetTime': now + 30 * 86400,
+              },
+            ],
+          },
+        ],
+      };
+
+      expect(antigravityQuotaSummaryWindows(body, now: now), isEmpty);
+      expect(
+        antigravityQuotaSummaryModelQuotas(body).single.usedPercent,
+        closeTo(75, 0.01),
+      );
     });
 
     test('quota summary group rows name the shared pools', () {
