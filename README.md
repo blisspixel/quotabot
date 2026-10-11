@@ -10,8 +10,7 @@ and recommends where to send the next request. It also shows supported local
 models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
-> **Current stable:** 0.11.8. quotabot remains under active 0.x development.
-> **Pending publication:** 0.11.11.
+> **Current stable:** 0.11.11. quotabot remains under active 0.x development.
 > **Next:** support Claude discovery for macOS Keychain sign-ins and prove
 > account-wide quota refresh on idle machines, then strengthen execution-scope
 > evidence for local-only advice. Native signing proceeds alongside product
@@ -232,49 +231,30 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Version 0.11.8 keeps model requirements consistent across cloud and local advice,
-preserves unknown loaded context, and excludes unresolved or cloud-backed
-Lemonade composites from local capacity. Runtime metadata reads and LiteLLM
-metadata exchanges are bounded through their original operations. The
-desktop adds model search, explicit unknown load state, and direct settings
-sections. The additive `loaded_state_known` field is available from 0.11.8;
-version 0.11.7 does not emit it. Six Python boundary modules have enforced
-strict checking. The preceding 0.11.7 refreshed model and security dependencies
-and bound LiteLLM leases to exact accounts. See the
-[changelog](CHANGELOG.md) and
-[September 30 review](docs/research/2026-09-30-review.md) for verification scope.
-The preceding 0.11.6 corrects NVIDIA catalog evidence across collection, setup, and
-the read manifest, and expands native legacy MCP launch checks. The September
-reviews update provider, runtime, and engineering priorities without claiming
-modern MCP support. Version 0.11.5 reads the live Claude weekly pool when the current session row
-omits a reset, so a spent weekly cap is no longer hidden behind last-known 5h
-leftover. Glance and doctor hide hashed account labels, keep Fable on the
-default view, and hide Codex Spark until detail. MCP shutdown stops late
-snapshots from recreating a closed HTTP client, and Claude, Codex, Grok, and
-Antigravity token POSTs keep ownership through original settlement. The
-preceding 0.11.4 rejects a quota reset boundary that advances with the clock
-while nothing has been consumed. Fresh quota remains independent of advisory
-analytics. The desktop retains inspectable local models and hardware evidence;
-agent harnesses and Agent Plugins use the same quota advice through
-`quotabot mcp`.
-The preceding 0.11.1
-[release run](https://github.com/blisspixel/quotabot/actions/runs/33977671639)
-published an immutable 14-asset set, and its unpinned GitHub Latest
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33980712404)
-passed clean install, prior-stable upgrade, source setup, stable-channel
-resolution, and desktop-run checks on Windows, macOS, and Ubuntu. A live Windows
-installation used `quotabot update` to move from 0.11.0 to 0.11.1 and installed
-the matching desktop, with both payloads verified against fresh downloads.
-The release uses GitHub's dedicated Latest endpoint for stable discovery and
-keeps preview discovery within smaller bounded pages. Every release
-repeats three-platform quality, native build, archive, checksum, provenance,
-fresh-download, install, upgrade, source-setup, and desktop-run checks. Current
-Windows and macOS artifacts remain unsigned transition artifacts, so the
-0.x line must repeat that evidence with platform-signed artifacts
-before 1.0. See the [release
-evidence](docs/BUILDING.md#baseline-release-evidence),
-[roadmap](ROADMAP.md), [documentation index](docs/README.md),
-[contributing guide](CONTRIBUTING.md), and [security policy](SECURITY.md).
+Version [0.11.11](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11) fixes absent-tool discovery,
+shares recent successful Claude captures with original age and safe backoff,
+and names concrete local models with context and hardware-fit advice. It also
+ships the Omarchy widget sources and selected MCP/LiteLLM security updates.
+See the [changelog](CHANGELOG.md) and
+[October 11 review](docs/research/2026-10-11-issue-review.md) for scope.
+
+The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38153000563),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701).
+The immutable 14-asset set contains four CLI and three desktop archive/checksum
+pairs. Publication verified exact workflow provenance and fresh downloads.
+Published smoke covers clean install, upgrade from 0.11.8, persistent state,
+source setup, and stable-channel resolution on Windows, macOS, and Linux.
+Desktop checks verify Windows/Linux startup and the installed macOS bundle.
+
+Current Windows and macOS artifacts remain unsigned transition artifacts.
+Native publisher signing, real-account idle-machine refresh, Keychain-only
+discovery, stronger local execution-scope evidence, and modern MCP support
+retain their own acceptance criteria in [roadmap Next](ROADMAP.md#next).
+Automated readiness and synthetic tests do not establish native assistive
+technology interaction or provider-account truth. Build and validation details
+are in [Building](docs/BUILDING.md), [Security](SECURITY.md), and the
+[documentation index](docs/README.md).
 
 ## Disclaimer
 

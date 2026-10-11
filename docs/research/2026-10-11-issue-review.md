@@ -56,12 +56,16 @@ contracts. Structured fields carry the same advice across machine interfaces.
 ## Verification scope
 
 The unpublished 0.11.9 release candidate passed main CI but failed the Windows
-Omarchy lifecycle test in the tagged Release workflow. Repeated local tests
+Omarchy lifecycle test in the
+[tagged Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38139016126/attempts/1).
+Repeated local tests
 reproduced the defect: Windows text-mode writes expanded random newline bytes
 inside the 32-byte alias key. Binary-mode creation preserves the exact bytes
 and stable aliases. A deterministic control-byte regression failed before the
 fix and passes afterward. The 0.11.10 candidate retained that correction and
-passed all three tagged quality gates, but metadata preparation mistook the
+passed all three
+[tagged quality gates](https://github.com/blisspixel/quotabot/actions/runs/38147087917),
+but metadata preparation mistook the
 scoped MCP npm package name in its changelog for an account mention. The
 corrected notes use the SDK product name, and a regression now runs the actual
 current changelog through metadata preparation early in CI. The regression
@@ -81,3 +85,34 @@ Synthetic tests do not prove real-account idle-machine refresh, Keychain-only
 discovery, native screen-reader interaction, publisher signing, or execution
 scope behind forwarding and LM Link. Those remain open and must not be marked
 complete when this maintenance release ships.
+
+## Released verification
+
+Version 0.11.11, desktop build 66, was published immutably from `0fa28b83797c7f4e9b2a28f10a139f6e89914901`.
+The [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38153000563),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701)
+passed. The release contains fourteen verified assets and published install
+smoke upgrades from 0.11.8. Windows candidate CLI/archive execution and
+desktop native window/tray readiness were also checked locally. The complete
+Windows contributor gate passed for the corrected release, with 92.84 percent
+collector line coverage and 87.52 percent desktop line coverage.
+
+The published Windows CLI and desktop were installed together on the maintainer
+machine. All thirty installed payload files matched the verified archives;
+existing settings, profiles, manual entries, and grants were preserved during
+activation, and the desktop restarted. The installed CLI reported 0.11.11,
+its stable-channel check reported up to date, and `doctor --json` returned the
+expected schema. An isolated launch of the published desktop independently
+passed native window/tray readiness with unchanged bundle bytes.
+
+During 0.11.9 preparation, the first local collector run had one 20-second CLI
+subprocess timeout during concurrent build work; the focused retry and full
+clean rerun passed without changing its deadline. The deterministic binary-key
+regression passes in the current full gate. The binary-key fix also passed 100
+isolated Omarchy lifecycle repetitions on the unpublished 0.11.10 candidate;
+that runtime correction is unchanged in 0.11.11.
+
+The [Python 3.13 os.open documentation](https://docs.python.org/3.13/library/os.html#os.open)
+explicitly requires `O_BINARY` for binary-mode file creation on Windows.
+Native interaction and real-account gaps listed above remain open.

@@ -60,15 +60,18 @@ verification, is [CLAUDE.md](CLAUDE.md).
 
 ## Project status
 
-The current verified stable release is 0.11.8. Callers should treat a snapshot
+The current verified stable release is 0.11.11. Callers should treat a snapshot
 with `drift_reason` as non-routable, keep measured percentages visible on
 admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
 explicit-spend evidence. Fresh quota publishes before advisory analytics.
 
-Version 0.11.8 adds stronger explicit local-model matching,
+Version 0.11.11 adds shared successful Claude captures with original age,
+concrete local-model/context advice, and truthful absent-tool detection.
+Version 0.11.8 added stronger explicit local-model matching,
 loaded context, composite execution exclusions, and metadata bounds. See
-[CHANGELOG.md](CHANGELOG.md) and the
+[CHANGELOG.md](CHANGELOG.md), the
+[October 11 issue review](docs/research/2026-10-11-issue-review.md), and the
 [source review](docs/research/2026-09-30-code-quality.md#second-round-against-0117)
 for verification scope and remaining validation gaps.
 
@@ -96,7 +99,7 @@ download a release binary instead. Build details and prerequisites:
 
 ## How to call it
 
-From source version 0.11.11, successful provider-identified Claude captures are
+From version 0.11.11, successful provider-identified Claude captures are
 shared through the existing credential-scoped read gate for 30 seconds by
 default. `shared_from_capture_at` preserves original capture provenance, while
 `stale` remains false only for a still-trusted recent live capture. Sharing
