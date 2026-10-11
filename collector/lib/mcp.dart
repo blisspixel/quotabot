@@ -39,7 +39,7 @@ import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.11.11';
+const quotabotMcpVersion = '0.11.12';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
@@ -1471,6 +1471,10 @@ McpServer buildQuotabotMcpServer({
   final server = McpServer(
     const Implementation(name: quotabotMcpName, version: quotabotMcpVersion),
     options: McpServerOptions(
+      // Bound messages with the current SDK while retaining the initialized
+      // protocol. Stateless HTTP and subscription ownership need a separate
+      // compatibility increment before modern discovery is advertised.
+      protocol: McpProtocol.legacy,
       capabilities: ServerCapabilities(
         tools: ServerCapabilitiesTools(),
         resources: ServerCapabilitiesResources(),
@@ -1894,7 +1898,7 @@ class QuotaResourceSubscriptionHub {
     }
     throw McpError(
       ErrorCode.invalidParams.value,
-      'resource is not subscribable: $uri',
+      'resource is not subscribable',
     );
   }
 }
@@ -1915,11 +1919,11 @@ void _registerQuotaResourceSubscriptions(
       await hub.subscribe(request.subParams.uri);
       return const EmptyResult();
     },
-    (id, params, meta) => JsonRpcSubscribeRequest.fromJson({
-      'id': id,
-      'params': params,
-      if (meta != null) '_meta': meta,
-    }),
+    (id, params, meta) => JsonRpcSubscribeRequest(
+      id: id,
+      subParams: SubscribeRequest.fromJson(params ?? const {}),
+      meta: meta,
+    ),
   );
   server.server.assertCanSetRequestHandler(Method.resourcesUnsubscribe);
   server.server.setRequestHandler<JsonRpcUnsubscribeRequest>(
@@ -1928,11 +1932,11 @@ void _registerQuotaResourceSubscriptions(
       await hub.unsubscribe(request.unsubParams.uri);
       return const EmptyResult();
     },
-    (id, params, meta) => JsonRpcUnsubscribeRequest.fromJson({
-      'id': id,
-      'params': params,
-      if (meta != null) '_meta': meta,
-    }),
+    (id, params, meta) => JsonRpcUnsubscribeRequest(
+      id: id,
+      unsubParams: UnsubscribeRequest.fromJson(params ?? const {}),
+      meta: meta,
+    ),
   );
   server.server.onclose = hub.dispose;
 }

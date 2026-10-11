@@ -148,7 +148,7 @@ jobs:
       - name: Collector tests with coverage
         working-directory: collector
         run: |
-          dart test --coverage=coverage
+          dart test --fail-fast --coverage=coverage
           dart run coverage:format_coverage \
             --lcov \
             --check-ignore \

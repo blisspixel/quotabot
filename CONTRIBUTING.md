@@ -96,7 +96,7 @@ cd collector
 dart pub get --enforce-lockfile
 dart format --set-exit-if-changed .
 dart analyze
-dart test --coverage=coverage
+dart test --fail-fast --coverage=coverage
 dart run coverage:format_coverage --lcov --check-ignore --in=coverage \
   --out=coverage/lcov.info --packages=.dart_tool/package_config.json \
   --report-on=lib

@@ -263,10 +263,10 @@ packages:
     dependency: transitive
     description:
       name: mcp_dart
-      sha256: bc43d364974cc55d9d4bb5ad3708e614274a9218ba66f9ff2e47493e3b32474e
+      sha256: "5a185c1c02e90239e6f3ebca05ef51e04ac0f9c2b1b7ec7ffbb1a671a6379729"
       url: "https://pub.dev"
     source: hosted
-    version: "2.2.2"
+    version: "2.4.2"
   menu_base:
     dependency: transitive
     description:
@@ -329,7 +329,7 @@ packages:
       path: "../collector"
       relative: true
     source: path
-    version: "0.11.11"
+    version: "0.11.12"
   record_use:
     dependency: transitive
     description:

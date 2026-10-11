@@ -11,11 +11,17 @@ models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
 > **Current stable:** 0.11.11. quotabot remains under active 0.x development.
+> **Pending publication:** 0.11.12.
 > **Next:** support Claude discovery for macOS Keychain sign-ins and prove
 > account-wide quota refresh on idle machines, then strengthen execution-scope
 > evidence for local-only advice. Native signing proceeds alongside product
 > development and remains a 1.0 release gate. See [roadmap Next](ROADMAP.md#next)
 > and the [documentation index](docs/README.md).
+
+The [October 11 quality review](docs/research/2026-10-11-next-quality-review.md)
+checks these priorities against current provider and runtime contracts. Source
+0.11.12 first takes the bounded MCP stdio update while preserving legacy
+negotiation; modern protocol support retains a separate acceptance matrix.
 
 Release notes state each artifact's Windows and macOS signing status. Current
 artifacts are unsigned; [signing readiness](docs/RELEASE-SIGNING.md) proceeds
