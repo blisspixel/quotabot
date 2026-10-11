@@ -106,7 +106,7 @@ try {
     Invoke-QuotabotDart -State $toolchain -Arguments @('analyze')
     Invoke-QuotabotDart `
       -State $toolchain `
-      -Arguments @('test', '--coverage=coverage')
+      -Arguments @('test', '--fail-fast', '--coverage=coverage')
     Invoke-QuotabotDart -State $toolchain -Arguments @(
       'run',
       'coverage:format_coverage',

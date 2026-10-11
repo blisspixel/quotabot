@@ -69,6 +69,19 @@ The SDK also accepts `2024-10-07`, as the old lock did. Preserve and test that
 existing negotiation behavior separately from the four documented plugin launch
 revisions; it is not a new published-protocol support claim.
 
+The complete local Windows gate passed with 2,359 collector tests, 455 desktop
+tests, and line coverage of 92.82 and 87.52 percent respectively. Linux and
+macOS PR gates also passed. Two hosted Windows attempts exposed process-exit
+timeouts while stdin remained open: the HTTP signal fixture, and on the second
+attempt, the newline-terminated oversized stdio case. Six isolated Windows HTTP
+repetitions and the extracted native CLI's boundary and legacy-launch checks
+passed. These results do not establish the timeout's cause or a correction.
+Fixed fixture-only shutdown phases and bounded timeout diagnostics now separate
+application return from final VM exit; the original deadlines and open stdin
+remain. The collector gate stops on its first failure for earlier diagnosis,
+while a successful gate still requires the complete suite and coverage floors.
+Publication remains pending until the hosted lifecycle failure is resolved.
+
 ## Evidence still needed for exceptional everyday behavior
 
 Credential recovery needs a native Keychain-only login and a selected alternate

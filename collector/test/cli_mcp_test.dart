@@ -20,6 +20,19 @@ Map<String, Object?> _initialize(int id, {String revision = '2025-11-25'}) => {
       },
     };
 
+Future<int> _exitWithin(
+  Process process,
+  Duration deadline,
+  List<String> diagnostics,
+) =>
+    process.exitCode.timeout(deadline, onTimeout: () {
+      final phases = diagnostics
+          .take(20)
+          .map((line) => line.length <= 200 ? line : line.substring(0, 200))
+          .join(' | ');
+      throw TimeoutException('MCP did not exit; stderr: $phases', deadline);
+    });
+
 void main() {
   late Directory temp;
   late HttpServer runtime;
@@ -281,10 +294,17 @@ void main() {
 
   for (final terminated in [false, true]) {
     test('stdio closes oversized UTF-8 input, newline=$terminated', () async {
-      final process = await start(['mcp']);
+      final process = await start(['mcp'],
+          entrypoint: 'test/support/mcp_diagnostic_cli.dart');
       final lines = StreamIterator(
           utf8.decoder.bind(process.stdout).transform(const LineSplitter()));
-      final errors = utf8.decoder.bind(process.stderr).join();
+      final errorLines = <String>[];
+      final errorStream = utf8.decoder
+          .bind(process.stderr)
+          .transform(const LineSplitter())
+          .listen(errorLines.add);
+      final errors = errorStream.asFuture<void>();
+      addTearDown(errorStream.cancel);
       addTearDown(lines.cancel);
       process.stdin.writeln(jsonEncode(_initialize(1)));
       await process.stdin.flush();
@@ -320,9 +340,13 @@ void main() {
         }));
       }
       await process.stdin.flush();
-      expect(await process.exitCode.timeout(const Duration(seconds: 10)), 0);
+      expect(
+          await _exitWithin(process, const Duration(seconds: 10), errorLines),
+          0);
       expect(await lines.moveNext(), isFalse);
-      expect(await errors, isNot(contains('é')));
+      await errors;
+      expect(errorLines.join('\n'), isNot(contains('é')));
+      expect(errorLines, contains('fixture CLI main returned'));
       expect(collections, 0);
       expect(temp.listSync(), isEmpty);
       await process.stdin.close();
@@ -517,6 +541,7 @@ void main() {
           ready.complete();
         }
       });
+      final errorsDone = errorStream.asFuture<void>();
       addTearDown(errorStream.cancel);
       await Future.any([
         ready.future,
@@ -559,10 +584,17 @@ void main() {
         // the fixture's signal stream, as it does for the real signal watcher.
         // The drain budget is 5s; keep this above that so a slow Windows runner
         // can still finish after HTTP close.
-        expect(await process.exitCode.timeout(const Duration(seconds: 20)), 0);
+        expect(
+            await _exitWithin(process, const Duration(seconds: 20), errorLines),
+            0);
       } else {
         process.kill();
         await process.exitCode.timeout(const Duration(seconds: 10));
+      }
+      await errorsDone.timeout(const Duration(seconds: 10));
+      if (fixture) {
+        expect(errorLines, contains('fixture signal cancellation completed'));
+        expect(errorLines, contains('fixture MCP main returned'));
       }
       expect(await output, isEmpty);
       expect(errorLines.join('\n'), isNot(contains(_token)));
