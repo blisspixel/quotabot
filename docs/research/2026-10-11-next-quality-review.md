@@ -95,6 +95,19 @@ arguments, environment, credentials, or raw inspection errors. Inspection has
 its own short deadline and kills and reaps its owned helper on timeout. A native
 test checks the same observation against an owned live child and after its exit.
 
+The [first process-snapshot run](https://github.com/blisspixel/quotabot/actions/runs/38177021457/job/114581447175)
+at `90830cfe5e652f64813b280f6cfd6351416602e6` captured both the launcher
+and its VM child still present after CLI main returned on unterminated overflow.
+This excludes a launcher-only or parent-notification-only explanation for that
+observation. It does not identify the remaining VM resource. The diagnostic
+fixtures now enable the pinned VM's fixed `--trace-shutdown` phases. Timeout
+reporting starts at the last fixture main-returned marker so earlier launcher
+cleanup cannot obscure the child VM's later phases. A trace before global
+cleanup and one within global cleanup have different implications; neither is
+automatically proof of a stdin defect. The
+[pinned trace implementation](https://github.com/dart-lang/sdk/blob/3.12.2/runtime/vm/dart.cc#L599-L755)
+reports shutdown phases without a debug service, heap dump, or application data.
+
 ## Evidence still needed for exceptional everyday behavior
 
 Credential recovery needs a native Keychain-only login and a selected alternate

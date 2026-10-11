@@ -28,8 +28,11 @@ Future<int> _exitWithin(
   List<String> diagnostics,
 ) =>
     process.exitCode.timeout(deadline, onTimeout: () async {
-      final phases = diagnostics
-          .take(20)
+      final marker = diagnostics.lastIndexWhere((line) =>
+          line == 'fixture CLI main returned' ||
+          line == 'fixture MCP main returned');
+      final phases = (marker < 0 ? diagnostics : diagnostics.skip(marker))
+          .take(24)
           .map((line) => line.length <= 200 ? line : line.substring(0, 200))
           .join(' | ');
       final snapshot = await snapshotTimedOutProcess(process, diagnostics);
@@ -67,6 +70,11 @@ void main() {
     final process = await Process.start(
       Platform.resolvedExecutable,
       [
+        if (Platform.isWindows &&
+            (entrypoint == 'test/support/mcp_diagnostic_cli.dart' ||
+                (entrypoint == 'test/support/mcp_fixture_server.dart' &&
+                    args.contains('--http'))))
+          '--trace-shutdown',
         '--packages=.dart_tool/package_config.json',
         entrypoint ?? (standalone ? 'bin/mcp_server.dart' : 'bin/collect.dart'),
         ...args,
