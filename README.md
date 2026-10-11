@@ -11,7 +11,7 @@ models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
 > **Current stable:** 0.11.8. quotabot remains under active 0.x development.
-> **Pending publication:** 0.11.9.
+> **Pending publication:** 0.11.10.
 > **Next:** support Claude discovery for macOS Keychain sign-ins and prove
 > account-wide quota refresh on idle machines, then strengthen execution-scope
 > evidence for local-only advice. Native signing proceeds alongside product

@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 
 def _load(name: str):
@@ -91,6 +92,43 @@ def _suggestion() -> dict[str, Any]:
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_alias_key_preserves_binary_bytes_across_refreshes(self) -> None:
+        key = bytes(range(32))
+
+        def runner(argv, timeout):
+            del timeout
+            arguments = tuple(argv)
+            body = (
+                _suggestion()
+                if arguments[-2:] == ("suggest", "--json")
+                else _snapshot()
+            )
+            return collect.CommandResult(arguments, 0, json.dumps(body), "", False)
+
+        with tempfile.TemporaryDirectory() as raw:
+            state = Path(raw) / "state"
+            with patch.object(collect.os, "urandom", return_value=key) as random:
+                first = collect.refresh(
+                    state_dir=state,
+                    executable=("quotabot",),
+                    runner=runner,
+                    now=1_800_000_020,
+                    home=Path("/home/secretuser"),
+                )
+                self.assertTrue(first.display["read_ok"], first.display["read_error"])
+                self.assertEqual((state / collect.ALIAS_NAME).read_bytes(), key)
+                second = collect.refresh(
+                    state_dir=state,
+                    executable=("quotabot",),
+                    runner=runner,
+                    now=1_800_000_030,
+                    home=Path("/home/secretuser"),
+                )
+                self.assertTrue(second.display["read_ok"], second.display["read_error"])
+                self.assertEqual(first.display["accounts"], second.display["accounts"])
+                self.assertEqual((state / collect.ALIAS_NAME).read_bytes(), key)
+                random.assert_called_once_with(32)
+
     def test_refresh_provider_failure_restart_and_total_cli_failure(self) -> None:
         calls: list[tuple[str, ...]] = []
 

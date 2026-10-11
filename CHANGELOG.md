@@ -4,10 +4,16 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-## 0.11.9 - 2026-10-11
+## 0.11.10 - 2026-10-11
 
 Truthful discovery, shared Claude captures, and actionable local-model advice.
 
+- Preserve all 32 random Omarchy alias-key bytes on Windows by opening the
+  owner-only key file in binary mode. Text mode could expand a newline byte,
+  making the next refresh reject the key. A deterministic binary-byte regression
+  covers creation, repeated refresh, and stable redacted account aliases.
+  The unpublished 0.11.9 candidate exposed this failure during release checks;
+  its protected tag remains unchanged and is superseded by 0.11.10.
 - Share successful, provider-identified Claude captures across processes for
   30 seconds by default, using the existing canonical cache and credential
   read guard. Preserve original capture time and expose

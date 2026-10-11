@@ -92,7 +92,7 @@ Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
   release gates.
 - [October 11 issue review](research/2026-10-11-issue-review.md): shared Claude
   captures, concrete local-model advice, primary sources, and validation scope
-  for 0.11.9. ROADMAP Next owns the release acceptance criteria.
+  for 0.11.10. ROADMAP Next owns the release acceptance criteria.
 - September 30 evidence: [review and validation](research/2026-09-30-review.md),
   [subscription quota](research/2026-09-30-subscription-quotas.md),
   [provider policies](research/2026-09-30-provider-policy-updates.md),

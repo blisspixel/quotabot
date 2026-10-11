@@ -387,7 +387,8 @@ def _alias_key(state_dir: Path) -> bytes:
         if len(data) != 32:
             raise OSError("alias key has an unexpected length")
         return data
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    # Windows text mode expands newline bytes inside a random binary key.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     descriptor = os.open(path, flags, 0o600)
     try:
         key = os.urandom(32)
