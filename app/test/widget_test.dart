@@ -1131,6 +1131,26 @@ void main() {
   });
 
   group('desktop provider trust line', () {
+    test(
+      'shared live capture retains original age and does not hide stale state',
+      () {
+        const now = 1782046566;
+        final quota = ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: 'synthetic',
+          asOf: now - 12,
+          sharedFromCaptureAt: now - 12,
+          windows: [QuotaWindow(label: '5h', usedPercent: 30)],
+        );
+        expect(desktopProviderTrustLine(quota, now), contains('live shared'));
+        expect(desktopProviderTrustLine(quota, now), contains('12s'));
+        expect(
+          desktopProviderTrustLine(quota.asStale('HTTP 429'), now),
+          contains('cached'),
+        );
+      },
+    );
     test('labels live quota plans and capture age', () {
       const now = 1782046566;
       final line = desktopProviderTrustLine(

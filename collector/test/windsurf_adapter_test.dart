@@ -66,6 +66,21 @@ void main() {
     expect(q.error, contains('Devin'));
   });
 
+  test(
+      'uninstalled Windsurf reports undetected without claiming installed state',
+      () async {
+    final q = await WindsurfAdapter(
+      dbPath: '${temp.path}/missing.vscdb',
+      hasDevinCli: false,
+      looksInstalled: () => false,
+    ).collect();
+
+    expect(q.ok, isFalse);
+    expect(q.status, 'undetected');
+    expect(q.account, 'none');
+    expect(q.error, 'Windsurf not installed');
+  });
+
   test('reads daily and weekly quotas, account, and plan from state DB',
       () async {
     final db = writeDb({

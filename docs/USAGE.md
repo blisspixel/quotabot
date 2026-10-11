@@ -5,6 +5,24 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
 
 ## The desktop widget
 
+Source version 0.11.9 shares recent provider-identified Claude captures across
+CLI, desktop, HTTP, and MCP processes. The default window is 30 seconds.
+`live shared` preserves the original capture age and differs from stale cached
+fallback. Set `QUOTABOT_MIN_LIVE_INTERVAL` to an integer from 0 through 60
+seconds; 0 disables sharing, and invalid values use 30. Other providers keep
+their existing reads. CLI quota commands accept `--fresh` to bypass successful
+sharing; provider cooldowns still apply. `verify --require-live` accepts a trusted
+shared capture produced by the selected adapter, with its original age visible.
+
+Provider routing adds concrete local-model advice using a default 32K context
+heuristic, then advisory hardware fit, declared tier, load state, and stable ID.
+It explains a loaded model's smaller running context and a cold model's
+advertised maximum separately. It never estimates load time without measurements.
+A context shortfall is visible advice and does not change legacy provider
+eligibility. Use `suggest --provider-route --min-context=65536` to explicitly gate
+provider routes and fallback on 64K context. Existing `suggest --task=hard` and
+other concrete-model policies retain their existing ordering.
+
 - **Header buttons** (left to right): refresh now, open Quota Analytics
   (bar-chart icon), collapse, Settings, setup and help, and
   close. Hover for a tooltip on each.

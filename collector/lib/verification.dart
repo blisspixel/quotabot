@@ -20,6 +20,7 @@ import 'provider_adapters.dart';
 import 'provider_ids.dart';
 import 'runtime_audit.dart';
 import 'schema_contracts.dart';
+import 'util.dart';
 
 const quotabotVerifyV1SchemaId = 'quotabot.verify.v1';
 
@@ -241,6 +242,7 @@ VerificationReport buildVerificationReport(
   bool requireLive = false,
   List<ProviderAdapterRegistration> registry = kProviderAdapterRegistry,
   RuntimeAccessReport? runtimeAccess,
+  bool Function(String providerId)? checkInstallEvidence,
 }) {
   final observedProviderIds = runtimeAccess?.providers
       .where((provider) => provider.observed)
@@ -254,6 +256,7 @@ VerificationReport buildVerificationReport(
         registry.where((entry) => entry.id == q.provider).firstOrNull,
         liveReadObserved: observedProviderIds == null ||
             observedProviderIds.contains(q.provider),
+        checkInstallEvidence: checkInstallEvidence,
       ),
   ];
   if (!filtered) {
@@ -275,10 +278,16 @@ VerificationReport buildVerificationReport(
 }
 
 ProviderVerification _undetected(ProviderAdapterRegistration entry) {
+  final isTruthfulAbsence = entry.localRuntime ||
+      entry.isPassiveLocal ||
+      entry.id == antigravityProviderId ||
+      entry.id == grokProviderId;
   final detail = entry.localRuntime
       ? 'local runtime not running on this host; absence is the truthful state'
-      : 'claimed provider produced no snapshot; expected only when the '
-          'adapter is filtered out or the host has never seen it';
+      : isTruthfulAbsence
+          ? 'passive local tool or agent not installed on this host; absence is the truthful state'
+          : 'claimed provider produced no snapshot; expected only when the '
+              'adapter is filtered out or the host has never seen it';
   return ProviderVerification(
     provider: entry.id,
     displayName: entry.displayName,
@@ -294,7 +303,7 @@ ProviderVerification _undetected(ProviderAdapterRegistration entry) {
       ),
       VerifyCheck(
         'claimed_coverage',
-        entry.localRuntime ? VerifyStatus.info : VerifyStatus.fail,
+        isTruthfulAbsence ? VerifyStatus.info : VerifyStatus.fail,
         detail,
       ),
     ],
@@ -307,6 +316,7 @@ ProviderVerification _verifyProvider(
   int now,
   ProviderAdapterRegistration? registration, {
   required bool liveReadObserved,
+  bool Function(String providerId)? checkInstallEvidence,
 }) {
   final checks = <VerifyCheck>[
     _identityCheck(q),
@@ -318,6 +328,28 @@ ProviderVerification _verifyProvider(
     _staleHonestyCheck(q, now),
     ..._resetChecks(q, now),
   ];
+  if (q.account == 'installed' &&
+      _passiveSpentStatusProviders.contains(q.provider) &&
+      liveReadObserved) {
+    final checker = checkInstallEvidence ?? hasPassiveInstallEvidence;
+    if (!checker(q.provider)) {
+      checks.add(
+        const VerifyCheck(
+          'install_evidence',
+          VerifyStatus.fail,
+          'provider claimed installed account state without local binary or application files',
+        ),
+      );
+    } else {
+      checks.add(
+        const VerifyCheck(
+          'install_evidence',
+          VerifyStatus.pass,
+          'local application or binary evidence confirms installation',
+        ),
+      );
+    }
+  }
   final liveReadSucceeded = liveReadObserved &&
       q.ok &&
       !q.stale &&
@@ -522,8 +554,12 @@ VerifyCheck _asOfCheck(ProviderQuota q, int now) {
 
 VerifyCheck _staleHonestyCheck(ProviderQuota q, int now) {
   if (!q.stale) {
-    return const VerifyCheck('stale_honesty', VerifyStatus.pass,
-        'snapshot is fresh, not served from cache');
+    return VerifyCheck(
+        'stale_honesty',
+        VerifyStatus.pass,
+        q.sharedFromCaptureAt == q.asOf
+            ? 'recent live snapshot shared from capture ${q.asOf}; original age preserved'
+            : 'snapshot is fresh, not served from cache');
   }
   final note = q.error?.trim() ?? '';
   if (note.isEmpty) {

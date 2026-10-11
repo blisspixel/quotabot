@@ -11,6 +11,21 @@ That file is not a snapshot, a suggestion, or an MCP response.
 
 ## `quotabot.v1`
 
+Source version 0.11.9 adds optional provider `shared_from_capture_at`, equal to
+the original `as_of` for a recent successful Claude capture reused under its
+credential-scoped read guard. A shared capture is distinct from stale fallback;
+its timestamp never advances on reuse. It remains subject to quota trust,
+reset boundaries, admission, drift quarantine, and current credential discovery.
+The default reuse window is 30 seconds and is configurable from 0 through 60.
+
+Provider suggestion candidates add optional `local_model` advice. Fields are
+`model_id` when a model qualifies, `context_tokens`, `local_readiness`,
+`hardware_fit` when known, `min_context_tokens`, `meets_context_floor`, and
+`reason`. Default advice applies a 32K context heuristic. A false
+`meets_context_floor` and absent `model_id` explain a shortfall without changing
+legacy provider eligibility. Explicit model requirements still gate eligibility.
+These additive fields also flow through MCP and HTTP provider decisions.
+
 The root object contains:
 
 - `schema`: always `quotabot.v1`.

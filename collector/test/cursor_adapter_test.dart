@@ -72,6 +72,19 @@ void main() {
     expect(q.error, contains('Cursor installed'));
   });
 
+  test('uninstalled Cursor reports undetected without claiming installed state',
+      () async {
+    final q = await CursorAdapter(
+      dbPath: '${temp.path}/missing.vscdb',
+      looksInstalled: () => false,
+    ).collect();
+
+    expect(q.ok, isFalse);
+    expect(q.status, 'undetected');
+    expect(q.account, 'none');
+    expect(q.error, 'Cursor not installed');
+  });
+
   test('detects an owner-bound Cursor 3 plan without claiming quota', () async {
     const owner = 'cursor-owner-nondisclosure-sentinel';
     final token = jwtWithSubject(

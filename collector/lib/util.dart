@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'provider_ids.dart';
+
 Directory? _quotabotDirOverrideForTesting;
 
 /// User home directory across platforms.
@@ -615,6 +617,210 @@ String formatCompactBytes(int bytes) {
 String formatContextTokens(int tokens) =>
     tokens >= 1000 ? '${(tokens / 1024).round()}K' : '$tokens';
 
+/// Checks whether any candidate path exists (file or directory).
+bool anyPathExists(Iterable<String> paths,
+    {bool Function(String path)? exists}) {
+  final check =
+      exists ?? ((p) => File(p).existsSync() || Directory(p).existsSync());
+  for (final p in paths) {
+    if (check(p)) return true;
+  }
+  return false;
+}
+
+/// Checks whether any named binary is present on PATH.
+bool isBinaryOnPath(
+  Iterable<String> binaryNames, {
+  String? pathEnv,
+  bool Function(String path)? exists,
+}) {
+  final path = pathEnv ?? Platform.environment['PATH'] ?? '';
+  final sep = Platform.isWindows ? ';' : ':';
+  final extensions =
+      Platform.isWindows ? const ['.cmd', '.exe', '.bat', ''] : const [''];
+  final fileExists = exists ?? ((p) => File(p).existsSync());
+  for (final dir in path.split(sep)) {
+    final trimmed = dir.trim();
+    if (trimmed.isEmpty) continue;
+    for (final name in binaryNames) {
+      for (final ext in extensions) {
+        final candidate = '$trimmed${Platform.pathSeparator}$name$ext';
+        if (fileExists(candidate)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/// Checks whether Cursor has local install evidence on this machine
+/// (app data directory, state database, or executable binary on PATH).
+bool hasCursorInstallEvidence({
+  String? homePath,
+  String? appDataPath,
+  String? xdgDataPath,
+  String? localAppDataPath,
+  String? pathEnv,
+  bool Function(String path)? exists,
+}) {
+  final h = homePath ?? home();
+  final appData =
+      appDataPath ?? Platform.environment['APPDATA'] ?? '$h/AppData/Roaming';
+  final xdg =
+      xdgDataPath ?? Platform.environment['XDG_DATA_HOME'] ?? '$h/.local/share';
+  final localAppData = localAppDataPath ??
+      Platform.environment['LOCALAPPDATA'] ??
+      '$h/AppData/Local';
+
+  final dirs = [
+    '$h/.cursor',
+    '$appData/Cursor',
+    '$h/Library/Application Support/Cursor',
+    '$xdg/Cursor',
+    '$xdg/cursor',
+    '$localAppData/Programs/cursor',
+    '$localAppData/Programs/Cursor',
+    '$localAppData/Cursor',
+  ];
+  if (anyPathExists(dirs, exists: exists)) return true;
+  return isBinaryOnPath(const ['cursor'], pathEnv: pathEnv, exists: exists);
+}
+
+/// Checks whether Kiro has local install evidence on this machine
+/// (app data directory, state database, or executable binary on PATH).
+bool hasKiroInstallEvidence({
+  String? homePath,
+  String? appDataPath,
+  String? xdgDataPath,
+  String? localAppDataPath,
+  String? pathEnv,
+  bool Function(String path)? exists,
+}) {
+  final h = homePath ?? home();
+  final appData =
+      appDataPath ?? Platform.environment['APPDATA'] ?? '$h/AppData/Roaming';
+  final xdg =
+      xdgDataPath ?? Platform.environment['XDG_DATA_HOME'] ?? '$h/.local/share';
+  final localAppData = localAppDataPath ??
+      Platform.environment['LOCALAPPDATA'] ??
+      '$h/AppData/Local';
+
+  final dirs = [
+    '$h/.kiro',
+    '$appData/Kiro',
+    '$h/Library/Application Support/Kiro',
+    '$xdg/Kiro',
+    '$xdg/kiro',
+    '$localAppData/Programs/Kiro',
+    '$localAppData/Programs/kiro',
+    '$localAppData/Kiro',
+  ];
+  if (anyPathExists(dirs, exists: exists)) return true;
+  return isBinaryOnPath(const ['kiro'], pathEnv: pathEnv, exists: exists);
+}
+
+/// Checks whether Windsurf / Devin has local install evidence on this machine
+/// (app data directory, state database, Devin CLI, config, or binary on PATH).
+bool hasWindsurfInstallEvidence({
+  String? homePath,
+  String? appDataPath,
+  String? xdgDataPath,
+  String? localAppDataPath,
+  String? pathEnv,
+  bool Function(String path)? exists,
+}) {
+  final h = homePath ?? home();
+  final appData =
+      appDataPath ?? Platform.environment['APPDATA'] ?? '$h/AppData/Roaming';
+  final xdg =
+      xdgDataPath ?? Platform.environment['XDG_DATA_HOME'] ?? '$h/.local/share';
+  final localAppData = localAppDataPath ??
+      Platform.environment['LOCALAPPDATA'] ??
+      '$h/AppData/Local';
+
+  final dirs = [
+    '$h/.windsurf',
+    '$h/.devin',
+    '$h/.codeium/windsurf',
+    '$appData/Windsurf',
+    '$appData/devin',
+    '$appData/Devin',
+    '$appData/.codeium/windsurf',
+    '$h/Library/Application Support/Windsurf',
+    '$h/Library/Application Support/Devin',
+    '$h/Library/Application Support/devin',
+    '$h/Library/Application Support/.codeium/windsurf',
+    '$xdg/Windsurf',
+    '$xdg/windsurf',
+    '$xdg/Devin',
+    '$xdg/devin',
+    '$xdg/.codeium/windsurf',
+    '$localAppData/Programs/Windsurf',
+    '$localAppData/Programs/Devin',
+    '$localAppData/devin',
+    '$localAppData/Devin',
+    '$h/.devin/cli/bin/devin',
+    '$h/.local/bin/devin',
+    '$localAppData/devin/cli/bin/devin.exe',
+    '$appData/devin/cli/bin/devin.exe',
+    '$appData/Devin/cli/bin/devin.exe',
+    '$appData/devin/config.json',
+    '$appData/Devin/config.json',
+    '$appData/devin/credentials.toml',
+    '$appData/Devin/credentials.toml',
+  ];
+  if (anyPathExists(dirs, exists: exists)) return true;
+  return isBinaryOnPath(
+    const ['windsurf', 'devin'],
+    pathEnv: pathEnv,
+    exists: exists,
+  );
+}
+
+/// Checks whether a passive local tool has local install evidence.
+bool hasPassiveInstallEvidence(
+  String providerId, {
+  String? homePath,
+  String? appDataPath,
+  String? xdgDataPath,
+  String? localAppDataPath,
+  String? pathEnv,
+  bool Function(String path)? exists,
+}) {
+  switch (providerId) {
+    case cursorProviderId:
+      return hasCursorInstallEvidence(
+        homePath: homePath,
+        appDataPath: appDataPath,
+        xdgDataPath: xdgDataPath,
+        localAppDataPath: localAppDataPath,
+        pathEnv: pathEnv,
+        exists: exists,
+      );
+    case kiroProviderId:
+      return hasKiroInstallEvidence(
+        homePath: homePath,
+        appDataPath: appDataPath,
+        xdgDataPath: xdgDataPath,
+        localAppDataPath: localAppDataPath,
+        pathEnv: pathEnv,
+        exists: exists,
+      );
+    case windsurfProviderId:
+      return hasWindsurfInstallEvidence(
+        homePath: homePath,
+        appDataPath: appDataPath,
+        xdgDataPath: xdgDataPath,
+        localAppDataPath: localAppDataPath,
+        pathEnv: pathEnv,
+        exists: exists,
+      );
+    default:
+      return false;
+  }
+}
+
 /// Detects installed popular agentic dev coding CLI/IDE tools by common data dirs.
 /// Used for passive robustness even if no active subscription or full adapter data.
 Set<String> detectInstalledAgenticTools({
@@ -636,32 +842,34 @@ Set<String> detectInstalledAgenticTools({
   final pathExists = exists ??
       (path) => File(path).existsSync() || Directory(path).existsSync();
 
-  // Kiro (CLI + IDE, VSCode fork, credits)
-  if (pathExists('$h/.kiro') ||
-      pathExists('$appData/Kiro') ||
-      pathExists('$h/Library/Application Support/Kiro') ||
-      pathExists('$xdg/kiro')) {
-    detected.add('kiro');
+  if (hasKiroInstallEvidence(
+    homePath: h,
+    appDataPath: appData,
+    xdgDataPath: xdg,
+    localAppDataPath: localAppData,
+    exists: pathExists,
+  )) {
+    detected.add(kiroProviderId);
   }
 
-  // Cursor (popular IDE with agentic, credits on Pro, local usage)
-  if (pathExists('$h/.cursor') ||
-      pathExists('$appData/Cursor') ||
-      pathExists('$h/Library/Application Support/Cursor') ||
-      pathExists('$xdg/cursor')) {
-    detected.add('cursor');
+  if (hasCursorInstallEvidence(
+    homePath: h,
+    appDataPath: appData,
+    xdgDataPath: xdg,
+    localAppDataPath: localAppData,
+    exists: pathExists,
+  )) {
+    detected.add(cursorProviderId);
   }
 
-  // Windsurf / Devin (now Devin Desktop / Devin CLI; Cascade agentic with daily/weekly quota)
-  if (pathExists('$h/.windsurf') ||
-      pathExists('$appData/Windsurf') ||
-      pathExists('$h/.codeium/windsurf') ||
-      pathExists('$appData/.codeium/windsurf') ||
-      pathExists('$h/.devin') ||
-      pathExists('$appData/devin') ||
-      pathExists('$appData/Devin') ||
-      pathExists('$appData/Local/devin')) {
-    detected.add('windsurf');
+  if (hasWindsurfInstallEvidence(
+    homePath: h,
+    appDataPath: appData,
+    xdgDataPath: xdg,
+    localAppDataPath: localAppData,
+    exists: pathExists,
+  )) {
+    detected.add(windsurfProviderId);
   }
 
   // Antigravity (Google agentic IDE/CLI, including `agy`)
@@ -674,7 +882,7 @@ Set<String> detectInstalledAgenticTools({
       pathExists('$h/Library/Application Support/Antigravity IDE') ||
       pathExists('$xdg/antigravity') ||
       pathExists('$localAppData/agy')) {
-    detected.add('antigravity');
+    detected.add(antigravityProviderId);
   }
 
   // Note: Aider, Cline are often model-agnostic (use API keys from Codex/Claude etc.)

@@ -44,6 +44,19 @@ void main() {
     expect(retainCollectedProviderQuota(local(ok: true)), isTrue);
     expect(
       retainCollectedProviderQuota(
+        ProviderQuota(
+          provider: cursorProviderId,
+          displayName: 'Cursor',
+          account: 'none',
+          asOf: 1782000000,
+          ok: false,
+          status: 'undetected',
+        ),
+      ),
+      isFalse,
+    );
+    expect(
+      retainCollectedProviderQuota(
         local(
           ok: false,
           sourceClass: ProviderSourceClass.authoritativeLive,

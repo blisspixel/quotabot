@@ -23,6 +23,37 @@ const int kDefaultExpiringQuotaMaxHours = 24;
 /// "1% free" after whole-percent display rounding and may already be rejected.
 const double kSpentHeadroomFloor = 1.5;
 
+/// Inspectable model advice attached to a provider route, not an execution grant.
+class LocalRouteModelAdvice {
+  final int? contextTokens;
+  final String? localReadiness;
+  final String? hardwareFit;
+  final String? modelId;
+  final int minContextTokens;
+  final bool meetsContextFloor;
+  final String reason;
+
+  const LocalRouteModelAdvice({
+    this.contextTokens,
+    this.localReadiness,
+    this.hardwareFit,
+    this.modelId,
+    required this.minContextTokens,
+    required this.meetsContextFloor,
+    required this.reason,
+  });
+
+  Map<String, dynamic> toJson() => {
+        if (contextTokens != null) 'context_tokens': contextTokens,
+        if (localReadiness != null) 'local_readiness': localReadiness,
+        if (hardwareFit != null) 'hardware_fit': hardwareFit,
+        if (modelId != null) 'model_id': modelId,
+        'min_context_tokens': minContextTokens,
+        'meets_context_floor': meetsContextFloor,
+        'reason': reason,
+      };
+}
+
 /// Provider-declared request admission, separate from measured quota usage.
 /// Positive or absent evidence never overrides other availability constraints.
 enum RequestAdmission {
@@ -503,6 +534,10 @@ const supplementalManualQuotaDetail =
     'built-in measured or status evidence remains primary.';
 
 class ProviderQuota {
+  /// Original capture reused under the credential-scoped successful read gate.
+  /// This never advances [asOf] or turns failed-read fallback into fresh quota.
+  final int? sharedFromCaptureAt;
+
   /// Stable provider id: "codex", "claude", "grok", "antigravity".
   final String provider;
 
@@ -637,6 +672,7 @@ class ProviderQuota {
   final RequestAdmission requestAdmission;
 
   ProviderQuota({
+    this.sharedFromCaptureAt,
     required this.provider,
     required this.displayName,
     required this.account,
@@ -816,6 +852,8 @@ class ProviderQuota {
         'provider': provider,
         'display_name': displayName,
         'account': account,
+        if (sharedFromCaptureAt != null && !stale)
+          'shared_from_capture_at': sharedFromCaptureAt,
         if (plan != null) 'plan': plan,
         if (planEvidenceSource != null)
           'plan_evidence_source': planEvidenceSource!.wireName,
@@ -858,6 +896,8 @@ class ProviderQuota {
       };
 
   factory ProviderQuota.fromJson(Map<String, dynamic> j) => ProviderQuota(
+        sharedFromCaptureAt:
+            boundedIntFromWire(j['shared_from_capture_at'], min: 1),
         provider: j['provider'] as String,
         displayName: j['display_name'] as String,
         account: j['account'] as String,
@@ -1122,6 +1162,7 @@ class ProviderQuota {
     SupplementalManualQuota supplement,
   ) =>
       ProviderQuota(
+        sharedFromCaptureAt: sharedFromCaptureAt,
         provider: provider,
         displayName: displayName,
         account: account,
@@ -1221,6 +1262,7 @@ String stripTerminalControl(String s) {
 ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
   final t = stripTerminalControl;
   return ProviderQuota(
+    sharedFromCaptureAt: q.sharedFromCaptureAt,
     provider: t(q.provider),
     displayName: t(q.displayName),
     account: t(q.account),

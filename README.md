@@ -11,6 +11,7 @@ models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
 > **Current stable:** 0.11.8. quotabot remains under active 0.x development.
+> **Pending publication:** 0.11.9.
 > **Next:** support Claude discovery for macOS Keychain sign-ins and prove
 > account-wide quota refresh on idle machines, then strengthen execution-scope
 > evidence for local-only advice. Native signing proceeds alongside product
@@ -86,6 +87,13 @@ quotabot suggest
 ```
 
 `doctor` explains stale or unavailable evidence and gives a repair command.
+Recent successful Claude reads are shared across processes for up to 30 seconds
+with their original capture time, reducing avoidable usage-endpoint throttling.
+`live shared` distinguishes this from stale fallback. Add `--fresh` to a quota
+read to bypass sharing while retaining provider backoff. Set
+`QUOTABOT_MIN_LIVE_INTERVAL` to 0 through 60 seconds to adjust the window.
+Sharing requires a current credential and a provider-proven account identity;
+other providers retain their existing collection behavior.
 `suggest` ranks usable subscriptions and supplies a local fallback when one is
 available. Run `quotabot update` to keep the CLI current. If an older install
 does not support that command or cannot discover the latest release, run the
@@ -108,6 +116,13 @@ rollback, and uninstall, use the [setup guide](docs/SETUP.md).
 | Require selected reads to be live | `quotabot verify --require-live` |
 | Install the latest release for this channel | `quotabot update` |
 | Connect an agent to quota advice | `quotabot mcp` |
+
+When provider advice includes a local runtime, it also names a model that
+meets a default 32K context heuristic, or explains the shortfall. Running context
+and a cold model's advertised maximum remain distinct. This advice does not
+change provider eligibility or existing concrete-model ordering. Use
+`quotabot suggest --provider-route --min-context=65536` to explicitly gate
+provider and fallback eligibility on a different context requirement.
 
 Provider routing is balanced by default. `--local-first` prefers eligible local
 runtime candidates immediately. `--quota-stretch` keeps fresh measured included

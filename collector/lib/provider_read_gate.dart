@@ -15,6 +15,13 @@ import 'util.dart';
 /// Independent metadata surfaces must not clear each other's cooldowns.
 enum ProviderReadPurpose { usage, profile }
 
+/// A bounded receipt for canonical cached quota, scoped by the gate's credential.
+class SharedReadCapture {
+  final int asOf;
+  final String digest;
+  const SharedReadCapture(this.asOf, this.digest);
+}
+
 /// Bounded diagnostics only. Never persist provider bodies or exception text.
 enum ProviderReadFailure {
   rateLimited,
@@ -120,6 +127,17 @@ class ProviderReadOperation {
 /// reacquired. A failed final write retains a known provider deadline in this
 /// isolate, but cannot promise durable cross-process enforcement of that value.
 class ProviderReadGate {
+  /// Explicit CLI refresh bypasses successful sharing, never provider backoff.
+  static bool forceFresh = false;
+
+  static Duration get configuredMinimumLiveInterval {
+    final seconds = int.tryParse(
+        Platform.environment['QUOTABOT_MIN_LIVE_INTERVAL'] ?? '30');
+    return Duration(
+        seconds:
+            seconds != null && seconds >= 0 && seconds <= 60 ? seconds : 30);
+  }
+
   static const _schema = 'quotabot.provider-read.v1';
   static const _maxStateBytes = 2048;
   static const _backoffSeconds = [60, 120, 300, 600, 1200];
@@ -145,6 +163,7 @@ class ProviderReadGate {
   final void Function(Directory) _hardenDirectory;
   final GuardFileHardener _hardenFile;
   final Duration acquisitionTimeout;
+  final Duration minimumLiveInterval;
 
   ProviderReadGate({
     Directory? directory,
@@ -153,6 +172,7 @@ class ProviderReadGate {
     void Function(Directory)? hardenDirectory,
     GuardFileHardener? hardenFile,
     this.acquisitionTimeout = const Duration(milliseconds: 100),
+    this.minimumLiveInterval = Duration.zero,
   })  : _directory = directory,
         _clock = clock ?? nowEpoch,
         _jitter = jitter ?? Random.secure().nextInt,
@@ -166,6 +186,8 @@ class ProviderReadGate {
     required Future<T> Function(ProviderReadOperation) attempt,
     required ProviderReadDisposition Function(T) classify,
     required FutureOr<T> Function(ProviderReadDeferral) deferred,
+    T? Function(SharedReadCapture capture)? loadShared,
+    SharedReadCapture? Function(T result)? saveShared,
   }) async {
     if (!kCurrentProviderIds.contains(provider) ||
         !isOpaqueCredentialIdentity(credentialIdentity)) {
@@ -221,6 +243,26 @@ class ProviderReadGate {
       if (previous != null && previous.deadline! > BigInt.from(now)) {
         return await deferred(previous.deferral(now));
       }
+      final receiptFile = File('${stateFile.path}.shared');
+      final capture =
+          loadShared == null ? null : _readSharedCapture(receiptFile);
+      if (!forceFresh &&
+          previous == null &&
+          capture != null &&
+          loadShared != null &&
+          now >= capture.asOf &&
+          now - capture.asOf < minimumLiveInterval.inSeconds) {
+        final shared = loadShared(capture);
+        if (shared != null) return shared;
+      }
+      // Older binaries keep using this same pending/cooldown wire contract.
+      // A receipt contains only a capture and digest, never a second quota cache.
+      if (loadShared != null) {
+        // Invalidation must succeed before a new attempt: otherwise a failed
+        // read could revive a prior success in another process.
+        _requireRegularOrMissing(receiptFile.path);
+        if (receiptFile.existsSync()) receiptFile.deleteSync();
+      }
       final failures = previous?.failures ?? 0;
       _writeState(
           stateFile,
@@ -252,6 +294,21 @@ class ProviderReadGate {
       if (disposition.failure == null) {
         _requireRegularOrMissing(stateFile.path);
         stateFile.deleteSync();
+        SharedReadCapture? capture;
+        try {
+          capture = minimumLiveInterval > Duration.zero
+              ? saveShared?.call(result)
+              : null;
+        } catch (_) {
+          // Optional sharing admission must not discard the original result.
+        }
+        if (capture != null &&
+            capture.asOf > 0 &&
+            capture.asOf <= _now() &&
+            RegExp(r'^[a-f0-9]{64}$').hasMatch(capture.digest) &&
+            minimumLiveInterval > Duration.zero) {
+          _writeSharedCapture(receiptFile, capture);
+        }
         _unpersistedDeadlines.remove(stateFile.absolute.path);
       } else {
         _persistFailure(stateFile, _failureState(disposition, failures));
@@ -278,6 +335,62 @@ class ProviderReadGate {
     _unpersistedDeadlines[file.absolute.path] = state;
     _writeState(file, state);
     _unpersistedDeadlines.remove(file.absolute.path);
+  }
+
+  SharedReadCapture? _readSharedCapture(File file) {
+    try {
+      _requireRegularOrMissing(file.path);
+      if (!file.existsSync() || file.lengthSync() > _maxStateBytes) return null;
+      final value = jsonDecode(file.readAsStringSync());
+      if (value is! Map<String, dynamic> ||
+          value['schema'] != 'quotabot.shared-read.v1' ||
+          value.keys.any(
+              (key) => !const {'schema', 'as_of', 'digest'}.contains(key)) ||
+          value['as_of'] is! int ||
+          (value['as_of'] as int) <= 0 ||
+          value['digest'] is! String ||
+          !RegExp(r'^[a-f0-9]{64}$').hasMatch(value['digest'] as String)) {
+        return null;
+      }
+      return SharedReadCapture(
+          value['as_of'] as int, value['digest'] as String);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _writeSharedCapture(File file, SharedReadCapture capture) {
+    // Sharing is optional. A failed receipt write does not invalidate a
+    // successful live read or its already admitted canonical snapshot.
+    File? temporary;
+    try {
+      _requireRegularOrMissing(file.path);
+      temporary =
+          File('${file.path}.$pid.${Random.secure().nextInt(1 << 32)}.tmp');
+      temporary.createSync(exclusive: true);
+      _hardenFile(temporary);
+      temporary.writeAsStringSync(
+          jsonEncode({
+            'schema': 'quotabot.shared-read.v1',
+            'as_of': capture.asOf,
+            'digest': capture.digest,
+          }),
+          flush: true);
+      _requireRegularOrMissing(file.path);
+      temporary.renameSync(file.path);
+    } catch (_) {
+      // Live quota remains usable when optional sharing storage fails.
+    } finally {
+      if (temporary != null &&
+          FileSystemEntity.typeSync(temporary.path, followLinks: false) ==
+              FileSystemEntityType.file) {
+        try {
+          temporary.deleteSync();
+        } catch (_) {
+          // Cleanup of optional receipt storage cannot discard live evidence.
+        }
+      }
+    }
   }
 
   int _now() {

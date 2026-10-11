@@ -23,6 +23,7 @@ import 'package:quotabot_collector/mcp_server_entrypoint.dart';
 import 'package:quotabot_collector/mcp_server_options.dart';
 import 'package:quotabot_collector/provenance.dart';
 import 'package:quotabot_collector/provider_id_migration.dart';
+import 'package:quotabot_collector/provider_read_gate.dart';
 import 'package:quotabot_collector/refresh_timer.dart';
 import 'package:quotabot_collector/route_render.dart';
 import 'package:quotabot_collector/top.dart';
@@ -35,7 +36,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.11.8';
+const _version = '0.11.9';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -354,6 +355,7 @@ Future<void> _runMain(List<String> rawArgs) async {
     return;
   }
   final wantsJson = flags.contains('--json');
+  ProviderReadGate.forceFresh = flags.contains('--fresh');
   style = AnsiStyle(_useColor(flags));
 
   if (cmd == 'help' || flags.contains('--help') || flags.contains('-h')) {
@@ -1654,6 +1656,7 @@ const _valueOptions = {
 };
 
 const _switchOptions = {
+  '--fresh',
   '--allow-external',
   '--color',
   '--check',
@@ -1740,7 +1743,7 @@ String? _commandOptionError(String command, Set<String> flags) {
   if (_usesQuotaRead(command)) {
     allowed.addAll(const {'profile', 'exclude'});
     if (command != 'explain') {
-      allowed.addAll(const {'mock-provider', 'state'});
+      allowed.addAll(const {'mock-provider', 'state', 'fresh'});
     }
   }
   switch (command) {
@@ -2653,6 +2656,9 @@ void _printHelp([String? command]) {
     '  --require-live      verify: fail unless every selected provider read is fresh',
   );
   stdout.writeln(
+    '  --fresh             quota reads: bypass recent Claude sharing, retain backoff',
+  );
+  stdout.writeln(
     '  --recover-drift=P --account=A --yes  verify and replace one exact drift baseline',
   );
   stdout.writeln(
@@ -3381,7 +3387,10 @@ Future<void> _check(
               : !q.isLocal && !trusted && q.windows.isNotEmpty
                   ? style.dim(' (unverified)')
                   : '';
-  final sourceTag = style.dim(' (${q.sourceClass.label})');
+  final sharedTag = trusted && q.sharedFromCaptureAt == q.asOf
+      ? ', live shared, ${routeCaptureAgeLabel(q.asOf, now)}'
+      : '';
+  final sourceTag = style.dim(' (${q.sourceClass.label}$sharedTag)');
   final accountTag = account != null || matchedAccountCount > 1
       ? ' (${quotaAccountDisplayLabel(q.account)})'
       : '';
@@ -3737,7 +3746,11 @@ String _doctorState(ProviderQuota q, int now) {
   if (!isTrustedQuotaEvidenceAt(q, now)) return 'UNVERIFIED';
   final headroom = providerHeadroom(q, now);
   if (headroom == null) return 'UNVERIFIED';
-  return headroom <= kSpentHeadroomFloor ? 'OUT OF QUOTA' : 'live';
+  return headroom <= kSpentHeadroomFloor
+      ? 'OUT OF QUOTA'
+      : q.sharedFromCaptureAt == q.asOf
+          ? 'live shared'
+          : 'live';
 }
 
 String doctorModelSummary(
@@ -3856,6 +3869,13 @@ void _printDoctor(
       '  ${namePart.padRight(nameWidth)} ${_stateStyled(state)} '
       '$detail $provenance',
     );
+    if (q.provider == 'claude') {
+      print(
+        '  $indent ${_stateColumn('shared reads')} '
+        '${ProviderReadGate.configuredMinimumLiveInterval.inSeconds}s window; '
+        '--fresh requests new metadata, subject to provider backoff.',
+      );
+    }
     // A redeemable off-cycle reset is the most actionable thing on a tight or
     // spent provider, so it leads the detail lines in green rather than reading
     // as one more dim note.
@@ -4844,7 +4864,8 @@ void _printSuggest(RouteSuggestion s) {
     final account = _routeAccountLabel(r);
     final provenance = _routeCandidateProvenance(r, s.asOf);
     print(
-      '  ${style.green('->')} ${style.bold(r.provider)}$account$tag '
+      '  ${style.green('->')} ${style.bold(r.provider)}$account'
+      '${r.localModel?.modelId == null ? '' : ' ${r.localModel!.modelId}'}$tag '
       '$provenance',
     );
   }
@@ -4880,7 +4901,9 @@ String _routeCandidateProvenance(RouteCandidate c, int decisionAsOf) {
         ? 'provider drift'
         : c.stale
             ? 'cached'
-            : 'live',
+            : c.sharedFromCaptureAt != null
+                ? 'live shared'
+                : 'live',
     c.sourceClass.label,
   ];
   if (!c.isLocal && c.sourceClass != ProviderSourceClass.manual) {

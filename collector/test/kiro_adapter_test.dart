@@ -58,6 +58,19 @@ void main() {
     expect(q.error, contains('Kiro installed'));
   });
 
+  test('uninstalled Kiro reports undetected without claiming installed state',
+      () async {
+    final q = await KiroAdapter(
+      dbPath: '${temp.path}/missing.vscdb',
+      looksInstalled: () => false,
+    ).collect();
+
+    expect(q.ok, isFalse);
+    expect(q.status, 'undetected');
+    expect(q.account, 'none');
+    expect(q.error, 'Kiro not installed');
+  });
+
   test('reports future exhausted credits with reset context', () async {
     final db = writeDb({
       'kiro.kiroAgent': jsonEncode(

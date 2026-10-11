@@ -2,12 +2,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
 import '../auth/anthropic_auth.dart';
 import '../auth/provider_disconnect.dart';
 import '../auth/tokens.dart';
+import '../cache.dart';
 import '../credential_pool_store.dart';
+import '../drift.dart';
 import '../http_client.dart';
 import '../models.dart';
 import '../parsing.dart';
@@ -81,7 +84,12 @@ class ClaudeAdapter {
         _http = client,
         _credentialsFile = credentialsFile,
         _disconnectReader = disconnectReader,
-        _readGate = readGate ?? ProviderReadGate(),
+        _readGate = readGate ??
+            ProviderReadGate(
+              acquisitionTimeout: const Duration(seconds: 12),
+              minimumLiveInterval:
+                  ProviderReadGate.configuredMinimumLiveInterval,
+            ),
         _grantResolutionDeadline = grantResolutionDeadline,
         _grantCredential = grantCredential ??
             (grantToken != null
@@ -370,17 +378,64 @@ class ClaudeAdapter {
     // Start it alongside usage so stable account-pool identity and current plan
     // proof add no serial network round trip. Await it on every path so a bad
     // usage body still keys last-known cache by the same pool as a live read.
-    final profileFuture = _readProfile(credential, asOf);
+    Future<_ProfileEvidence?>? profileFuture;
+    Future<_ProfileEvidence?> profileRead() =>
+        profileFuture ??= _readProfile(credential, asOf);
+    final generation = DateTime.now().microsecondsSinceEpoch;
 
     return _readGate.run<_ReadOutcome>(
       provider: id,
       credentialIdentity: credential.identity,
       purpose: ProviderReadPurpose.usage,
+      loadShared: (capture) {
+        final account = _cachedAccountForCredential(credential.identity);
+        final stored = loadAccountSnapshot(id, account);
+        final cached =
+            stored == null ? null : attachProviderDriftObservation(stored);
+        final now = nowEpoch();
+        if (cached == null ||
+            cached.asOf != capture.asOf ||
+            sha256
+                    .convert(utf8.encode(jsonEncode(cached.toJson())))
+                    .toString() !=
+                capture.digest ||
+            cached.sourceClass != ProviderSourceClass.authoritativeLive ||
+            !isTrustedQuotaEvidenceAt(cached, now) ||
+            cached.windows.any((window) =>
+                window.resetsAt != null && window.resetsAt! <= now)) {
+          return null;
+        }
+        return _ReadOutcome.ok(
+          ProviderQuota.fromJson(
+              {...cached.toJson(), 'shared_from_capture_at': capture.asOf}),
+          poolIdentity: account == credential.identity ? null : account,
+        );
+      },
+      saveShared: (outcome) {
+        final quota = outcome.quota;
+        if (quota == null ||
+            outcome.poolIdentity == null ||
+            !isTrustedQuotaEvidenceAt(quota, nowEpoch())) {
+          return null;
+        }
+        final admitted = admitAndCacheQuotaEvidence(quota,
+            observedAt: nowEpoch(), observedAtMicros: generation);
+        final digest =
+            sha256.convert(utf8.encode(jsonEncode(quota.toJson()))).toString();
+        return isTrustedQuotaEvidenceAt(admitted, nowEpoch()) &&
+                admitted.asOf == quota.asOf &&
+                sha256
+                        .convert(utf8.encode(jsonEncode(admitted.toJson())))
+                        .toString() ==
+                    digest
+            ? SharedReadCapture(admitted.asOf, digest)
+            : null;
+      },
       attempt: (operation) => _readUsage(
         credential,
         fallbackPlanEvidence,
         asOf,
-        profileFuture,
+        profileRead(),
         operation,
         timeout: timeout,
       ),
@@ -403,7 +458,7 @@ class ClaudeAdapter {
         );
       },
       deferred: (deferral) => _finishReadError(
-        profileFuture,
+        profileRead(),
         credential: credential,
         knownAccount: knownAccount,
         fallbackPlanEvidence: fallbackPlanEvidence,

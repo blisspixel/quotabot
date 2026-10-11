@@ -96,6 +96,18 @@ download a release binary instead. Build details and prerequisites:
 
 ## How to call it
 
+From source version 0.11.9, successful provider-identified Claude captures are
+shared through the existing credential-scoped read gate for 30 seconds by
+default. `shared_from_capture_at` preserves original capture provenance, while
+`stale` remains false only for a still-trusted recent live capture. Sharing
+never advances `as_of`, bypasses a cooldown, or admits drifted evidence.
+CLI quota reads accept `--fresh`; `QUOTABOT_MIN_LIVE_INTERVAL` accepts 0 through
+60 seconds. Other providers keep their existing live-read behavior.
+Provider-route local candidates add `local_model` advice with the selected ID,
+context, readiness, advisory fit, context floor, and reason. Default advice uses
+a 32K context heuristic and explains shortfalls without changing provider
+eligibility. Explicit capability requirements still gate eligibility.
+
 Pick whichever transport you already speak. They share normalized quota data
 and routing logic, while each transport exposes the schema and subset documented
 for that surface.

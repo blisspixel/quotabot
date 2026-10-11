@@ -594,7 +594,8 @@ Future<List<ProviderQuota>> _collectAllProviders({
       ),
   ];
   final results = coalesceSupplementalManualQuotas(sanitized);
-  _recordAnalytics(results);
+  _recordAnalytics(
+      results.where((q) => q.sharedFromCaptureAt == null).toList());
   return results;
 }
 
@@ -816,6 +817,11 @@ ProviderQuota admitRegisteredProviderObservation(
       ? quota
       : _expectedAdapterIdentityFailure(entry, quota, observedAt ?? nowEpoch());
   if (entry.cached) {
+    if (rejectionReason == null &&
+        quota.sharedFromCaptureAt == quota.asOf &&
+        isTrustedQuotaEvidenceAt(quota, observedAt ?? nowEpoch())) {
+      return quota;
+    }
     return _cacheResult(
       evidence,
       evidenceGenerationMicros: evidenceGenerationMicros,
@@ -901,9 +907,11 @@ ProviderQuota _cacheResult(
 }
 
 /// Keeps actionable provenance failures visible while hiding ordinary offline
-/// local runtimes from the product surface.
-bool retainCollectedProviderQuota(ProviderQuota quota) =>
-    !quota.isLocal || quota.ok || quota.sourceClassViolation != null;
+/// local runtimes and uninstalled tools from the product surface.
+bool retainCollectedProviderQuota(ProviderQuota quota) {
+  if (quota.status == 'undetected') return false;
+  return !quota.isLocal || quota.ok || quota.sourceClassViolation != null;
+}
 
 /// Loads the last-known snapshot for [result]'s provider and account.
 /// Account-scoped providers are loaded by account rather than from the generic

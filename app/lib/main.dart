@@ -4792,7 +4792,7 @@ class _DashboardState extends State<Dashboard>
     final h = providerHeadroom(q, now);
     if (h == null) return ('unverified', amber);
     if (h <= kSpentHeadroomFloor) return ('spent', errorColor);
-    return ('live', green);
+    return (q.sharedFromCaptureAt == q.asOf ? 'live shared' : 'live', green);
   }
 
   Widget _iconButton(

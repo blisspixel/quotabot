@@ -490,6 +490,65 @@ class ModelRequirements {
       );
 }
 
+/// Default provider advice uses a 32K context heuristic, without changing
+/// provider eligibility or the existing explicit concrete-model ordering.
+Map<String, LocalRouteModelAdvice> localRouteModelAdvice(
+  List<ProviderQuota> snapshot,
+  int now, {
+  ModelRequirements? requirements,
+}) {
+  final needs =
+      requirements ?? const ModelRequirements(minContextTokens: 32768);
+  final floor = needs.minContextTokens ?? 0;
+  final inventory = buildModelRegistry(snapshot, now,
+      requirements:
+          const ModelRequirements(budgetPolicy: ModelBudgetPolicy.local));
+  final result = <String, LocalRouteModelAdvice>{};
+  for (final quota in snapshot.where((q) => q.isLocal)) {
+    final available = inventory
+        .where((entry) =>
+            entry.provider == quota.provider &&
+            entry.account == quota.account &&
+            entry.available &&
+            !entry.model.hasLocalGenerationVeto)
+        .toList();
+    final matching =
+        available.where((entry) => meetsRequirements(entry, needs)).toList();
+    matching.sort((a, b) {
+      final fit = _hardwareFitRank(a.hardwareFit?.status)
+          .compareTo(_hardwareFitRank(b.hardwareFit?.status));
+      if (fit != 0) return fit;
+      final tier = _tierRank(a.model.tier).compareTo(_tierRank(b.model.tier));
+      if (tier != 0) return tier;
+      if (a.model.loaded != b.model.loaded) return a.model.loaded ? -1 : 1;
+      return a.model.id.compareTo(b.model.id);
+    });
+    final selected = matching.firstOrNull;
+    final limited = available.where((entry) =>
+        entry.model.loaded &&
+        (entry.model.contextTokens == null ||
+            entry.model.contextTokens! < floor));
+    final notes = <String>[
+      if (selected != null)
+        _recommendReason(selected)
+      else
+        'No available model meets the ${formatContextTokens(floor)} context floor and requested capabilities; inspect quotabot models or relax the requirements.',
+      for (final entry in limited.take(3))
+        '${entry.model.id} is loaded with ${entry.model.contextTokens == null ? 'unknown' : formatContextTokens(entry.model.contextTokens!)} running context, below the requested floor.',
+    ];
+    result[quotaIdentityKeyFor(quota)] = LocalRouteModelAdvice(
+      contextTokens: selected?.model.contextTokens,
+      localReadiness: selected?.localReadiness,
+      hardwareFit: selected?.hardwareFit?.status.wireName,
+      modelId: selected?.model.id,
+      minContextTokens: floor,
+      meetsContextFloor: selected != null,
+      reason: notes.join(' '),
+    );
+  }
+  return result;
+}
+
 /// Maps a coarse task label to a default requirement set: a documented heuristic,
 /// fully overridable by explicit requirements. Public surfaces validate labels;
 /// unknown internal values add nothing as a final fail-soft guard.

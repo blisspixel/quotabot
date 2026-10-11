@@ -196,6 +196,17 @@ PROV-DM conformance.
 
 ## Claude (Anthropic)
 
+- Successful reads with provider-proven account identity can share the exact
+  admitted capture across commands for 30 seconds by default. The scope is the
+  current credential generation; different credentials do not share a read
+  guard merely because they might represent one subscription. Configure
+  `QUOTABOT_MIN_LIVE_INTERVAL` from 0 through 60 seconds or pass `--fresh` to
+  bypass successful sharing. Neither bypasses provider backoff. Original
+  capture time, reset validity, drift, canonical evidence, and current credential
+  discovery are checked before reuse. `shared_from_capture_at` distinguishes
+  this recent live evidence from stale fallback. A shared read makes no usage
+  or companion-profile request and adds no analytics sample.
+
 - Source: `GET https://api.anthropic.com/api/oauth/usage`, with a companion
   `GET https://api.anthropic.com/api/oauth/profile` metadata read using the same
   credential when current account-pool or plan evidence is needed. Both are

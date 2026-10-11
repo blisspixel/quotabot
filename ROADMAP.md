@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-10-10. This file is the forward plan. It records brief shipped
+Updated 2026-10-11. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -88,6 +88,22 @@ by being correct, quiet, and predictable, not by being large.
   packaging checks, and contract checks are release gates, not aspirations.
 
 ## Next
+
+**Focused 0.11.9 release:** resolve [#155](https://github.com/blisspixel/quotabot/issues/155),
+[#156](https://github.com/blisspixel/quotabot/issues/156), and
+[#157](https://github.com/blisspixel/quotabot/issues/157) before expanding scope.
+The [October 11 issue review](docs/research/2026-10-11-issue-review.md) records
+the README-to-issue assessment, primary sources, implementation choices, and
+validation limits. Acceptance is truthful absent-tool discovery, credential-scoped
+sharing with original capture times and safe backoff, concrete local-model advice
+with context shortfalls, full contributor gates, three-OS main CI, an immutable
+0.11.9 release, and published install smoke. Source implementation and tests do
+not establish real-account, native interaction, or signing evidence.
+
+Follow-up priorities remain Claude Keychain discovery and idle-machine account
+proof, positive local execution scope, and modern MCP compatibility. Extend
+successful-read sharing to another provider only after proving its credential and
+account identity seam; profile settings and unproven account sharing are deferred.
 
 **Make quota recovery reliable, then polish how people inspect and use the
 same evidence in the app and their agent harnesses.** Useful product work

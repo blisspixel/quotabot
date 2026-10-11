@@ -46,6 +46,11 @@ DecisionContext providerRouteDecisionContext(
   );
   final leases = List<RouteLease>.unmodifiable(activeLeases);
   return DecisionContext(
+    localModelAdviceByQuotaKey: localRouteModelAdvice(
+      providers,
+      now,
+      requirements: routeRequirements,
+    ),
     comfortThreshold: comfortThreshold,
     quotaStretchThreshold: quotaStretchThreshold,
     burnByProvider: burnByProvider,

@@ -76,6 +76,27 @@ List<String> _frame(
 }
 
 void main() {
+  test('shared capture loses its live label after its reset boundary', () {
+    final quota = ProviderQuota.fromJson({
+      ..._q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 20, resetsAt: _now + 1),
+      ]).toJson(),
+      'shared_from_capture_at': _now,
+    });
+    final live = _plain(_frame([quota], width: 120).join('\n'));
+    expect(live, contains('live shared'));
+    final expired = _plain(renderTopFrame(
+      providers: [quota],
+      suggestion: suggestRoute([quota], _now + 2),
+      now: _now + 2,
+      width: 120,
+      color: false,
+      clock: '12:00:02',
+    ).join('\n'));
+    expect(expired, contains('unverified'));
+    expect(expired, isNot(contains('live shared')));
+  });
+
   test('an Antigravity pool split stays on the unselected top row', () {
     final quota = ProviderQuota(
       provider: 'antigravity',
