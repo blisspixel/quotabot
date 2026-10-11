@@ -11,7 +11,7 @@ That file is not a snapshot, a suggestion, or an MCP response.
 
 ## `quotabot.v1`
 
-Source version 0.11.10 adds optional provider `shared_from_capture_at`, equal to
+Source version 0.11.11 adds optional provider `shared_from_capture_at`, equal to
 the original `as_of` for a recent successful Claude capture reused under its
 credential-scoped read guard. A shared capture is distinct from stale fallback;
 its timestamp never advances on reuse. It remains subject to quota trust,

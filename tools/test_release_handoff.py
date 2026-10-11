@@ -30,6 +30,41 @@ def metadata() -> dict:
 
 
 class HandoffTests(unittest.TestCase):
+    def test_current_release_changelog_is_publishable(self):
+        version = next(
+            line.removeprefix("version:").strip()
+            for line in (handoff.ROOT / "collector" / "pubspec.yaml")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.startswith("version:")
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            environment = {
+                "GITHUB_REF_NAME": f"v{version}",
+                "GITHUB_REPOSITORY": "blisspixel/quotabot",
+                "GITHUB_SHA": "a" * 40,
+                "GITHUB_RUN_ID": "123",
+                "GITHUB_RUN_ATTEMPT": "1",
+                "GITHUB_OUTPUT": str(root / "outputs"),
+                "WINDOWS_SIGNING_BACKEND": "unsigned",
+                "MACOS_SIGNING_MODE": "unsigned",
+            }
+            with (
+                patch.object(
+                    handoff,
+                    "gh",
+                    return_value='[[{"draft": false, "prerelease": false}]]',
+                ),
+                patch.object(handoff, "api", return_value={"tag_name": "v0.0.0"}),
+                patch.object(handoff, "tag_commit", return_value="b" * 40),
+                patch.object(handoff, "require_current_source"),
+                patch.dict(os.environ, environment, clear=True),
+            ):
+                record = handoff.prepare(root / "metadata.json")
+            self.assertEqual(record["tag"], f"v{version}")
+            self.assertIn("Native signing status:", record["body"])
+
     def test_final_audit_binds_the_actual_rerun_attempt(self):
         environment = {
             "GITHUB_REPOSITORY": "blisspixel/quotabot",
