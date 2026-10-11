@@ -159,6 +159,15 @@ pool so a late continuation cannot open another.
 Quota collection is I/O-bound: HTTP metadata, local files, and SQLite. The
 useful parallelism is overlapping those waits, not occupying every CPU core.
 
+Claude successful reads may reuse the canonical admitted account snapshot for
+30 seconds under `provider_read_gate.dart`'s existing exact-credential guard.
+The bounded sharing receipt stores only capture time and a SHA-256 digest.
+The original pending/cooldown format stays compatible with older binaries.
+Concurrent commands wait for original work; shared reads preserve capture age
+and produce no analytics sample. `--fresh` bypasses success sharing, while
+provider backoff, drift quarantine, reset expiry, and credential discovery
+remain mandatory. No second quota payload cache or HTTP client is introduced.
+
 - A fleet poll starts every selected adapter at once (`Future.wait` in
   `collector.dart`). Multi-account live reads inside Grok and Antigravity overlap
   the same way. Result order stays the discovered account order.
