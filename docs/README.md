@@ -4,48 +4,26 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.11.8. It makes explicit model gates
-consistent across provider advice, keeps loaded context conservative, bounds
-metadata transport, excludes unresolved composite scope, and improves settings
-navigation. The preceding 0.11.7 refreshed model evidence, account-bound leases,
-and security dependencies. The
-[September 30 review](research/2026-09-30-review.md) records the research and
-remaining validation gaps. The preceding 0.11.6 corrects NVIDIA catalog
-evidence and expands native legacy MCP launch checks. The September 13 review
-refreshes provider, runtime, and protocol priorities. Version 0.11.5 reads the live Claude weekly
-pool when the session row omits a reset, keeps Fable on glance while hiding
-Codex Spark until detail, and stops MCP snapshots from recreating a closed HTTP
-client. The preceding 0.11.4 rejects a reset boundary that
-advances with the clock over zero usage, withdraws stale meters past an age
-ceiling, and stops the desktop promising an update it cannot install. The
-preceding 0.11.2 added reset confirmation,
-provider-specific usage retry coordination, explicit admission evidence, and
-current Grok CLI billing support. Fresh quota remains independent of advisory
-analytics. Inspectable local models, conservative hardware evidence, and
-versioned harness and Agent Plugins setup use the same normalized quota through
-`quotabot mcp`.
+The current verified stable release is 0.11.11. It shares recent successful
+Claude captures without changing their age, makes local routing advice name a
+concrete model and context shortfall, fixes absent-tool discovery, and includes
+selected security updates. See the [changelog](../CHANGELOG.md) and
+[October 11 issue review](research/2026-10-11-issue-review.md).
 
-The preceding 0.11.1
-[release run](https://github.com/blisspixel/quotabot/actions/runs/33977671639)
-and unpinned GitHub Latest
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/33980712404)
-passed exact-tag installation, prior-stable upgrade, source setup, stable-channel
-discovery and desktop-run checks on Windows, macOS and Linux. Matching CLI and
-desktop payloads were installed on Windows and verified against fresh downloads.
-Each new release repeats those gates. Current Windows and macOS artifacts remain
-unsigned; protected signing and notarization need provisioned publisher
-identities and fresh signed native evidence before 1.0.
+The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38153000563),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701).
+Immutable publication includes fourteen verified archive/checksum assets.
+Published install smoke verifies clean installation, upgrade from 0.11.8,
+persistent state, source setup, and stable-channel discovery on Windows,
+macOS, and Linux. Desktop checks cover Windows/Linux startup and the macOS
+installed bundle.
 
-The [September 30 review](research/2026-09-30-review.md) records current primary
-sources and development corrections separately from that release: model catalog
-currency, Claude billing/reset notices, local text-deployment eligibility,
-account-bound reservations, cancellation, and the scoped Python typing baseline.
-
-Next work addresses independent OAuth and MCP shutdown lifetimes, shared desktop
-controls and identity, stronger execution-scope evidence, and installed harness
-validation. The [roadmap Next section](../ROADMAP.md#next) owns execution order,
-guardrails and completion criteria. Signing does not block useful product work.
-Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
+Native publisher signing, real-account idle-machine refresh, Claude Keychain
+discovery, stronger execution-scope proof, and modern MCP compatibility remain
+in [ROADMAP Next](../ROADMAP.md#next). Current Windows and macOS binaries remain
+unsigned. Synthetic tests and automated startup are separate from native
+screen-reader interaction and independently known provider-account usage.
 
 ## Install and first success
 
@@ -92,7 +70,7 @@ Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
   release gates.
 - [October 11 issue review](research/2026-10-11-issue-review.md): shared Claude
   captures, concrete local-model advice, primary sources, and validation scope
-  for 0.11.11. ROADMAP Next owns the release acceptance criteria.
+  for the verified 0.11.11 release. ROADMAP Next owns remaining work.
 - September 30 evidence: [review and validation](research/2026-09-30-review.md),
   [subscription quota](research/2026-09-30-subscription-quotas.md),
   [provider policies](research/2026-09-30-provider-policy-updates.md),

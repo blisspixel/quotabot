@@ -89,16 +89,13 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Next
 
-**Focused 0.11.11 release:** resolve [#155](https://github.com/blisspixel/quotabot/issues/155),
+Version [0.11.11](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11) resolves
+[#155](https://github.com/blisspixel/quotabot/issues/155),
 [#156](https://github.com/blisspixel/quotabot/issues/156), and
-[#157](https://github.com/blisspixel/quotabot/issues/157) before expanding scope.
-The [October 11 issue review](docs/research/2026-10-11-issue-review.md) records
-the README-to-issue assessment, primary sources, implementation choices, and
-validation limits. Acceptance is truthful absent-tool discovery, credential-scoped
-sharing with original capture times and safe backoff, concrete local-model advice
-with context shortfalls, full contributor gates, three-OS main CI, an immutable
-0.11.11 release, and published install smoke. Source implementation and tests do
-not establish real-account, native interaction, or signing evidence.
+[#157](https://github.com/blisspixel/quotabot/issues/157) with truthful discovery,
+shared Claude captures, and concrete local
+model advice. The [October 11 issue review](docs/research/2026-10-11-issue-review.md)
+records decisions and validation limits.
 
 Follow-up priorities remain Claude Keychain discovery and idle-machine account
 proof, positive local execution scope, and modern MCP compatibility. Extend
@@ -159,12 +156,13 @@ and draft publication handling. These reproducible fixes do not supply native LM
 forwarded-endpoint, idle-machine, or real-account proof. The second-round record
 is in the existing [code-quality review](docs/research/2026-09-30-code-quality.md#second-round-against-0117).
 
-**Maintenance release complete:** [0.11.8](https://github.com/blisspixel/quotabot/releases/tag/v0.11.8)
-with desktop build 63 passed the three-OS source gates, [Release workflow](https://github.com/blisspixel/quotabot/actions/runs/36969617185),
-canonical owner publication with fresh asset and provenance checks, immutable
-publication, and [published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/36973784629) upgrading from 0.11.7.
-Source commit: `b234778621e68b8bc4f95c6f5a2c020d15900078`. Native interaction
-and account evidence remain separate from these release gates.
+**Maintenance release complete:** [0.11.11](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11)
+with desktop build 66 passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38153000563),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701),
+canonical owner publication with fresh asset and provenance checks, and immutable
+publication. Published install smoke upgrades from 0.11.8. Source commit:
+`0fa28b83797c7f4e9b2a28f10a139f6e89914901`. Native interaction and account evidence remain separate.
 
 **Immediate compatibility maintenance:** the September 13
 [MCP and Agent Plugins review](docs/research/2026-09-13-mcp-agent-plugins.md)
@@ -588,7 +586,7 @@ plan semantics remain uneven.
 
 ## Current state
 
-The current line, **0.11.8**, is the stable release version and includes the
+The current line, **0.11.11**, is the stable release version and includes the
 shipped hardening recorded in [CHANGELOG](CHANGELOG.md); [Next](#next) owns
 remaining work. The stable line contains the implemented core of the first three
 milestones below: the truthful substrate (0.6), one
@@ -627,16 +625,16 @@ milestone sections below.
 
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
-| Core contracts and automated quality | Stable 0.10.3 | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the stable immutable release, unpinned three-OS Latest smoke, and live RC-to-stable update passed | Keep the current stable line green and resolve any new reproducible defect before signing activation |
-| Integration trust boundary | Stable 0.10.3 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
+| Core contracts and automated quality | Stable 0.11.11 | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the 0.11.11 immutable release and unpinned three-OS Latest smoke passed; earlier live RC-to-stable evidence remains historical | Keep the current stable line green and resolve any new reproducible defect before signing activation |
+| Integration trust boundary | Stable 0.11.11 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
 | Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
 | Provider-ID cache continuity | Stable 0.10.1 | The bounded coordinator, exact role validation, mixed-version locks, durable prepared receipts, crash recovery, branch-conflict quarantine, and empty shipped alias map passed [ordinary hosted CI](https://github.com/blisspixel/quotabot/actions/runs/33542805801), the immutable [candidate release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1-rc.1), and the complete [three-OS lifecycle](https://github.com/blisspixel/quotabot/actions/runs/33562140830) | Add an alias only for a real provider rename and retain the same fail-closed migration evidence when one exists |
-| Installation and update | Stable 0.10.3 | The immutable stable release, unpinned GitHub Latest smoke, three-OS stable-channel, clean install, prior-stable upgrade, persistence, source-setup, and desktop-run matrix passed; the preceding release also has a live RC-to-stable update record | Repeat the complete path on the signed rehearsal and frozen 1.0 candidate |
+| Installation and update | Stable 0.11.11 | The immutable stable release, unpinned GitHub Latest smoke, three-OS stable-channel, clean install, prior-stable upgrade, persistence, source-setup, desktop installation, Windows/Linux startup, and macOS bundle checks passed; earlier releases retain a historical live RC-to-stable update record | Repeat the complete path on the signed rehearsal and frozen 1.0 candidate |
 | Native signing | Repository-ready; inactive | Exact Windows PE and macOS Mach-O inventories and deltas, isolated signer jobs, protected nonpublishing rehearsal workflows, reviewed `main` and `v*` environment policies, deterministic policy and failure tests, credential-free packaging, bounded receipts, and exact draft-asset re-verification are implemented for CLI and desktop; current published artifacts remain unsigned | Provision both owner identities and the exact protected-environment values and secrets, pass native protected rehearsals, activate both modes, and retain one signed 0.x lifecycle record |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Stable 0.10.3 baseline complete | The stable release completed the tag, exact 14-asset set, checksum, provenance, fresh download, install, upgrade, state, exact self-update, source setup, immutable publication, unpinned Latest acquisition, and installed stable-channel assertion | Run a signed 0.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Stable 0.11.11 baseline complete | The stable release completed the tag, exact 14-asset set, checksum, provenance, fresh download, install, upgrade, state, exact self-update, source setup, immutable publication, unpinned Latest acquisition, and installed stable-channel assertion | Run a signed 0.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Use patches on the current stable
@@ -1089,10 +1087,12 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   teardown on quit across all three OSes.
   **Done (portable artifact pipeline):** native Windows x64, macOS Apple Silicon,
   and Linux x64 archives now receive SHA-256 sidecars, archive-shape validation,
-  native Windows/Linux readiness checks, build-provenance attestations, and a
-  draft-release barrier. Clean native runners also re-download the draft assets
-  and exercise side-by-side update, rollback, and data-preserving uninstall
-  mechanics. Stable v0.10.2 supplies the current tagged acquisition, explicit
+  native Windows/Linux readiness checks, build-provenance attestations, and an
+  attested owner-publication handoff. Clean native runners download the workflow
+  archives and exercise side-by-side update, rollback, and data-preserving
+  uninstall. The owner helper freshly downloads every uploaded draft asset and
+  checks checksum and provenance before immutable publication.
+  Stable v0.10.2 established the tagged acquisition, explicit
   GitHub Latest, bounded stable-channel discovery, self-update, and canonical
   unversioned install record.
   Signed platform-identity evidence and the same record on the exact 1.0 candidate

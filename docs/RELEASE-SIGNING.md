@@ -7,7 +7,7 @@ that binary changed after publication.
 
 ## Activation order
 
-Keep both platform modes `unsigned` while the 0.10.x correctness, recovery,
+Keep both platform modes `unsigned` while the 0.x correctness, recovery,
 quality-of-life, and native field-validation rounds are active. Every unsigned
 candidate must retain the explicit release-note disclosure, checksums, GitHub
 provenance, and exact asset audit.

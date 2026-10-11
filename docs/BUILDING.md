@@ -129,12 +129,13 @@ Notes:
   not sign or verify the candidate themselves. The
   GitHub `Release` workflow runs the CLI and desktop helpers on `v*` tags,
   validates every CLI and desktop archive, and attests each exact archive path.
-  Clean native runners then redownload all four draft CLI archives, reverify
+  Clean native runners download all four workflow CLI archives and reverify
   checksum and provenance, and require the packaged version and demo-mode
   `doctor --json` to run. Three more native runners reverify the desktop
   archives and exercise their portable lifecycle before the exact-asset audit
-  allows publication. The separate `Install smoke` workflow tests the published
-  one-line installer, a versioned upgrade, persistent data, and source setup.
+  preserves the attested owner-publication handoff. The separate `Install smoke`
+  workflow tests the published one-line installer, a versioned upgrade,
+  persistent data, and source setup.
 
 ### Native signing inventories
 
@@ -330,7 +331,7 @@ handoff to packaging. The credential-free packaging job repeats the delta gate
 against the trusted unsigned inventory and exact action catalog. Packaging,
 attestation, release upload, and fresh-download verification have no access to
 the signing environment. The archive must match the selected inventory, and
-the clean release-verification jobs download each exact draft Windows archive,
+the clean release-verification jobs download each exact workflow Windows archive,
 inventory the extracted payload again, rerun the complete native signature
 verifier, and retain its bounded receipt before publication can continue.
 
@@ -657,7 +658,20 @@ check remain separate release-candidate requirements.
 
 ### Baseline release evidence
 
-The preceding completed rehearsal baseline is the exact runtime promoted by the
+The current verified baseline is [0.11.11](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11),
+desktop build 66, from `0fa28b83797c7f4e9b2a28f10a139f6e89914901`. It passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38153000563),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701).
+The tagged workflow produced an attested handoff; the owner publication helper
+verified and uploaded its exact fourteen assets, freshly downloaded every draft
+asset, checked checksum and provenance, and published immutably. Published
+unpinned Latest smoke upgraded from 0.11.8 and covered clean install, persistent
+state, source setup, and stable-channel resolution on Windows, macOS, and Linux.
+Desktop startup is checked on Windows/Linux; macOS verifies the installed bundle.
+Platform signing and native interactive accessibility
+remain separate acceptance criteria.
+
+An earlier completed rehearsal baseline was the exact runtime promoted by the
 [v0.10.3 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.3).
 Its release workflow builds, checksums, shape-checks, attests, freshly downloads,
 and reverifies the immutable 14-asset set before publication. The separate
@@ -680,7 +694,7 @@ remain the preceding acquisition records. All used unsigned Windows and macOS
 artifacts.
 The complete checklist, successful protected signing rehearsals, signed
 fresh-download verification, and interactive evidence must run again on the
-signed 0.10.x rehearsal and exact 1.0 candidate.
+next signed 0.x rehearsal and exact 1.0 candidate.
 
 ## Icon and dev launcher
 

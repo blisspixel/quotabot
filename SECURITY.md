@@ -31,11 +31,12 @@ reads and writes helps scope any report:
   provenance. Repository rules block updates and deletion of `v*` tags, and
   GitHub release immutability locks an audited release's tag and assets when the
   draft is published.
-  The current audited release is [v0.11.8](https://github.com/blisspixel/quotabot/releases/tag/v0.11.8).
-  Its [Release workflow](https://github.com/blisspixel/quotabot/actions/runs/36969617185) enforces the exact immutable 14-asset
-  contract. Its [three-OS Install smoke](https://github.com/blisspixel/quotabot/actions/runs/36973784629) covers exact-tag
-  installation, upgrade from 0.11.7, persistent state, source setup, desktop
-  startup, stable-channel resolution, and canonical unversioned acquisition.
+  The current audited release is [v0.11.11](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11).
+  Its [Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920) enforces the exact immutable 14-asset
+  contract. Its [three-OS Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701) covers exact-tag
+  installation, upgrade from 0.11.8, persistent state, source setup,
+  stable-channel resolution, and canonical unversioned acquisition.
+  Desktop checks cover Windows/Linux startup and the installed macOS bundle.
   The preceding v0.10.2
   [release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
   and [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)

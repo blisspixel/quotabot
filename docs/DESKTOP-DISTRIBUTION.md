@@ -9,40 +9,40 @@ portable desktop bundle and one SHA-256 sidecar for each supported desktop OS:
 | macOS Apple Silicon | `quotabot-darwin-arm64-desktop.zip` |
 | Linux x64 | `quotabot-linux-x64-desktop.tar.gz` |
 
-Each archive is built on its native GitHub-hosted runner, checked for the
-expected Flutter bundle shape, checksum-verified, and given a GitHub build
-provenance attestation before the draft release can be published. The release
-stays a draft if any CLI or desktop build, clean-host lifecycle check, readiness
-check, attestation, or upload fails. The Windows candidate check also isolates
-configuration and singleton state, binds a structured v3 pass or failure report
-to the launched process, runner digest, and deterministic complete-bundle
-digest, verifies the bundle is unchanged after cleanup, preserves bounded
-failure evidence in CI and release jobs, and leaves an installed tray instance
-untouched.
-The lifecycle check installs two versioned
-copies, launches the Windows and Linux copies, exercises rollback, removes both
-application directories, and proves a persistent-state sentinel remains. A final
-asset audit rejects a draft with any missing, duplicate, or unexpected file,
-then downloads every CLI and desktop asset again and reverifies every checksum
-and provenance attestation immediately before publication.
+Each archive is built on its native GitHub-hosted runner, checked for its
+expected Flutter bundle shape and checksum, and given restricted GitHub workflow
+provenance. CI verifies native CLI and desktop archives and preserves an attested
+handoff. It creates no GitHub draft or release and holds no owner token.
+
+The owner runs `tools/publish_release.py` from the exact clean tagged source.
+That helper checks the successful workflow, current protected main and tag,
+attested handoff, provenance, and exact fourteen-file inventory before creating
+a draft. It uploads through the same owner login, freshly downloads and verifies
+every draft asset, then publishes immutably. Failed build or verification gates
+prevent publication; a failed owner attempt leaves its draft unpublished.
+
+The Windows candidate check isolates configuration and singleton state, binds a
+structured v3 pass or failure report to the launched process and complete-bundle
+digest, verifies unchanged bytes after cleanup, preserves bounded failure
+evidence, and leaves an installed tray instance untouched. Native lifecycle
+checks exercise versioned copies, rollback, removal, and persistent-state
+preservation before publication. Published install smoke repeats acquisition on
+all three platforms and Windows/Linux startup against the immutable release.
 
 The official repository's active tag rules block updates and deletion of `v*`
-tags. Drafts remain writable while the workflow assembles and audits the exact
-asset set, then GitHub release immutability locks the associated tag and assets
-at publication. Immutability applies prospectively to releases published after
+tags. Owner drafts remain writable during upload and fresh-download verification.
+GitHub release immutability locks the associated tag and assets at publication.
+Immutability applies prospectively to releases published after
 it was enabled on July 18, 2026. v0.9.4 and later releases are locked under that
 policy; v0.9.2 and earlier releases were not changed retroactively.
 
-The preceding verified
-[v0.10.3 stable release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.3)
-contains all three desktop bundles and sidecars inside the exact 14-asset set.
-The release workflow builds, attests, freshly downloads, and verifies those
-archives before immutable publication. The separate unpinned GitHub Latest
-smoke covers stable-channel, packaged desktop, canonical acquisition, and
-source-setup checks on Windows, macOS, and Ubuntu. The preceding v0.10.2
-[release run](https://github.com/blisspixel/quotabot/actions/runs/33595583014)
-and [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33598880949)
-remain the prior audited lifecycle record.
+The current verified [0.11.11 release](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11)
+contains all three desktop archive/checksum pairs inside the exact fourteen-asset
+set. Its [Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920) and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701) passed.
+The unpinned Latest smoke covers clean installation, upgrade from 0.11.8,
+persistent state, source setup, and stable-channel resolution on Windows, macOS,
+and Linux. Desktop checks cover Windows/Linux startup and the macOS bundle.
 Application signing and notarization remain pre-1.0 native trust gates.
 Interactive native accessibility evidence remains a separate final 1.0 gate
 and must run again on the exact signed candidate.
@@ -130,7 +130,7 @@ Expand-Archive -LiteralPath $asset -DestinationPath $destination
 Start-Process (Join-Path $destination 'quotabot.exe')
 ```
 
-The v0.11.0 Windows packages use unsigned transition mode. Each
+Current Windows packages use unsigned transition mode. Each
 release begins with a mandatory native signing status in its GitHub release
 notes. `Windows: unsigned transition artifact` means SmartScreen publisher
 identity is not established. Checksums and GitHub provenance do not establish
@@ -220,7 +220,7 @@ Validate the archive and sidecar before upload:
 python tools/verify_desktop_archive.py release/quotabot-<os>-<arch>-desktop.<ext>
 ```
 
-Clean native release jobs download the draft assets by release asset id,
+Clean native release jobs download exact workflow archive artifacts,
 reverify checksum and provenance, and exercise side-by-side update, rollback,
 and data-preserving uninstall mechanics. Windows and Linux also require the
 native window and tray readiness contract to pass. The bounded v3 report records
