@@ -107,6 +107,10 @@ cleanup and one within global cleanup have different implications; neither is
 automatically proof of a stdin defect. The
 [pinned trace implementation](https://github.com/dart-lang/sdk/blob/3.12.2/runtime/vm/dart.cc#L599-L755)
 reports shutdown phases without a debug service, heap dump, or application data.
+Windows retains untraced controls for both oversized-input forms and HTTP signal
+shutdown alongside the traced cases. They use the same assertions, open stdin,
+and exit deadlines. Passing only with tracing would be diagnostic evidence of
+an instrumentation-sensitive result, not proof that the lifecycle is fixed.
 
 ## Evidence still needed for exceptional everyday behavior
 
