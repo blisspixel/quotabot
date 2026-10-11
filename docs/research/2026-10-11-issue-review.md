@@ -5,7 +5,7 @@ The execution queue remains [ROADMAP Next](../../ROADMAP.md#next).
 
 ## Scope and decisions
 
-| Issue | README promise | 0.11.9 response |
+| Issue | README promise | 0.11.10 response |
 |---|---|---|
 | [155](https://github.com/blisspixel/quotabot/issues/155) | Truthful discovery and actionable doctor guidance | Retain the reviewed passive-install fix and first-party security pins; absent applications are undetected. |
 | [156](https://github.com/blisspixel/quotabot/issues/156) | Quick-start commands and integrations should compose reliably | Share recent successful Claude account captures under the existing credential read guard and canonical cache. |
@@ -54,6 +54,14 @@ invented. Explicit profiles and concrete-model selection retain their existing
 contracts. Structured fields carry the same advice across machine interfaces.
 
 ## Verification scope
+
+The unpublished 0.11.9 release candidate passed main CI but failed the Windows
+Omarchy lifecycle test in the tagged Release workflow. Repeated local tests
+reproduced the defect: Windows text-mode writes expanded random newline bytes
+inside the 32-byte alias key. Binary-mode creation preserves the exact bytes
+and stable aliases. A deterministic control-byte regression failed before the
+fix and passes afterward. Release 0.11.10 supersedes that candidate; the
+protected 0.11.9 tag is preserved and no 0.11.9 release was published.
 
 Regression coverage targets independent processes, sequential adapter instances,
 concurrent adapters, exact capture fingerprints, drift, resets, expiry, forced

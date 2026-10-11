@@ -5,7 +5,7 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
 
 ## The desktop widget
 
-Source version 0.11.9 shares recent provider-identified Claude captures across
+Source version 0.11.10 shares recent provider-identified Claude captures across
 CLI, desktop, HTTP, and MCP processes. The default window is 30 seconds.
 `live shared` preserves the original capture age and differs from stale cached
 fallback. Set `QUOTABOT_MIN_LIVE_INTERVAL` to an integer from 0 through 60

@@ -96,7 +96,7 @@ download a release binary instead. Build details and prerequisites:
 
 ## How to call it
 
-From source version 0.11.9, successful provider-identified Claude captures are
+From source version 0.11.10, successful provider-identified Claude captures are
 shared through the existing credential-scoped read gate for 30 seconds by
 default. `shared_from_capture_at` preserves original capture provenance, while
 `stale` remains false only for a still-trusted recent live capture. Sharing
