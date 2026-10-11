@@ -152,6 +152,7 @@ const quotabotV1JsonSchema = <String, Object?>{
           'enum': ProviderPlanEvidenceSource.wireValues,
         },
         'plan_evidence_as_of': {'type': 'integer', 'minimum': 1},
+        'shared_from_capture_at': {'type': 'integer', 'minimum': 1},
         'request_admission': {
           'type': 'string',
           'enum': RequestAdmission.wireValues,

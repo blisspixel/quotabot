@@ -652,6 +652,8 @@ bool _doctorWindowHasSignal(
 
 /// A ranked candidate in a routing suggestion.
 class RouteCandidate {
+  final int? sharedFromCaptureAt;
+  final LocalRouteModelAdvice? localModel;
   final String provider;
   final String account;
   final String? plan;
@@ -763,6 +765,8 @@ class RouteCandidate {
   final String? localReadiness;
 
   const RouteCandidate({
+    this.sharedFromCaptureAt,
+    this.localModel,
     required this.provider,
     required this.account,
     required this.plan,
@@ -798,6 +802,9 @@ class RouteCandidate {
   });
 
   Map<String, dynamic> toJson() => {
+        if (sharedFromCaptureAt != null && !stale)
+          'shared_from_capture_at': sharedFromCaptureAt,
+        if (localModel != null) 'local_model': localModel!.toJson(),
         'provider': provider,
         'account': account,
         if (plan != null) 'plan': plan,
@@ -1003,7 +1010,9 @@ class RouteSuggestion {
             ? 'provider drift'
             : winner.stale
                 ? 'cached'
-                : 'live',
+                : winner.sharedFromCaptureAt != null
+                    ? 'live shared'
+                    : 'live',
       };
       final ageLabel = age < 1 ? 'just now' : 'captured ${age}s ago';
       parts.add(
@@ -1019,6 +1028,9 @@ class RouteSuggestion {
         'quota_plan' => 'Spend: measured quota-plan budget.',
         _ => 'Spend: metered plan; this route may create metered spend.',
       });
+      if (winner.localModel != null && fallback.provider != winner.provider) {
+        parts.add(winner.localModel!.reason);
+      }
     }
     parts.add('Fallback: ${fallback.reason}');
     return parts.join(' ');
@@ -1252,8 +1264,11 @@ RouteFallback _fallbackFor(
     return RouteFallback(
       kind: RouteFallbackKind.local,
       provider: l.provider,
-      reason: 'Use ${l.provider} through its reachable local-runtime adapter; '
-          'execution location and cost are not independently verified.',
+      reason: 'Use ${l.provider}'
+          '${l.localModel?.modelId == null ? '' : ' ${l.localModel!.modelId}'}'
+          ' through its reachable local-runtime adapter; '
+          'execution location and cost are not independently verified.'
+          '${l.localModel == null ? '' : ' ${l.localModel!.reason}'}',
     );
   }
   final resetting = subs
@@ -1752,6 +1767,7 @@ RouteSuggestion suggestRoute(
   Map<String, RequestAdmission> capabilityRequestAdmissionByQuotaKey = const {},
   bool gateLocalCapabilities = false,
   Map<String, String> capabilityLocalReadinessByQuotaKey = const {},
+  Map<String, LocalRouteModelAdvice> localModelAdviceByQuotaKey = const {},
   List<String> preferenceOrder = const [],
   String snapshotSource = 'live',
   int? snapshotAsOf,
@@ -1895,6 +1911,8 @@ RouteSuggestion suggestRoute(
       costWeight: costWeight,
     );
     return RouteCandidate(
+      sharedFromCaptureAt: q.sharedFromCaptureAt,
+      localModel: q.isLocal ? localModelAdviceByQuotaKey[quotaKey] : null,
       provider: q.provider,
       account: q.account,
       plan: q.plan,

@@ -51,6 +51,7 @@ class DecisionContext {
 
   /// Readiness of only the local models that satisfy that explicit profile.
   final Map<String, String> capabilityLocalReadinessByQuotaKey;
+  final Map<String, LocalRouteModelAdvice> localModelAdviceByQuotaKey;
   final String snapshotSource;
   final int? snapshotAsOf;
   final bool? snapshotStale;
@@ -82,6 +83,7 @@ class DecisionContext {
     this.capabilityRequestAdmissionByQuotaKey = const {},
     this.gateLocalCapabilities = false,
     this.capabilityLocalReadinessByQuotaKey = const {},
+    this.localModelAdviceByQuotaKey = const {},
     this.preferenceOrder = const [],
     this.snapshotSource = 'live',
     this.snapshotAsOf,
@@ -167,6 +169,7 @@ Decision decide(
         gateLocalCapabilities: context.gateLocalCapabilities,
         capabilityLocalReadinessByQuotaKey:
             context.capabilityLocalReadinessByQuotaKey,
+        localModelAdviceByQuotaKey: context.localModelAdviceByQuotaKey,
         preferenceOrder: context.preferenceOrder,
         snapshotSource: context.snapshotSource,
         snapshotAsOf: context.snapshotAsOf,

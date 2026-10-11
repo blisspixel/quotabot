@@ -20,6 +20,21 @@ void main() {
         environment: {'LOCALAPPDATA': temp.path},
       );
 
+  test('fresh is accepted for quota reads and rejected for unrelated commands',
+      () async {
+    final result = await runCli([
+      'suggest',
+      '--fresh',
+      '--mock-provider=claude',
+      '--state=healthy',
+      '--json'
+    ]);
+    expectExitCode(result, 0);
+    expect(result.stdout, contains('quotabot.suggest.v1'));
+    final rejected = await runCli(['update', '--fresh']);
+    expectExitCode(rejected, 64);
+  });
+
   test('suggest help is focused, equivalent, and side-effect free', () async {
     final optionForm = await runCli(['suggest', '--help']);
     final commandForm = await runCli(['help', 'suggest']);

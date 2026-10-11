@@ -389,6 +389,7 @@ String? _topEvidenceLabel(ProviderQuota q, int now) {
   if (q.windows.isNotEmpty && !isTrustedQuotaEvidenceAt(q, now)) {
     return 'unverified';
   }
+  if (q.sharedFromCaptureAt == q.asOf) return 'live shared';
   return null;
 }
 

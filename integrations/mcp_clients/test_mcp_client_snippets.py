@@ -35,7 +35,7 @@ class McpClientSnippetTest(unittest.TestCase):
         tsconfig = (ROOT / "tsconfig.json").read_text(encoding="utf-8")
 
         self.assertIn('"typecheck": "tsc --noEmit"', package_json)
-        self.assertIn('"@modelcontextprotocol/sdk": "1.30.0"', package_json)
+        self.assertIn('"@modelcontextprotocol/sdk": "1.32.1"', package_json)
         self.assertIn('"typescript": "7.0.2"', package_json)
         self.assertIn('"strict": true', tsconfig)
 

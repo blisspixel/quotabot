@@ -19,16 +19,35 @@ class KiroAdapter {
   static const id = kiroProviderId;
   static const name = kiroProviderName;
 
-  KiroAdapter({String? dbPath}) : _dbPath = dbPath;
+  KiroAdapter({String? dbPath, bool Function()? looksInstalled})
+      : _dbPath = dbPath,
+        _looksInstalledSource = looksInstalled;
 
   final String? _dbPath;
+  final bool Function()? _looksInstalledSource;
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
     try {
       final dbPath = _dbPath ?? _kiroDbPath();
       if (!File(dbPath).existsSync()) {
-        // Passive detection for installed but no (or expired) data
+        final isInstalled = _looksInstalledSource?.call() ??
+            (_dbPath != null
+                ? File(dbPath).parent.existsSync()
+                : hasKiroInstallEvidence());
+        if (!isInstalled) {
+          return ProviderQuota(
+            provider: id,
+            displayName: name,
+            account: 'none',
+            plan: null,
+            asOf: asOf,
+            ok: false,
+            status: 'undetected',
+            error: 'Kiro not installed',
+            windows: const [],
+          );
+        }
         return ProviderQuota(
           provider: id,
           displayName: name,

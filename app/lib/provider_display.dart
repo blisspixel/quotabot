@@ -288,6 +288,7 @@ String _desktopProviderReadState(ProviderQuota quota, int now) {
     return 'no live data';
   }
   if (quota.windows.isEmpty) return 'metadata';
+  if (quota.sharedFromCaptureAt == quota.asOf) return 'live shared';
   return 'live';
 }
 

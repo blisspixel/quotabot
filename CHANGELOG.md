@@ -4,6 +4,28 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.9 - 2026-10-11
+
+Truthful discovery, shared Claude captures, and actionable local-model advice.
+
+- Share successful, provider-identified Claude captures across processes for
+  30 seconds by default, using the existing canonical cache and credential
+  read guard. Preserve original capture time and expose
+  `shared_from_capture_at`; distinguish live sharing from failed-read cache.
+  `--fresh` bypasses sharing while retaining cooldowns.
+- Attach concrete local-model advice to provider candidates and fallback
+  explanations. Apply a documented 32K context heuristic, then advisory
+  hardware fit, declared tier, and load state. Explain insufficient loaded
+  context without changing provider eligibility or concrete-model policies.
+
+- Report absent Cursor, Windsurf, Kiro, Antigravity, and Grok as undetected
+  when neither local configuration directories nor binaries exist on PATH.
+  Reserve the "installed, no data" state for when host application evidence
+  is present without a readable quota database. Verification marks truthful
+  absence as informative and fails unbacked installed-state claims.
+- Upgrade `@modelcontextprotocol/sdk` to 1.32.1, `proxy-addr` to 2.0.8, and
+  `multidict` to 6.9.1 with universal sha256 hashes across MCP client snippets
+  and LiteLLM integration requirements.
 - Add an Omarchy 4.0.4 bar widget that shows a redacted quotabot
   recommendation, per-account remaining headroom, reset time, and freshness.
   Refresh runs `quotabot --json` and `quotabot suggest --json`. It does not

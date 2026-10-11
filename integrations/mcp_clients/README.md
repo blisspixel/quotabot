@@ -13,8 +13,9 @@ prompts, code, or model requests.
   Stable v2 is now 2.2.0. Migrating the examples to the breaking v2
   API belongs in a separately reviewed change.
 - TypeScript: use `@modelcontextprotocol/sdk` and the high-level `Client` with
-  `StreamableHTTPClientTransport` or `StdioClientTransport`. npm latest was
-  `1.31.0` when checked; this checkout retains the verified `1.30.0` pin.
+  `StreamableHTTPClientTransport` or `StdioClientTransport`. The checkout pins
+  the maintained v1 release `1.32.1` with patched OAuth client handling and
+  `proxy-addr`.
 - TypeScript snippets require Node.js 20 or later. The lock overrides the MCP
   SDK's transitive Hono Node adapter to patched version 2.0.11 because versions
   below 2.0.5 are affected by the Windows path traversal in

@@ -501,9 +501,9 @@ List<RuntimeAccessRecord> _usageCoordinationAccess(
       _joinPath(config, 'quotabot/$relative', operatingSystem);
   return [
     _file(path('provider_read_gates/*'),
-        'opaque metadata-scope retry deadlines and native ownership'),
+        'opaque metadata-scope retry deadlines, capture digests, and native ownership'),
     _fileWrite(path('provider_read_gates/*'),
-        'bounded metadata retry state and native ownership'),
+        'bounded metadata retry state, capture receipts, and native ownership'),
     if (poolAssociation != null) ...[
       _file(path('credential_pools/$poolAssociation.json*'),
           'same-credential last-known cache association'),

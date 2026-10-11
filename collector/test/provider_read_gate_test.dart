@@ -10,6 +10,29 @@ import 'package:quotabot_collector/provider_read_gate.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('two independent processes share one successful metadata operation',
+      () async {
+    final sharedDirectory =
+        Directory.systemTemp.createTempSync('quotabot_shared_gate_');
+    try {
+      Future<ProcessResult> invoke() =>
+          Process.run(Platform.resolvedExecutable, [
+            '--packages=.dart_tool/package_config.json',
+            'test/fixtures/provider_shared_read_worker.dart',
+            sharedDirectory.path
+          ]);
+      final results = await Future.wait([invoke(), invoke()]);
+      for (final result in results) {
+        expect(result.exitCode, 0, reason: result.stderr.toString());
+      }
+      expect(results.map((r) => r.stdout.toString().trim()),
+          unorderedEquals(['live', 'shared']));
+      expect(File('${sharedDirectory.path}/attempts').readAsLinesSync(),
+          hasLength(1));
+    } finally {
+      sharedDirectory.deleteSync(recursive: true);
+    }
+  });
   late Directory temp;
   late Directory storage;
   late int now;
@@ -21,6 +44,7 @@ void main() {
     void Function(File)? hardenFile,
     void Function(Directory)? hardenDirectory,
     Duration acquisitionTimeout = const Duration(milliseconds: 30),
+    Duration minimumLiveInterval = Duration.zero,
   }) =>
       ProviderReadGate(
         directory: storage,
@@ -29,6 +53,7 @@ void main() {
         hardenFile: hardenFile ?? (_) {},
         hardenDirectory: hardenDirectory ?? (_) {},
         acquisitionTimeout: acquisitionTimeout,
+        minimumLiveInterval: minimumLiveInterval,
       );
 
   Future<Object> read({
@@ -55,6 +80,79 @@ void main() {
       .listSync()
       .whereType<File>()
       .singleWhere((file) => file.path.endsWith('.json'));
+
+  Future<String> shareRead(ProviderReadGate using, {bool failSave = false}) =>
+      using.run<String>(
+        provider: 'claude',
+        credentialIdentity: credential,
+        purpose: ProviderReadPurpose.usage,
+        attempt: (_) async {
+          attempts++;
+          return 'live';
+        },
+        classify: (_) => const ProviderReadDisposition.completed(),
+        deferred: (_) => 'deferred',
+        loadShared: (_) => 'shared',
+        saveShared: (_) {
+          if (failSave)
+            throw const FileSystemException('synthetic storage failure');
+          return SharedReadCapture(now, 'b' * 64);
+        },
+      );
+
+  test('an expired older-version cooldown cannot revive an earlier receipt',
+      () async {
+    final sharing = makeGate(minimumLiveInterval: const Duration(seconds: 30));
+    expect(await shareRead(sharing), 'live');
+    final lock = storage
+        .listSync()
+        .whereType<File>()
+        .singleWhere((file) => file.path.endsWith('.lock'));
+    final state = File(lock.path.substring(0, lock.path.length - 5));
+    state.writeAsStringSync(jsonEncode({
+      'schema': 'quotabot.provider-read.v1',
+      'pending': false,
+      'observed_at': now,
+      'failures': 1,
+      'retry_not_before': '${now + 1}',
+      'failure': 'rateLimited',
+      'http_status': 429,
+    }));
+    now += 2;
+    expect(await shareRead(sharing), 'live');
+    expect(attempts, 2);
+  });
+
+  test(
+      'optional sharing admission and receipt hardening failures preserve live result',
+      () async {
+    final sharing = makeGate(
+        minimumLiveInterval: const Duration(seconds: 30),
+        hardenFile: (file) {
+          if (file.path.contains('.shared.'))
+            throw const FileSystemException('synthetic hardening failure');
+        });
+    expect(await shareRead(sharing, failSave: true), 'live');
+    expect(await shareRead(sharing), 'live');
+    expect(await shareRead(sharing), 'live');
+    expect(attempts, 3);
+    expect(storage.listSync().where((file) => file.path.endsWith('.shared')),
+        isEmpty);
+  });
+
+  test('unsafe receipt invalidation fails closed before network work',
+      () async {
+    final sharing = makeGate(minimumLiveInterval: const Duration(seconds: 30));
+    expect(await shareRead(sharing), 'live');
+    final receipt = storage
+        .listSync()
+        .whereType<File>()
+        .singleWhere((file) => file.path.endsWith('.shared'));
+    receipt.deleteSync();
+    Directory(receipt.path).createSync();
+    expect(await shareRead(sharing), 'deferred');
+    expect(attempts, 1);
+  });
 
   setUp(() {
     temp = Directory.systemTemp.createTempSync('quotabot_read_gate_');

@@ -7,6 +7,7 @@ import 'provenance.dart';
 const quotaHealthReportSchema = 'quotabot.report.v1';
 
 class QuotaHealthProviderLine {
+  final int? sharedFromCaptureAt;
   final String provider;
   final String displayName;
   final String account;
@@ -43,6 +44,7 @@ class QuotaHealthProviderLine {
   final String? pace;
 
   const QuotaHealthProviderLine({
+    this.sharedFromCaptureAt,
     required this.provider,
     required this.displayName,
     required this.account,
@@ -344,6 +346,7 @@ QuotaHealthProviderLine _providerLine(
           now: now,
         )?.verdict;
   return QuotaHealthProviderLine(
+    sharedFromCaptureAt: provider.sharedFromCaptureAt,
     provider: provider.provider,
     displayName: provider.displayName,
     account: provider.account,
@@ -453,6 +456,9 @@ String _trustReadState(QuotaHealthProviderLine provider) {
   if (provider.state == 'unavailable') return 'error';
   final admission = requestAdmissionLabel(provider.requestAdmission);
   if (!provider.stale && admission != null) return admission;
+  if (!provider.stale && provider.sharedFromCaptureAt != null) {
+    return 'live shared';
+  }
   if (provider.kind.isLocal) {
     return switch (provider.state) {
       'local active' => 'loaded',

@@ -105,8 +105,18 @@ class GrokAdapter {
     final host = _readHost(_authFile ?? defaultAuthFile());
     final grants = _ownedGrants();
     if (host.credential == null && grants.isEmpty) {
+      final hasGrokSetup = (_authFile ?? defaultAuthFile()).existsSync() ||
+          isBinaryOnPath(const ['grok']);
       return [
-        _error(host.error ?? 'no Grok account - run: quotabot login grok', asOf)
+        ProviderQuota(
+          provider: id,
+          displayName: name,
+          account: hasGrokSetup ? 'unknown' : 'none',
+          asOf: asOf,
+          ok: false,
+          status: hasGrokSetup ? null : 'undetected',
+          error: host.error ?? 'no Grok account - run: quotabot login grok',
+        ),
       ];
     }
 
