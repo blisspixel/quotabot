@@ -7,6 +7,8 @@ import 'package:mcp_dart/mcp_dart.dart';
 import 'package:quotabot_collector/mcp_server_entrypoint.dart';
 import 'package:test/test.dart';
 
+import 'support/process_exit_diagnostics.dart';
+
 const _token = '0123456789abcdef0123456789abcdef';
 
 Map<String, Object?> _initialize(int id, {String revision = '2025-11-25'}) => {
@@ -25,12 +27,15 @@ Future<int> _exitWithin(
   Duration deadline,
   List<String> diagnostics,
 ) =>
-    process.exitCode.timeout(deadline, onTimeout: () {
+    process.exitCode.timeout(deadline, onTimeout: () async {
       final phases = diagnostics
           .take(20)
           .map((line) => line.length <= 200 ? line : line.substring(0, 200))
           .join(' | ');
-      throw TimeoutException('MCP did not exit; stderr: $phases', deadline);
+      final snapshot = await snapshotTimedOutProcess(process, diagnostics);
+      throw TimeoutException(
+          'MCP did not exit; stderr: $phases; process state: $snapshot',
+          deadline);
     });
 
 void main() {

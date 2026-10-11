@@ -9,6 +9,7 @@ import 'package:quotabot_collector/util.dart';
 /// subscription polling. It never invokes a real provider collector.
 Future<void> main(List<String> args) async {
   final http = args.contains('--http');
+  if (http) stderr.writeln('fixture VM pid: $pid');
   await runQuotabotMcpServer(
     args,
     // Keep stdin open after requesting shutdown. The server must cancel the

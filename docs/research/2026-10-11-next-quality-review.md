@@ -82,6 +82,19 @@ remain. The collector gate stops on its first failure for earlier diagnosis,
 while a successful gate still requires the complete suite and coverage floors.
 Publication remains pending until the hosted lifecycle failure is resolved.
 
+The [exact-main Windows gate](https://github.com/blisspixel/quotabot/actions/runs/38174988308/job/114575378069)
+at `5fc3831a6cbafd8b0ae9afe42eacb45b96dac609` subsequently timed out on
+unterminated UTF-8 overflow after ten seconds. The fixed diagnostic confirmed
+the real CLI main function had returned. That does not establish whether the VM,
+its launcher, or the parent's exit-notification delivery was still active.
+Publication remains held. The fixture now records its VM PID and captures a
+bounded Windows process snapshot before teardown on an exit timeout. Inspection
+reports only selected PIDs, parent PIDs, executable names, and observed presence;
+it does not close target stdin, extend the original exit deadline, or print
+arguments, environment, credentials, or raw inspection errors. Inspection has
+its own short deadline and kills and reaps its owned helper on timeout. A native
+test checks the same observation against an owned live child and after its exit.
+
 ## Evidence still needed for exceptional everyday behavior
 
 Credential recovery needs a native Keychain-only login and a selected alternate
