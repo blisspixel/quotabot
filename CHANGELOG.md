@@ -4,6 +4,25 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.12 - 2026-10-11
+
+Bounded MCP input with explicit legacy compatibility.
+
+- Upgrade the MCP Dart SDK to 2.4.2 in both collector and desktop lockfiles.
+  Limit incoming stdio messages to 256 KiB of UTF-8 before each newline,
+  closing on overflow even without a newline. Keep the existing bounded
+  collection shutdown path and initialization-only protocol through 2025-11-25.
+- Adapt resource subscription parsing to the SDK's validated parameter types.
+  Preserve alert delivery, unsubscribe, and timer cleanup. Schema-invalid tool
+  arguments return tool errors before collection, cache access, or lease writes.
+- Keep rejected stdio frames out of SDK runtime diagnostics and avoid repeating
+  unsupported subscription URIs in errors. Preserve category-only warnings and
+  protocol-only stdout, with malformed-frame sentinel regressions.
+- Add exact-ceiling, aggregate-traffic, multibyte-overflow, unterminated-input,
+  and post-overflow dispatch regressions. Refresh the roadmap with concrete
+  acceptance boundaries for credential discovery, idle-machine truth, execution
+  scope, modern MCP, and native daily use.
+
 ## 0.11.11 - 2026-10-11
 
 Truthful discovery, shared Claude captures, and actionable local-model advice.

@@ -1105,6 +1105,13 @@ The collector runs as an MCP server so agents can query quota as a primitive. It
 speaks MCP over stdio by default, can opt into MCP Streamable HTTP on loopback,
 and exposes nine tools plus two resources:
 
+Source 0.11.12 caps incoming stdio frames at 256 KiB of UTF-8 before each
+newline. Overflow closes the connection even for an incomplete frame. The
+limit applies per message, not to total connection traffic. The server keeps
+legacy initialization through `2025-11-25`; upgrading the SDK does not advertise
+modern protocol support. Schema-invalid tool arguments return a tool result
+with `isError: true` before the handler performs work.
+
 - `list_quotas` - the full normalized snapshot for every provider.
 - `provider_with_most_headroom` - the account with the most remaining budget.
 - `suggest_provider` - the provider to route the next request to, with ranked

@@ -4,16 +4,17 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:mcp_dart/mcp_dart.dart';
+import 'package:quotabot_collector/mcp_server_entrypoint.dart';
 import 'package:test/test.dart';
 
 const _token = '0123456789abcdef0123456789abcdef';
 
-Map<String, Object?> _initialize(int id) => {
+Map<String, Object?> _initialize(int id, {String revision = '2025-11-25'}) => {
       'jsonrpc': '2.0',
       'id': id,
       'method': 'initialize',
       'params': {
-        'protocolVersion': '2025-11-25',
+        'protocolVersion': revision,
         'capabilities': <String, Object?>{},
         'clientInfo': {'name': 'quotabot-cli-test', 'version': '1.0.0'},
       },
@@ -87,6 +88,245 @@ void main() {
     await process.stdin.close();
     final code = await process.exitCode.timeout(const Duration(seconds: 20));
     return ProcessResult(process.pid, code, await output, await errors);
+  }
+
+  for (final revision in [
+    '2024-10-07',
+    '2024-11-05',
+    '2025-03-26',
+    '2025-06-18',
+    '2025-11-25',
+  ]) {
+    test('legacy $revision tools, subscriptions and EOF remain compatible',
+        () async {
+      final process =
+          await start([], entrypoint: 'test/support/mcp_fixture_server.dart');
+      final lines = StreamIterator(
+          utf8.decoder.bind(process.stdout).transform(const LineSplitter()));
+      final errors = utf8.decoder.bind(process.stderr).join();
+      addTearDown(lines.cancel);
+      var id = 0;
+      Future<Map<String, dynamic>> request(String method,
+          [Map<String, Object?>? params]) async {
+        process.stdin.writeln(jsonEncode({
+          'jsonrpc': '2.0',
+          'id': ++id,
+          'method': method,
+          if (params != null) 'params': params,
+        }));
+        await process.stdin.flush();
+        expect(await lines.moveNext().timeout(const Duration(seconds: 20)),
+            isTrue);
+        final response = jsonDecode(lines.current) as Map;
+        expect(response['id'], id);
+        expect(response['error'], isNull, reason: lines.current);
+        return response['result'] as Map<String, dynamic>;
+      }
+
+      final params =
+          _initialize(0, revision: revision)['params']! as Map<String, Object?>;
+      final initialized = await request('initialize', params);
+      expect(initialized['protocolVersion'], revision);
+      process.stdin.writeln(jsonEncode({
+        'jsonrpc': '2.0',
+        'method': 'notifications/initialized',
+      }));
+      final tools = await request('tools/list');
+      final listing = (tools['tools'] as List)
+          .cast<Map<String, dynamic>>()
+          .singleWhere((tool) => tool['name'] == 'list_quotas');
+      expect((listing['inputSchema'] as Map)['type'], 'object');
+      final result = await request('tools/call', {'name': 'list_quotas'});
+      expect(result['isError'], anyOf(isNull, isFalse));
+      final content =
+          (result['content'] as List).cast<Map<String, dynamic>>().single;
+      final snapshot = jsonDecode(content['text'] as String) as Map;
+      expect(snapshot['schema'], 'quotabot.v1');
+      expect((snapshot['providers'] as List).single['provider'], 'ollama');
+      for (final method in ['resources/subscribe', 'resources/unsubscribe']) {
+        expect(await request(method, {'uri': 'quotas://alerts'}), isEmpty);
+      }
+      await process.stdin.close();
+      expect(await process.exitCode.timeout(const Duration(seconds: 10)), 0);
+      expect(await lines.moveNext(), isFalse);
+      expect(await errors, isEmpty);
+      expect(collections, 0);
+    });
+  }
+
+  test('malformed short stdio frames never enter runtime diagnostics',
+      () async {
+    final process = await start(['mcp']);
+    final lines = StreamIterator(
+        utf8.decoder.bind(process.stdout).transform(const LineSplitter()));
+    final errors = utf8.decoder.bind(process.stderr).join();
+    addTearDown(lines.cancel);
+    const sentinel = 'private-frame-sentinel-59b8';
+    final responses = <Map<String, dynamic>>[];
+    Future<Map<String, dynamic>> response() async {
+      expect(
+          await lines.moveNext().timeout(const Duration(seconds: 20)), isTrue);
+      expect(lines.current, isNot(contains(sentinel)));
+      final value = jsonDecode(lines.current) as Map<String, dynamic>;
+      responses.add(value);
+      return value;
+    }
+
+    process.stdin.writeln('"$sentinel');
+    process.stdin.writeln(jsonEncode([sentinel]));
+    process.stdin.writeln(jsonEncode({
+      'jsonrpc': '2.0',
+      'id': 1,
+      'method': 'initialize',
+      'params': {
+        'protocolVersion': [sentinel]
+      },
+    }));
+    await process.stdin.flush();
+    for (var index = 0; index < 3; index++) {
+      expect((await response())['error'], isA<Map<String, dynamic>>());
+    }
+    process.stdin.writeln(jsonEncode(_initialize(2)));
+    await process.stdin.flush();
+    expect((await response())['error'], isNull);
+    process.stdin.writeln(jsonEncode({
+      'jsonrpc': '2.0',
+      'method': 'notifications/initialized',
+    }));
+    var id = 2;
+    for (final method in ['resources/subscribe', 'resources/unsubscribe']) {
+      process.stdin.writeln(jsonEncode({
+        'jsonrpc': '2.0',
+        'id': ++id,
+        'method': method,
+        'params': {'uri': 'quotas://$sentinel'},
+      }));
+      await process.stdin.flush();
+      expect((await response())['error'], isA<Map<String, dynamic>>());
+    }
+    process.stdin.writeln(jsonEncode({
+      'jsonrpc': '2.0',
+      'id': 5,
+      'method': 'ping',
+    }));
+    await process.stdin.flush();
+    final ping = await response();
+    expect(ping['id'], 5);
+    expect(ping['result'], isEmpty);
+    expect(ping['error'], isNull);
+    await process.stdin.close();
+    expect(await process.exitCode.timeout(const Duration(seconds: 10)), 0);
+    expect(await lines.moveNext(), isFalse);
+    final stderrText = await errors;
+    expect(stderrText, isNot(contains(sentinel)));
+    expect(stderrText, contains('quotabot MCP: metadata or transport warn'));
+    expect(responses.where((value) => value['error'] != null), hasLength(5));
+    expect(collections, 0);
+    expect(temp.listSync(), isEmpty);
+  });
+
+  test('stdio accepts separate messages at the byte ceiling', () async {
+    final process = await start(['mcp']);
+    final lines = StreamIterator(
+        utf8.decoder.bind(process.stdout).transform(const LineSplitter()));
+    final errors = utf8.decoder.bind(process.stderr).join();
+    addTearDown(lines.cancel);
+
+    String frame(Map<String, Object?> request) {
+      final encoded = jsonEncode(request);
+      return '$encoded${' ' * (maxMcpStdioMessageBytes - utf8.encode(encoded).length)}\n';
+    }
+
+    process.stdin.writeln(jsonEncode({
+      'jsonrpc': '2.0',
+      'id': 0,
+      'method': 'server/discover',
+    }));
+    await process.stdin.flush();
+    expect(await lines.moveNext().timeout(const Duration(seconds: 20)), isTrue);
+    final discovery = jsonDecode(lines.current) as Map;
+    expect(discovery['id'], 0);
+    expect(discovery['error'], isA<Map<String, dynamic>>());
+    expect(discovery.containsKey('result'), isFalse);
+    process.stdin.write(frame(_initialize(1)));
+    await process.stdin.flush();
+    expect(await lines.moveNext().timeout(const Duration(seconds: 20)), isTrue);
+    final initialized = jsonDecode(lines.current) as Map;
+    expect((initialized['result'] as Map)['protocolVersion'], '2025-11-25');
+    process.stdin.writeln(jsonEncode({
+      'jsonrpc': '2.0',
+      'method': 'notifications/initialized',
+    }));
+    // The aggregate exceeds the ceiling. The limit applies to each frame.
+    process.stdin.write([
+      for (final id in [2, 3])
+        frame({'jsonrpc': '2.0', 'id': id, 'method': 'ping'}),
+    ].join());
+    await process.stdin.flush();
+    for (final id in [2, 3]) {
+      expect(
+          await lines.moveNext().timeout(const Duration(seconds: 10)), isTrue);
+      final response = jsonDecode(lines.current) as Map;
+      expect(response['id'], id);
+      expect(response['error'], isNull);
+      expect(response['result'], isEmpty);
+    }
+    await process.stdin.close();
+    expect(await process.exitCode.timeout(const Duration(seconds: 10)), 0);
+    expect(await lines.moveNext(), isFalse);
+    expect(await errors, isNot(contains(' ' * 100)));
+    expect(collections, 0);
+    expect(temp.listSync(), isEmpty);
+  });
+
+  for (final terminated in [false, true]) {
+    test('stdio closes oversized UTF-8 input, newline=$terminated', () async {
+      final process = await start(['mcp']);
+      final lines = StreamIterator(
+          utf8.decoder.bind(process.stdout).transform(const LineSplitter()));
+      final errors = utf8.decoder.bind(process.stderr).join();
+      addTearDown(lines.cancel);
+      process.stdin.writeln(jsonEncode(_initialize(1)));
+      await process.stdin.flush();
+      expect(
+          await lines.moveNext().timeout(const Duration(seconds: 20)), isTrue);
+      expect((jsonDecode(lines.current) as Map)['error'], isNull);
+      process.stdin.writeln(jsonEncode({
+        'jsonrpc': '2.0',
+        'method': 'notifications/initialized',
+      }));
+      process.stdin.writeln(jsonEncode({
+        'jsonrpc': '2.0',
+        'id': 2,
+        'method': 'ping',
+      }));
+      await process.stdin.flush();
+      expect(
+          await lines.moveNext().timeout(const Duration(seconds: 10)), isTrue);
+      final ready = jsonDecode(lines.current) as Map;
+      expect(ready['id'], 2);
+      expect(ready['error'], isNull);
+      // Fewer characters than the limit, but more UTF-8 bytes. Keep stdin open
+      // so an unterminated frame cannot rely on EOF for rejection.
+      final oversized = 'é' * (maxMcpStdioMessageBytes ~/ 2 + 1);
+      process.stdin.write(oversized);
+      if (terminated) {
+        process.stdin.writeln();
+        process.stdin.writeln(jsonEncode({
+          'jsonrpc': '2.0',
+          'id': 3,
+          'method': 'tools/call',
+          'params': {'name': 'list_quotas'},
+        }));
+      }
+      await process.stdin.flush();
+      expect(await process.exitCode.timeout(const Duration(seconds: 10)), 0);
+      expect(await lines.moveNext(), isFalse);
+      expect(await errors, isNot(contains('é')));
+      expect(collections, 0);
+      expect(temp.listSync(), isEmpty);
+      await process.stdin.close();
+    });
   }
 
   test('MCP help forms match the standalone server without collection',
@@ -304,6 +544,7 @@ void main() {
           'headers': {HttpHeaders.authorizationHeader: 'Bearer $_token'},
         }),
       ));
+      expect(client.getProtocolVersion(), '2025-11-25');
       final tools = await client.listTools();
       expect(
           tools.tools.map((tool) => tool.name), contains('suggest_provider'));

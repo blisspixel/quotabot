@@ -18,6 +18,10 @@ import 'util.dart';
 /// pool.
 const defaultMcpShutdownDrainTimeout = Duration(seconds: 5);
 
+/// Quota tool requests contain bounded metadata, never prompts or code. Count
+/// UTF-8 bytes before the newline, including an incomplete message.
+const maxMcpStdioMessageBytes = 256 * 1024;
+
 /// MCP server exposing AI subscription quota as a primitive other agents can
 /// query before routing work. Communicates over stdio, speaks MCP 2025-11-25
 /// (tool annotations plus output schemas via mcp_dart), and every tool runs the
@@ -126,6 +130,15 @@ Future<void> _runMain(
     stdout.write(mcpServerUsage);
     return;
   }
+
+  // SDK parser diagnostics can contain the rejected frame or exception source.
+  // This entrypoint owns the MCP process. Keep runtime diagnostics categorical
+  // so malformed client input cannot be copied into persistent client logs.
+  setMcpLogHandler((_, level, __) {
+    if (level == LogLevel.warn || level == LogLevel.error) {
+      stderr.writeln('quotabot MCP: metadata or transport ${level.name}');
+    }
+  });
 
   final liveSnapshots = ExpiringSingleFlight<List<ProviderQuota>>(
     load: snapshotSource,
@@ -240,6 +253,8 @@ Future<void> _runMain(
       if (!done.isCompleted) done.complete();
     }
   };
-  await server.connect(StdioServerTransport());
+  await server.connect(StdioServerTransport(
+    maxIncomingMessageBytes: maxMcpStdioMessageBytes,
+  ));
   await done.future;
 }

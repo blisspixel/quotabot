@@ -9,6 +9,13 @@ The Omarchy bar widget writes a separate redacted display file,
 [integrations/omarchy/README.md](../integrations/omarchy/README.md).
 That file is not a snapshot, a suggestion, or an MCP response.
 
+Source 0.11.12 preserves quota JSON schemas and the legacy MCP protocol while
+upgrading its SDK. MCP schema-invalid tool arguments return `isError: true`
+with text diagnostics rather than JSON-RPC `invalidParams`. Malformed request
+parameters remain protocol errors. Rejection happens before tool side effects.
+Incoming stdio frames are limited to 256 KiB of UTF-8 before the newline;
+overflow closes the transport, including for unterminated input.
+
 ## `quotabot.v1`
 
 Version 0.11.11 adds optional provider `shared_from_capture_at`, equal to

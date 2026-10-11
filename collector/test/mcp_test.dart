@@ -617,6 +617,7 @@ void main() {
       server = McpServer(
         const Implementation(name: 'quotabot', version: 'test'),
         options: McpServerOptions(
+          protocol: McpProtocol.legacy,
           capabilities: ServerCapabilities(
             tools: ServerCapabilitiesTools(),
             resources: ServerCapabilitiesResources(),
@@ -639,6 +640,7 @@ void main() {
 
       client = McpClient(const Implementation(name: 'test', version: '1.0.0'));
       await client.connect(clientT);
+      expect(client.getProtocolVersion(), '2025-11-25');
     }
 
     tearDown(() async {
@@ -1998,22 +2000,12 @@ void main() {
       Future<void> expectProtocolRejection(
         Map<String, dynamic> arguments,
       ) async {
-        Object? rejection;
-        CallToolResult? result;
-        try {
-          result = await client.callTool(
-            CallToolRequest(name: 'reserve_provider', arguments: arguments),
-          );
-        } catch (error) {
-          rejection = error;
-        }
-        final structuredError = result?.structuredContent?['error'] ??
-            result?.structuredContent?['reason'];
-        expect(
-          rejection != null || structuredError != null,
-          isTrue,
-          reason: arguments.toString(),
+        final result = await client.callTool(
+          CallToolRequest(name: 'reserve_provider', arguments: arguments),
         );
+        expect(result.isError, isTrue, reason: arguments.toString());
+        expect(result.content.whereType<TextContent>().single.text,
+            contains('Invalid arguments'));
       }
 
       await expectProtocolRejection({'provider': ' '});
@@ -3012,6 +3004,8 @@ void main() {
           updated.add(notification.updatedParams.uri);
         },
         (params, meta) => JsonRpcResourceUpdatedNotification.fromJson({
+          'jsonrpc': '2.0',
+          'method': Method.notificationsResourcesUpdated,
           'params': {
             ...?params,
             if (meta != null) '_meta': meta,

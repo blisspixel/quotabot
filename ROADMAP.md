@@ -102,6 +102,24 @@ proof, positive local execution scope, and modern MCP compatibility. Extend
 successful-read sharing to another provider only after proving its credential and
 account identity seam; profile settings and unproven account sharing are deferred.
 
+The [October 11 quality review](docs/research/2026-10-11-next-quality-review.md)
+rechecks those priorities against current source and primary documentation.
+Use these concrete increments to assess progress:
+
+| Increment | User outcome | Acceptance boundary |
+|---|---|---|
+| Bounded MCP maintenance, source 0.11.12 | A malformed stdio peer cannot buffer an unlimited frame; existing clients keep working. | SDK 2.4.2, explicit legacy mode, 256 KiB UTF-8 ceiling, incomplete-frame closure, no post-overflow dispatch, subscription delivery and cancellation, four legacy revisions, client fallback, independent review, full gates and published install smoke. |
+| Claude host credential discovery | A signed-in user can see Claude without another login, including a selected alternate config directory. | One bounded injectable discovery path for collection and cache identity; native Keychain-only and file-fallback evidence; locked store, replacement, mismatch, disconnect, own-grant fallback; no host writes or guessed plan dates. |
+| Idle-machine account truth | The quota view stays current when work happens on another machine. | Sanitized two-machine comparison across host-token expiry and quotabot-owned refresh; original capture/reset scope visible; host files unchanged; no collection inference. |
+| Positive execution scope | A stronger local-only choice explains where execution is proven. | Producer plus endpoint-scope evidence, direct/forwarded/WSL/LM Link/composite cases; unknown stays unknown; loaded context and advertised maximum remain separate. |
+| Modern MCP compatibility | Current clients can use the modern wire path without losing older clients. | Separate stdio and authenticated HTTP matrix for discovery-free calls, mirrored metadata, private cache scope, independent subscriptions, cancellation, bounds, and shutdown against exact clients. |
+
+Native daily-use checks accompany each affected surface: keyboard and screen
+reader behavior, large text and mixed DPI, offline repair, sleep recovery, and
+update/rollback state preservation. Measure first-answer and recovery latency
+on the supported hosts before choosing performance targets. Hosted packaging
+and a consent page cannot substitute for native interaction or completed login.
+
 **Make quota recovery reliable, then polish how people inspect and use the
 same evidence in the app and their agent harnesses.** Useful product work
 continues while publisher identities are unavailable. Signing remains a native
@@ -164,11 +182,12 @@ canonical owner publication with fresh asset and provenance checks, and immutabl
 publication. Published install smoke upgrades from 0.11.8. Source commit:
 `0fa28b83797c7f4e9b2a28f10a139f6e89914901`. Native interaction and account evidence remain separate.
 
-**Immediate compatibility maintenance:** the September 13
+**Immediate compatibility maintenance, in preparation for 0.11.12:** the September 13
 [MCP and Agent Plugins review](docs/research/2026-09-13-mcp-agent-plugins.md)
 confirms that stable `mcp_dart` now implements the final July protocol and its
-2.4.2 release bounds incoming stdio messages. Review that security update
-alongside provider fixes, then implement and prove the modern protocol path
+2.4.2 release bounds incoming stdio messages. Source takes that update with
+explicit legacy negotiation and a 256 KiB per-message ceiling. Prove the full
+maintenance release before calling it shipped, then implement the modern path
 without dropping legacy clients. The current server still requires
 initialization and does not implement `2026-07-28`. The package passes native
 legacy launch checks; that is not proof of modern protocol or installed-client

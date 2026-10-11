@@ -94,8 +94,9 @@ void main() {
         deferred: (_) => 'deferred',
         loadShared: (_) => 'shared',
         saveShared: (_) {
-          if (failSave)
+          if (failSave) {
             throw const FileSystemException('synthetic storage failure');
+          }
           return SharedReadCapture(now, 'b' * 64);
         },
       );
@@ -129,8 +130,9 @@ void main() {
     final sharing = makeGate(
         minimumLiveInterval: const Duration(seconds: 30),
         hardenFile: (file) {
-          if (file.path.contains('.shared.'))
+          if (file.path.contains('.shared.')) {
             throw const FileSystemException('synthetic hardening failure');
+          }
         });
     expect(await shareRead(sharing, failSave: true), 'live');
     expect(await shareRead(sharing), 'live');
