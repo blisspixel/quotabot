@@ -5,7 +5,7 @@ The execution queue remains [ROADMAP Next](../../ROADMAP.md#next).
 
 ## Scope and decisions
 
-| Issue | README promise | 0.11.10 response |
+| Issue | README promise | 0.11.11 response |
 |---|---|---|
 | [155](https://github.com/blisspixel/quotabot/issues/155) | Truthful discovery and actionable doctor guidance | Retain the reviewed passive-install fix and first-party security pins; absent applications are undetected. |
 | [156](https://github.com/blisspixel/quotabot/issues/156) | Quick-start commands and integrations should compose reliably | Share recent successful Claude account captures under the existing credential read guard and canonical cache. |
@@ -60,8 +60,14 @@ Omarchy lifecycle test in the tagged Release workflow. Repeated local tests
 reproduced the defect: Windows text-mode writes expanded random newline bytes
 inside the 32-byte alias key. Binary-mode creation preserves the exact bytes
 and stable aliases. A deterministic control-byte regression failed before the
-fix and passes afterward. Release 0.11.10 supersedes that candidate; the
-protected 0.11.9 tag is preserved and no 0.11.9 release was published.
+fix and passes afterward. The 0.11.10 candidate retained that correction and
+passed all three tagged quality gates, but metadata preparation mistook the
+scoped MCP npm package name in its changelog for an account mention. The
+corrected notes use the SDK product name, and a regression now runs the actual
+current changelog through metadata preparation early in CI. The regression
+failed before the wording fix and passes afterward without weakening the
+attribution or mention guard. Release 0.11.11 supersedes both unpublished
+candidates. Their protected tags are preserved unchanged.
 
 Regression coverage targets independent processes, sequential adapter instances,
 concurrent adapters, exact capture fingerprints, drift, resets, expiry, forced

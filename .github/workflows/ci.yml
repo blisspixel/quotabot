@@ -27,6 +27,8 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
+      - name: Release notes and publication guardrails
+        run: python -m unittest tools.test_release_handoff
       - name: Strict Python boundary helpers
         run: |
           python -m pip install --require-hashes -r tools/requirements-dev.txt

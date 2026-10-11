@@ -4,16 +4,21 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-## 0.11.10 - 2026-10-11
+## 0.11.11 - 2026-10-11
 
 Truthful discovery, shared Claude captures, and actionable local-model advice.
 
+- Validate the current release's actual changelog through metadata preparation
+  early in CI. Use the MCP TypeScript SDK product name in release notes so its
+  scoped package spelling cannot be mistaken for a GitHub account mention.
+  The unpublished 0.11.10 candidate passed all three quality gates but failed
+  this metadata check. Its protected tag remains unchanged.
 - Preserve all 32 random Omarchy alias-key bytes on Windows by opening the
   owner-only key file in binary mode. Text mode could expand a newline byte,
   making the next refresh reject the key. A deterministic binary-byte regression
   covers creation, repeated refresh, and stable redacted account aliases.
   The unpublished 0.11.9 candidate exposed this failure during release checks;
-  its protected tag remains unchanged and is superseded by 0.11.10.
+  its protected tag remains unchanged and is superseded by 0.11.11.
 - Share successful, provider-identified Claude captures across processes for
   30 seconds by default, using the existing canonical cache and credential
   read guard. Preserve original capture time and expose
@@ -29,7 +34,7 @@ Truthful discovery, shared Claude captures, and actionable local-model advice.
   Reserve the "installed, no data" state for when host application evidence
   is present without a readable quota database. Verification marks truthful
   absence as informative and fails unbacked installed-state claims.
-- Upgrade `@modelcontextprotocol/sdk` to 1.32.1, `proxy-addr` to 2.0.8, and
+- Upgrade the MCP TypeScript SDK to 1.32.1, `proxy-addr` to 2.0.8, and
   `multidict` to 6.9.1 with universal sha256 hashes across MCP client snippets
   and LiteLLM integration requirements.
 - Add an Omarchy 4.0.4 bar widget that shows a redacted quotabot
