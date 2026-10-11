@@ -7,6 +7,8 @@ import 'package:mcp_dart/mcp_dart.dart';
 import 'package:quotabot_collector/mcp_server_entrypoint.dart';
 import 'package:test/test.dart';
 
+import 'support/process_exit_diagnostics.dart';
+
 const _token = '0123456789abcdef0123456789abcdef';
 
 Map<String, Object?> _initialize(int id, {String revision = '2025-11-25'}) => {
@@ -25,12 +27,26 @@ Future<int> _exitWithin(
   Duration deadline,
   List<String> diagnostics,
 ) =>
-    process.exitCode.timeout(deadline, onTimeout: () {
-      final phases = diagnostics
-          .take(20)
+    process.exitCode.timeout(deadline, onTimeout: () async {
+      final marker = diagnostics.lastIndexWhere((line) =>
+          line == 'fixture CLI main returned' ||
+          line == 'fixture MCP main returned');
+      final observed =
+          (marker < 0 ? diagnostics : diagnostics.skip(marker)).toList();
+      final bounded = observed.length <= 24
+          ? observed
+          : [
+              ...observed.take(6),
+              'fixture intermediate phases omitted',
+              ...observed.skip(observed.length - 17),
+            ];
+      final phases = bounded
           .map((line) => line.length <= 200 ? line : line.substring(0, 200))
           .join(' | ');
-      throw TimeoutException('MCP did not exit; stderr: $phases', deadline);
+      final snapshot = await snapshotTimedOutProcess(process, diagnostics);
+      throw TimeoutException(
+          'MCP did not exit; stderr: $phases; process state: $snapshot',
+          deadline);
     });
 
 void main() {
@@ -57,11 +73,19 @@ void main() {
   });
 
   Future<Process> start(List<String> args,
-      {bool standalone = false, String? entrypoint}) async {
+      {bool standalone = false,
+      String? entrypoint,
+      bool traceShutdown = true}) async {
     final runtimeUrl = 'http://127.0.0.1:${runtime.port}';
     final process = await Process.start(
       Platform.resolvedExecutable,
       [
+        if (traceShutdown &&
+            Platform.isWindows &&
+            (entrypoint == 'test/support/mcp_diagnostic_cli.dart' ||
+                (entrypoint == 'test/support/mcp_fixture_server.dart' &&
+                    args.contains('--http'))))
+          '--trace-shutdown',
         '--packages=.dart_tool/package_config.json',
         entrypoint ?? (standalone ? 'bin/mcp_server.dart' : 'bin/collect.dart'),
         ...args,
@@ -292,10 +316,17 @@ void main() {
     expect(temp.listSync(), isEmpty);
   });
 
-  for (final terminated in [false, true]) {
-    test('stdio closes oversized UTF-8 input, newline=$terminated', () async {
+  for (final (terminated, traceShutdown) in [
+    (false, true),
+    (true, true),
+    if (Platform.isWindows) ...[(false, false), (true, false)],
+  ]) {
+    test(
+        'stdio closes oversized UTF-8 input, newline=$terminated, trace=$traceShutdown',
+        () async {
       final process = await start(['mcp'],
-          entrypoint: 'test/support/mcp_diagnostic_cli.dart');
+          entrypoint: 'test/support/mcp_diagnostic_cli.dart',
+          traceShutdown: traceShutdown);
       final lines = StreamIterator(
           utf8.decoder.bind(process.stdout).transform(const LineSplitter()));
       final errorLines = <String>[];
@@ -514,10 +545,14 @@ void main() {
     });
   }
 
-  for (final mode in ['CLI', 'signal fixture']) {
+  for (final mode in [
+    'CLI',
+    'signal fixture',
+    if (Platform.isWindows) 'untraced signal fixture',
+  ]) {
     test('$mode MCP HTTP requires auth and serves metadata without collection',
         () async {
-      final fixture = mode == 'signal fixture';
+      final fixture = mode != 'CLI';
       final probe = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
       final port = probe.port;
       await probe.close();
@@ -527,7 +562,9 @@ void main() {
         '--port=$port',
         '--path=/test-mcp',
         '--token-env=QUOTABOT_TEST_MCP_BEARER',
-      ], entrypoint: fixture ? 'test/support/mcp_fixture_server.dart' : null);
+      ],
+          entrypoint: fixture ? 'test/support/mcp_fixture_server.dart' : null,
+          traceShutdown: mode != 'untraced signal fixture');
       final output = utf8.decoder.bind(process.stdout).join();
       final ready = Completer<void>();
       final errorLines = <String>[];

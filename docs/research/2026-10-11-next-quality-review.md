@@ -82,6 +82,36 @@ remain. The collector gate stops on its first failure for earlier diagnosis,
 while a successful gate still requires the complete suite and coverage floors.
 Publication remains pending until the hosted lifecycle failure is resolved.
 
+The [exact-main Windows gate](https://github.com/blisspixel/quotabot/actions/runs/38174988308/job/114575378069)
+at `5fc3831a6cbafd8b0ae9afe42eacb45b96dac609` subsequently timed out on
+unterminated UTF-8 overflow after ten seconds. The fixed diagnostic confirmed
+the real CLI main function had returned. That does not establish whether the VM,
+its launcher, or the parent's exit-notification delivery was still active.
+Publication remains held. The fixture now records its VM PID and captures a
+bounded Windows process snapshot before teardown on an exit timeout. Inspection
+reports only selected PIDs, parent PIDs, executable names, and observed presence;
+it does not close target stdin, extend the original exit deadline, or print
+arguments, environment, credentials, or raw inspection errors. Inspection has
+its own short deadline and kills and reaps its owned helper on timeout. A native
+test checks the same observation against an owned live child and after its exit.
+
+The [first process-snapshot run](https://github.com/blisspixel/quotabot/actions/runs/38177021457/job/114581447175)
+at `90830cfe5e652f64813b280f6cfd6351416602e6` captured both the launcher
+and its VM child still present after CLI main returned on unterminated overflow.
+This excludes a launcher-only or parent-notification-only explanation for that
+observation. It does not identify the remaining VM resource. The diagnostic
+fixtures now enable the pinned VM's fixed `--trace-shutdown` phases. Timeout
+reporting starts at the last fixture main-returned marker so earlier launcher
+cleanup cannot obscure the child VM's later phases. A trace before global
+cleanup and one within global cleanup have different implications; neither is
+automatically proof of a stdin defect. The
+[pinned trace implementation](https://github.com/dart-lang/sdk/blob/3.12.2/runtime/vm/dart.cc#L599-L755)
+reports shutdown phases without a debug service, heap dump, or application data.
+Windows retains untraced controls for both oversized-input forms and HTTP signal
+shutdown alongside the traced cases. They use the same assertions, open stdin,
+and exit deadlines. Passing only with tracing would be diagnostic evidence of
+an instrumentation-sensitive result, not proof that the lifecycle is fixed.
+
 ## Evidence still needed for exceptional everyday behavior
 
 Credential recovery needs a native Keychain-only login and a selected alternate
