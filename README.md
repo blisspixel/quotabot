@@ -10,9 +10,8 @@ and recommends where to send the next request. It also shows supported local
 models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
-> **Current stable:** 0.11.11. quotabot remains under active 0.x development.
-> **Pending publication:** 0.11.13.
-> **Release validation:** the protected 0.11.12 candidate remains unpublished.
+> **Current stable:** 0.11.13. quotabot remains under active 0.x development.
+> **Pending publication:** 0.11.14.
 > **Next:** confirm a supported Claude quota integration before expanding
 > credential discovery, prove account-wide freshness on idle machines through
 > a permitted path, and strengthen execution-scope evidence for local-only
@@ -21,7 +20,7 @@ on-device capacity directly or fall back when subscription caps are low.
 > and the [documentation index](docs/README.md).
 
 The [October 11 quality review](docs/research/2026-10-11-next-quality-review.md)
-checks these priorities against current provider and runtime contracts. Source
+checks these priorities against current provider and runtime contracts. Version
 0.11.13 pairs bounded MCP stdio with owned Windows pipe cancellation while
 preserving legacy negotiation; modern protocol support retains a separate acceptance matrix.
 
@@ -239,32 +238,34 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Version [0.11.11](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11) fixes absent-tool discovery,
-shares recent successful Claude captures with original age and safe backoff,
-and names concrete local models with context and hardware-fit advice. It also
-ships the Omarchy widget sources and selected MCP/LiteLLM security updates.
-See the [changelog](CHANGELOG.md) and
-[October 11 review](docs/research/2026-10-11-issue-review.md) for scope.
+Version [0.11.13](https://github.com/blisspixel/quotabot/releases/tag/v0.11.13) ships bounded MCP input and
+owned Windows pipe cancellation, retaining legacy negotiation, subscriptions,
+and the existing response and shutdown deadlines. Installation validates the
+native bridge before activation. It includes the 0.11.11 discovery, shared
+Claude capture, and concrete local-model advice improvements. See the
+[changelog](CHANGELOG.md) and
+[quality review](docs/research/2026-10-11-next-quality-review.md).
 
-The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38153000563),
-[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920), and
-[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701).
-The immutable 14-asset set contains four CLI and three desktop archive/checksum
-pairs. Publication verified exact workflow provenance and fresh downloads.
-Published smoke covers clean install, upgrade from 0.11.8, persistent state,
-source setup, and stable-channel resolution on Windows, macOS, and Linux.
-Desktop checks verify Windows/Linux startup and the installed macOS bundle.
+The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38208637717),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38232223042), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38238648896).
+The immutable fourteen-asset set contains four CLI and three desktop
+archive/checksum pairs. Publication verified exact workflow provenance and
+fresh downloads. Unpinned Latest smoke covers clean install, upgrade from
+0.11.11, persistent state, source setup, and stable-channel resolution on
+Windows, macOS, and Linux. Desktop checks verify Windows/Linux startup and
+the installed macOS bundle. Published CLI and desktop payloads were also
+installed and checked on this Windows machine.
 
 Current Windows and macOS artifacts remain unsigned transition artifacts.
 Native publisher signing, supported Claude quota integration, real-account
 idle-machine refresh, stronger local execution-scope evidence, and modern MCP
 support retain their own acceptance criteria in [roadmap Next](ROADMAP.md#next).
 Expanded Claude credential discovery is deferred pending a supported path or
-provider confirmation.
-Automated readiness and synthetic tests do not establish native assistive
-technology interaction or provider-account truth. Build and validation details
-are in [Building](docs/BUILDING.md), [Security](SECURITY.md), and the
-[documentation index](docs/README.md).
+provider confirmation. The protected 0.11.12 candidate remains unpublished.
+Automated checks do not establish native assistive-technology interaction or
+provider-account truth. See [Building](docs/BUILDING.md), [Security](SECURITY.md),
+and the [documentation index](docs/README.md).
 
 ## Disclaimer
 

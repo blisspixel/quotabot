@@ -9,7 +9,14 @@ The Omarchy bar widget writes a separate redacted display file,
 [integrations/omarchy/README.md](../integrations/omarchy/README.md).
 That file is not a snapshot, a suggestion, or an MCP response.
 
-Source 0.11.12 preserves quota JSON schemas and the legacy MCP protocol while
+Source 0.11.14 adds presentation fields `read_state` and optional `next_step`
+to observed provider rows in the `doctor --json` snapshot. Undetected sources are
+omitted, as with other snapshot commands; `verify` reports registry coverage.
+`sign-in needed` is readiness without quota evidence. The normalized `ok`,
+`error`, `windows`, and `source_class` fields remain unchanged. An adapter's
+declared source class on a failed read does not establish measured quota.
+
+Version 0.11.13 preserves quota JSON schemas and the legacy MCP protocol while
 upgrading its SDK. MCP schema-invalid tool arguments return `isError: true`
 with text diagnostics rather than JSON-RPC `invalidParams`. Malformed request
 parameters remain protocol errors. Rejection happens before tool side effects.

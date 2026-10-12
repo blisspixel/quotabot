@@ -674,17 +674,18 @@ check remain separate release-candidate requirements.
 
 ### Baseline release evidence
 
-The current verified baseline is [0.11.11](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11),
-desktop build 66, from `0fa28b83797c7f4e9b2a28f10a139f6e89914901`. It passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38153000563),
-[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920), and
-[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701).
-The tagged workflow produced an attested handoff; the owner publication helper
-verified and uploaded its exact fourteen assets, freshly downloaded every draft
-asset, checked checksum and provenance, and published immutably. Published
-unpinned Latest smoke upgraded from 0.11.8 and covered clean install, persistent
-state, source setup, and stable-channel resolution on Windows, macOS, and Linux.
-Desktop startup is checked on Windows/Linux; macOS verifies the installed bundle.
-Platform signing and native interactive accessibility
+The current verified baseline is [0.11.13](https://github.com/blisspixel/quotabot/releases/tag/v0.11.13),
+desktop build 68, from `853e13200c2ac6a9b1d0e61046a34821a300c5ef`. It passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38208637717),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38232223042), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38238648896).
+The tagged workflow produced an attested handoff. Owner publication verified
+the exact fourteen assets, freshly downloaded every draft asset, checked
+checksum and provenance, and published immutably. Unpinned Latest smoke upgraded
+from 0.11.11 and covered clean install, persistent state, source setup, and
+stable-channel resolution on Windows, macOS, and Linux. Desktop startup is
+checked on Windows/Linux; macOS verifies the installed bundle. Local installed
+Windows CLI and desktop payloads match the published archives, and native
+window/tray readiness passed. Platform signing and interactive accessibility
 remain separate acceptance criteria.
 
 An earlier completed rehearsal baseline was the exact runtime promoted by the

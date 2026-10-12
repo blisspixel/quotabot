@@ -1105,7 +1105,7 @@ The collector runs as an MCP server so agents can query quota as a primitive. It
 speaks MCP over stdio by default, can opt into MCP Streamable HTTP on loopback,
 and exposes nine tools plus two resources:
 
-Source 0.11.12 caps incoming stdio frames at 256 KiB of UTF-8 before each
+Version 0.11.13 caps incoming stdio frames at 256 KiB of UTF-8 before each
 newline. Overflow closes the connection even for an incomplete frame. The
 limit applies per message, not to total connection traffic. The server keeps
 legacy initialization through `2025-11-25`; upgrading the SDK does not advertise

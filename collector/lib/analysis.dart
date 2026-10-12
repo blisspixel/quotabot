@@ -2138,11 +2138,16 @@ RouteSuggestion suggestRoute(
     return result(
       best,
       useQuotaStretch
-          ? 'Quota-stretch policy: preserve the last '
-              '${boundedStretchThreshold.round()}% of included subscription '
-              'quota - use ${best.localReadiness ?? 'reachable'} local '
-              '${best.provider}$subNote.'
-          : 'Subscriptions are low - fall back to local ${best.provider}$subNote.',
+          ? policyEvidenceSubs.isEmpty
+              ? 'Quota-stretch policy: no measured included subscription quota '
+                  'is available - use local ${best.provider}.'
+              : 'Quota-stretch policy: preserve the last '
+                  '${boundedStretchThreshold.round()}% of included subscription '
+                  'quota - use ${best.localReadiness ?? 'reachable'} local '
+                  '${best.provider}$subNote.'
+          : policyEvidenceSubs.isEmpty
+              ? 'No subscription quota is available - use local ${best.provider}.'
+              : 'Subscriptions are low - fall back to local ${best.provider}$subNote.',
       decisionCode: useQuotaStretch
           ? RouteDecisionCode.quotaStretch
           : RouteDecisionCode.localFallback,

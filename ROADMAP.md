@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-10-11. This file is the forward plan. It records brief shipped
+Updated 2026-10-12. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -92,6 +92,17 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Next
 
+**First-run maintenance, source 0.11.14:** issues
+[#166](https://github.com/blisspixel/quotabot/issues/166) and
+[#167](https://github.com/blisspixel/quotabot/issues/167) arrived during 0.11.13
+publication verification. Separate absent quota from low measured quota, make
+doctor sign-in readiness explicit without changing normalized failure evidence,
+and document omitted sources. Prove isolated first-run text and JSON, preserve
+existing routing decisions and error states, then pass complete contributor,
+three-OS CI, tagged release, and published installation gates. Independent CLI
+validation cases retain their original deadlines. Version 0.11.13 remains the
+verified stable release until that publication completes.
+
 Version [0.11.11](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11) resolves
 [#155](https://github.com/blisspixel/quotabot/issues/155),
 [#156](https://github.com/blisspixel/quotabot/issues/156), and
@@ -119,35 +130,25 @@ Use these concrete increments to assess progress:
 
 | Increment | User outcome | Acceptance boundary |
 |---|---|---|
-| Bounded MCP maintenance, source 0.11.13 | A malformed stdio peer cannot buffer an unlimited frame; existing clients keep working. | SDK 2.4.2, explicit legacy mode, 256 KiB UTF-8 ceiling, incomplete-frame closure, no post-overflow dispatch, subscription delivery and cancellation, four legacy revisions, client fallback, independent review, full gates and published install smoke. |
+| Bounded MCP maintenance, released 0.11.13 | A malformed stdio peer cannot buffer an unlimited frame; existing clients keep working. | SDK 2.4.2, explicit legacy mode, 256 KiB UTF-8 ceiling, incomplete-frame closure, no post-overflow dispatch, subscription delivery and cancellation, four legacy revisions, client fallback, independent review, full gates and published install smoke. |
 | Supported Claude quota integration | A signed-in user can see clearly scoped quota through a permitted integration. | First establish a supported metadata path or provider confirmation before expanding token handling. Research a credential-free status-line projection with original response age and account isolation. If credential discovery is permitted, require one bounded path for collection and cache identity, native storage evidence, replacement/disconnect tests, and no host writes or guessed plan dates. |
 | Idle-machine account truth | The quota view stays current when work happens on another machine. | A provider-permitted refresh path plus sanitized two-machine comparison across credential expiry; original capture/reset scope visible; host files unchanged; no collection inference. Session-fed status-line evidence alone cannot satisfy this gate. |
 | Positive execution scope | A stronger local-only choice explains where execution is proven. | Producer plus endpoint-scope evidence, direct/forwarded/WSL/LM Link/composite cases; unknown stays unknown; loaded context and advertised maximum remain separate. |
 | Modern MCP compatibility | Current clients can use the modern wire path without losing older clients. | Separate stdio and authenticated HTTP matrix for discovery-free calls, mirrored metadata, private cache scope, independent subscriptions, cancellation, bounds, and shutdown against exact clients. |
 
-**Windows lifecycle release hold:** the tagged 0.11.12 gate reproduced a source-JIT
-HTTP shutdown timeout after main returned, with launcher and VM both alive.
-The subsequent instrumented overflow failures captured a runnable main isolate
-with one live socket event port. The latest read-only projection identifies stdin
-destruction still pending after stream cancellation; the native call or lost
-completion that caused it remains unproven.
-The EOF follow-up also failed an untraced overflow control; closing its parent
-writer after failure did not produce an observed exit within one second.
-The mixed-clock Claude sharing fixture is corrected and passes its full local
-gate and prior hosted failure point. The subsequent Windows gate reached the
-ownership probe and failed at the unchanged shutdown deadline. Native stack
-inspection was incomplete. The Windows-only owned pipe reader is integrated in source 0.11.13, with the
-SDK parser and output queue retained. Its direct-FFI prototype was rejected after
-JIT error capture failed; a narrow native bridge captures results atomically.
-Focused overflow, startup, late-cleanup, pause, and deterministic cancellation
-races pass locally. Compiled bundles also pass synchronous and overlapped pipe
-shutdown and missing-library checks. Independent source review is complete;
-the Windows desktop release build also passes locally. Full contributor,
-installation, and hosted acceptance remain required. None is a released fix.
-Retain traced, untraced, and separately instrumented controls, unchanged exit
-deadlines, and bounded process/VM evidence. Localize the remaining lifetime before
-release; passing earlier PR and main gates did not establish a fix. The protected
-0.11.12 tag remains unpublished. See the
+**Windows lifecycle maintenance released:** [0.11.13](https://github.com/blisspixel/quotabot/releases/tag/v0.11.13)
+owns Windows pipe reads and cancellation through native completion while retaining
+the SDK parser and output queue. Focused races, synchronous and overlapped pipes,
+missing-library rejection, complete contributor gates, three-OS CI, the tagged
+release gate, and published install smoke passed with unchanged deadlines.
+Published native bundles and local installation also passed their checks.
+
+The protected 0.11.12 candidate remains unpublished after its tagged shutdown
+failure. Earlier read-only evidence identified SDK stdin destruction pending
+after cancellation; the underlying native call or lost SDK completion remains
+unproven. The released reader owns the affected Windows pipe lifetime directly.
+Retain traced, untraced, and instrumented regression controls. Bounded debugger
+deadline acceptance proves cleanup, not a successful stack observation. See the
 [dated evidence](docs/research/2026-10-11-next-quality-review.md#tagged-release-recurrence).
 
 Native daily-use checks accompany each affected surface: keyboard and screen
@@ -213,24 +214,21 @@ and draft publication handling. These reproducible fixes do not supply native LM
 forwarded-endpoint, idle-machine, or real-account proof. The second-round record
 is in the existing [code-quality review](docs/research/2026-09-30-code-quality.md#second-round-against-0117).
 
-**Maintenance release complete:** [0.11.11](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11)
-with desktop build 66 passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38153000563),
-[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920), and
-[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701),
-canonical owner publication with fresh asset and provenance checks, and immutable
-publication. Published install smoke upgrades from 0.11.8. Source commit:
-`0fa28b83797c7f4e9b2a28f10a139f6e89914901`. Native interaction and account evidence remain separate.
+**Maintenance release complete:** [0.11.13](https://github.com/blisspixel/quotabot/releases/tag/v0.11.13),
+desktop build 68, passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38208637717),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38232223042), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38238648896), canonical owner publication with exact
+fresh-download checksum and provenance verification, and immutable publication.
+Published install smoke upgrades from 0.11.11. Source commit:
+`853e13200c2ac6a9b1d0e61046a34821a300c5ef`. Native interaction and account evidence remain separate.
 
-**Immediate compatibility maintenance, in preparation for 0.11.13:** the September 13
+**Next compatibility increment:** the
 [MCP and Agent Plugins review](docs/research/2026-09-13-mcp-agent-plugins.md)
-confirms that stable `mcp_dart` now implements the final July protocol and its
-2.4.2 release bounds incoming stdio messages. Source takes that update with
-explicit legacy negotiation and a 256 KiB per-message ceiling. Prove the full
-maintenance release before calling it shipped, then implement the modern path
-without dropping legacy clients. The current server still requires
-initialization and does not implement `2026-07-28`. The package passes native
-legacy launch checks; that is not proof of modern protocol or installed-client
-support. This maintenance does not wait for post-1.0 stabilization.
+records modern protocol support in the upstream SDK. Release 0.11.13 takes SDK
+2.4.2's bounded input while deliberately retaining legacy initialization through
+2025-11-25; it does not implement `2026-07-28`. Implement the modern path against
+its separate transport/client matrix without dropping legacy clients. Native
+legacy launch and published install checks do not prove modern compatibility.
 
 **Build in this order**
 
@@ -652,7 +650,7 @@ plan semantics remain uneven.
 
 ## Current state
 
-The current line, **0.11.11**, is the stable release version and includes the
+The current line, **0.11.13**, is the stable release version and includes the
 shipped hardening recorded in [CHANGELOG](CHANGELOG.md); [Next](#next) owns
 remaining work. The stable line contains the implemented core of the first three
 milestones below: the truthful substrate (0.6), one
@@ -691,16 +689,16 @@ milestone sections below.
 
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
-| Core contracts and automated quality | Stable 0.11.11 | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the 0.11.11 immutable release and unpinned three-OS Latest smoke passed; earlier live RC-to-stable evidence remains historical | Keep the current stable line green and resolve any new reproducible defect before signing activation |
-| Integration trust boundary | Stable 0.11.11 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
+| Core contracts and automated quality | Stable 0.11.13 | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the 0.11.13 immutable release and unpinned three-OS Latest smoke passed; earlier live RC-to-stable evidence remains historical | Keep the current stable line green and resolve any new reproducible defect before signing activation |
+| Integration trust boundary | Stable 0.11.13 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
 | Provider truth and drift handling | Partial | Drift fails closed; the existing Claude flow has technical live evidence, while current credential-policy compatibility is unresolved; token parsing, account cleanup, disconnect, parser, and cache provenance have deterministic coverage | Establish a supported Claude metadata path before further grant work; validate idle refresh through permitted paths, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
 | Provider-ID cache continuity | Stable 0.10.1 | The bounded coordinator, exact role validation, mixed-version locks, durable prepared receipts, crash recovery, branch-conflict quarantine, and empty shipped alias map passed [ordinary hosted CI](https://github.com/blisspixel/quotabot/actions/runs/33542805801), the immutable [candidate release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1-rc.1), and the complete [three-OS lifecycle](https://github.com/blisspixel/quotabot/actions/runs/33562140830) | Add an alias only for a real provider rename and retain the same fail-closed migration evidence when one exists |
-| Installation and update | Stable 0.11.11 | The immutable stable release, unpinned GitHub Latest smoke, three-OS stable-channel, clean install, prior-stable upgrade, persistence, source-setup, desktop installation, Windows/Linux startup, and macOS bundle checks passed; earlier releases retain a historical live RC-to-stable update record | Repeat the complete path on the signed rehearsal and frozen 1.0 candidate |
+| Installation and update | Stable 0.11.13 | The immutable stable release, unpinned GitHub Latest smoke, three-OS stable-channel, clean install, prior-stable upgrade, persistence, source-setup, desktop installation, Windows/Linux startup, and macOS bundle checks passed; earlier releases retain a historical live RC-to-stable update record | Repeat the complete path on the signed rehearsal and frozen 1.0 candidate |
 | Native signing | Repository-ready; inactive | Exact Windows PE and macOS Mach-O inventories and deltas, isolated signer jobs, protected nonpublishing rehearsal workflows, reviewed `main` and `v*` environment policies, deterministic policy and failure tests, credential-free packaging, bounded receipts, and exact draft-asset re-verification are implemented for CLI and desktop; current published artifacts remain unsigned | Provision both owner identities and the exact protected-environment values and secrets, pass native protected rehearsals, activate both modes, and retain one signed 0.x lifecycle record |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Stable 0.11.11 baseline complete | The stable release completed the tag, exact 14-asset set, checksum, provenance, fresh download, install, upgrade, state, exact self-update, source setup, immutable publication, unpinned Latest acquisition, and installed stable-channel assertion | Run a signed 0.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Stable 0.11.13 baseline complete | The stable release completed the tag, exact 14-asset set, checksum, provenance, fresh download, install, upgrade, state, exact self-update, source setup, immutable publication, unpinned Latest acquisition, and installed stable-channel assertion | Run a signed 0.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Use patches on the current stable

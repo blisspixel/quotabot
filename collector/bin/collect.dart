@@ -36,7 +36,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.11.13';
+const _version = '0.11.14';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -709,7 +709,13 @@ Future<void> _runMain(List<String> rawArgs) async {
   }
   if (cmd.isEmpty || cmd == 'status' || cmd == 'doctor') {
     wantsJson
-        ? print(_jsonPretty(_snapshot(results, incidentInventory, profile)))
+        ? print(_jsonPretty({
+            ..._snapshot(results, incidentInventory, profile),
+            if (cmd == 'doctor')
+              'providers': results
+                  .map((q) => doctorProviderJson(q, nowEpoch()))
+                  .toList(),
+          }))
         : _printDoctor(
             results,
             preferenceOrder: profile?.preferenceOrder ?? const [],
@@ -3607,6 +3613,9 @@ List<String> _providerProvenanceParts(
   String state, {
   bool includeAccount = true,
 }) {
+  if (state == 'sign-in needed') {
+    return ['sign-in needed', 'no quota evidence'];
+  }
   final parts = <String>[
     _providerReadStateLabel(state),
     q.sourceClass.label,
@@ -3724,7 +3733,8 @@ bool providerHasDoctorProvenanceIdentity(ProviderQuota q) =>
         q.account.contains('@') ||
         isOpaqueCredentialIdentity(q.account));
 
-String _doctorState(ProviderQuota q, int now) {
+/// Human readiness, separate from an adapter's declared source class.
+String doctorProviderState(ProviderQuota q, int now) {
   if (q.isLocal) {
     if (!q.ok || q.error != null || q.sourceClassViolation != null) {
       return 'ERROR';
@@ -3737,6 +3747,16 @@ String _doctorState(ProviderQuota q, int now) {
     return _localProviderReadState(q);
   }
   if (q.driftReason != null) return 'PROVIDER DRIFT';
+  if (!q.ok &&
+      !q.stale &&
+      q.windows.isEmpty &&
+      q.modelQuotas.isEmpty &&
+      q.sourceClassViolation == null &&
+      q.pipeHealth != providerPipeHealthThrottled &&
+      q.pipeHealth != providerPipeHealthDegraded &&
+      quotaFailureNeedsSignIn(q.error)) {
+    return 'sign-in needed';
+  }
   if (!q.ok || q.sourceClassViolation != null) return 'ERROR';
   if (q.stale) return 'cached';
   if (q.suspect != null) return 'NEEDS REVIEW';
@@ -3752,6 +3772,14 @@ String _doctorState(ProviderQuota q, int now) {
           ? 'live shared'
           : 'live';
 }
+
+/// Add doctor readiness without rewriting the normalized failure evidence.
+Map<String, dynamic> doctorProviderJson(ProviderQuota q, int now) => {
+      ...q.toJson(),
+      'read_state': doctorProviderState(q, now),
+      if (doctorRecoveryHint(q, doctorProviderState(q, now)) case final hint?)
+        'next_step': hint,
+    };
 
 String doctorModelSummary(
   String provider,
@@ -3849,7 +3877,7 @@ void _printDoctor(
       .fold(28, (w, len) => len > w ? len : w);
   final indent = ' '.padRight(nameWidth);
   for (final q in orderProvidersForHumanStatus(results)) {
-    final state = _doctorState(q, now);
+    final state = doctorProviderState(q, now);
     final detail = q.isLocal
         ? (isLocalRuntimeReachableAt(q, now) && q.error == null
             ? q.status ?? 'ready'
@@ -4001,7 +4029,13 @@ void _printDoctor(
     now,
     preferenceOrder: preferenceOrder,
   );
-  print('\nSuggested: ${suggestion.explanation}');
+  final explanation = suggestion.decisionCode == RouteDecisionCode.noData
+      ? suggestion.explanation.replaceFirst(
+          'Run quotabot doctor for provider-specific recovery steps.',
+          'Use the provider recovery steps above, or start a local runtime.',
+        )
+      : suggestion.explanation;
+  print('\nSuggested: $explanation');
   print('  (run "quotabot suggest" for the full ranked list)');
 
   // Surface a precisely named agreement score once enough forecasts have
@@ -5165,7 +5199,7 @@ String? doctorRecoveryHint(ProviderQuota q, String state) {
     return q.error ??
         'start the local runtime and expose an on-device model, then re-run';
   }
-  if (state == 'ERROR' &&
+  if ((state == 'ERROR' || state == 'sign-in needed') &&
       !q.isLocal &&
       !q.ok &&
       q.pipeHealth != providerPipeHealthThrottled &&
@@ -5175,7 +5209,7 @@ String? doctorRecoveryHint(ProviderQuota q, String state) {
         _looksLikeCredentialFailure(error) &&
         !error.toLowerCase().contains('quotabot login')) {
       return 'run: quotabot login ${q.provider} '
-          '(adds a refreshable path; re-run doctor)';
+          '(adds a refreshable path; retry after signing in)';
     }
   }
   if (state == 'cached' && q.error?.isNotEmpty == true) {
@@ -5184,13 +5218,13 @@ String? doctorRecoveryHint(ProviderQuota q, String state) {
         _looksLikeCredentialFailure(error) &&
         !error.toLowerCase().contains('quotabot login')) {
       return '$error; run: quotabot login ${q.provider} '
-          '(adds a refreshable path; re-run doctor)';
+          '(adds a refreshable path; retry after signing in)';
     }
     return error;
   }
   if (state == 'cached' && canLogin.contains(q.provider)) {
     return 'run: quotabot login ${q.provider}  '
-        '(adds a refreshable path; re-run doctor)';
+        '(adds a refreshable path; retry after signing in)';
   }
   if (state == 'no live data' && !q.isLocal) {
     // NVIDIA NIM is an env-key provider, not an installed app, so the generic

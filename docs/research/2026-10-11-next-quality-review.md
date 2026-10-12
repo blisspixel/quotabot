@@ -555,3 +555,70 @@ implementation from unresolved provider-policy compatibility and defer new
 grants and expanded discovery. Release 0.11.13 notes explicitly include the
 unpublished 0.11.12 MCP maintenance so publication includes its compatibility
 and validation changes. The stable release designation remains 0.11.11.
+
+## Released 0.11.13 verification
+
+Version 0.11.13, desktop build 68, was published immutably from `853e13200c2ac6a9b1d0e61046a34821a300c5ef`.
+The [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38208637717),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38232223042), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38238648896) passed. The exact fourteen-asset set was verified with fresh
+downloads and workflow provenance. Unpinned Latest smoke upgrades from 0.11.11.
+The clean signed `7f343c4` contributor gate passed with 91.72 percent
+collector line coverage and 87.52 percent desktop line coverage; its tree
+matches the released source. Earlier failed receipts remain preserved.
+The preceding `dba9e85` gate completed every command successfully but its
+clean-tree wrapper rejected seven regenerated Flutter files. Separate canonical
+blob comparisons proved all seven unchanged; an index refresh produced no
+staged changes. That original rejected receipt remains intact and is not the
+final clean gate evidence.
+
+All published Windows CLI and desktop payload files matched after installation
+on the local machine, with metadata preserved. Installed version and Latest
+stable resolution passed. The native MCP suite passed all twenty checks with
+no skips, including legacy negotiation, synchronous and overlapped pipe
+overflow/EOF, unchanged shutdown bounds, and missing-library rejection.
+The published desktop passed isolated native window/tray readiness and cleanup
+with unchanged bundle bytes. Automated readiness is separate from interactive
+keyboard/screen-reader acceptance and account-wide provider truth.
+
+The user confirmed that Mac and Windows use the same Claude subscription, then
+skipped further Mac Keychain validation. The earlier macOS 0.11.11 file-fallback
+check remains baseline evidence only. Idle credential refresh, Keychain-only
+discovery, and provider-policy compatibility remain unproven; no new grant or
+expanded token-discovery work was performed. Supported Claude metadata access,
+positive local execution scope, modern MCP, signing, and native daily-use
+acceptance remain in ROADMAP Next.
+
+## October 12 first-run follow-up
+
+Issues [166](https://github.com/blisspixel/quotabot/issues/166) and
+[167](https://github.com/blisspixel/quotabot/issues/167) arrived during final
+0.11.13 publication checks. Source review confirmed a shared local-fallback
+reason incorrectly called absent subscription evidence low quota. Source
+0.11.14 changes only the explanation for an empty eligible subscription set;
+candidate selection and decision codes remain unchanged. It uses unavailable
+quota wording because an empty evidence set cannot prove an account is absent.
+
+Doctor now distinguishes sign-in readiness from transport and validation
+failures when no quota windows or model-budget evidence exist. Its JSON adds
+presentation fields while preserving normalized failure evidence. Setup and
+schema documentation explain that undetected sources are omitted and `verify`
+inspects registry coverage. No placeholder quota observations are fabricated.
+The no-data doctor recommendation uses recovery steps already in its output.
+
+The documentation PR's [macOS job](https://github.com/blisspixel/quotabot/actions/runs/38239697277/job/114778978322)
+failed the existing invalid-capability CLI test at its 30-second test deadline.
+That test launches five independent source-JIT processes serially; the log
+records no production assertion failure or proof of a hung child. The correction
+parameterizes independent capability and risk cases, preserving their original
+per-test deadline and all rejection assertions. Missing native inventories were
+a downstream consequence of failing before packaging, not a packaging failure.
+
+The first-run fixture runs real collection against synthetic metadata with
+private user paths, no inherited credential environment, and empty PATH. An
+initial probe showed that HOME alone does not isolate the native Antigravity
+keyring; the corrected fixture creates a private disconnect marker before
+discovery. All HTTP requests are intercepted. Child startup, stdin, termination,
+reaping, output settlement, and private-directory ownership are explicit.
+Local first-run text and JSON checks pass. Complete release gates remain required
+before source 0.11.14 is described as released.

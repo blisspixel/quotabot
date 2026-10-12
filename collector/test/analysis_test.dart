@@ -1293,6 +1293,36 @@ void main() {
       expect(suggestion.usingLocalFallback, isTrue);
     });
 
+    test('local fallback distinguishes absent quota from low quota', () {
+      final absent = suggestRoute([_local('ollama')], _now);
+      final signedOut = suggestRoute([
+        ProviderQuota.error('claude', 'Claude', 'no usable Claude login', _now),
+        _local('ollama'),
+      ], _now);
+      final low = suggestRoute([
+        _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 95)]),
+        _local('ollama'),
+      ], _now);
+      for (final suggestion in [absent, signedOut]) {
+        expect(suggestion.reason,
+            'No subscription quota is available - use local ollama.');
+        expect(
+            suggestion.explanation, isNot(contains('Subscriptions are low')));
+        expect(suggestion.toJson()['reason'], suggestion.reason);
+        expect(suggestion.decisionCode, RouteDecisionCode.localFallback);
+        expect(suggestion.recommended?.provider, 'ollama');
+      }
+      expect(low.reason, startsWith('Subscriptions are low'));
+      expect(low.toJson()['reason'], low.reason);
+      expect(low.decisionCode, RouteDecisionCode.localFallback);
+      final stretch =
+          suggestRoute([_local('ollama')], _now, quotaStretch: true);
+      expect(
+          stretch.reason, contains('no measured included subscription quota'));
+      expect(stretch.reason, isNot(contains('preserve the last')));
+      expect(stretch.decisionCode, RouteDecisionCode.quotaStretch);
+    });
+
     test('without a local fallback, recommends the least-bad subscription', () {
       final s = suggestRoute([
         _q('codex', [QuotaWindow(label: 'w', usedPercent: 95)]), // 5% free

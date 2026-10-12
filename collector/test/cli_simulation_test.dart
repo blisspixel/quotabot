@@ -105,6 +105,7 @@ void main() {
       );
 
       expect(cli.doctorRecoveryHint(quota, 'ERROR'), isNull, reason: error);
+      expect(cli.doctorProviderState(quota, 1782046566), 'ERROR');
     }
   });
 
@@ -896,11 +897,60 @@ void main() {
 
       expectExitCode(result, 0);
       final out = result.stdout as String;
-      expect(out, contains('[error, authoritative, quota plan, captured'));
+      expect(out, contains('[sign-in needed, no quota evidence]'));
+      expect(out, isNot(contains('[error, authoritative')));
+      expect(out, isNot(contains('Run quotabot doctor')));
+      expect(out, isNot(contains('re-run doctor')));
       expect(out, contains('simulated signed-out state'));
       expect(out, contains('-> run: quotabot login $provider'));
+      final jsonResult = await runCli([
+        'doctor',
+        '--json',
+        '--mock-provider=$provider',
+        '--state=signed-out',
+      ]);
+      expectExitCode(jsonResult, 0);
+      final body =
+          jsonDecode(jsonResult.stdout as String) as Map<String, dynamic>;
+      final row = (body['providers'] as List).single as Map<String, dynamic>;
+      expect(row['read_state'], 'sign-in needed');
+      expect(row['ok'], isFalse);
+      expect(row['windows'], isEmpty);
+      expect(row['next_step'], contains('quotabot login $provider'));
     });
   }
+
+  test('doctor retains stale quota and transport errors as distinct states',
+      () {
+    const now = 1782046566;
+    for (final stale in [false, true]) {
+      final quota = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'unknown',
+        asOf: now,
+        ok: false,
+        stale: stale,
+        error: 'token expired',
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      );
+      expect(cli.doctorProviderState(quota, now), 'ERROR');
+      expect(cli.doctorProviderJson(quota, now)['windows'], isNotEmpty);
+    }
+    final cached = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'unknown',
+      asOf: now,
+      stale: true,
+      error: 'token expired',
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    expect(cli.doctorProviderState(cached, now), 'cached');
+    final serviceFailure =
+        ProviderQuota.error('claude', 'Claude', 'HTTP 503', now);
+    expect(cli.doctorProviderState(serviceFailure, now), 'ERROR');
+  });
 
   test('doctor human output explains provider drift and recovery', () async {
     final result = await runCli([
@@ -1004,15 +1054,15 @@ void main() {
     expect(result.stderr as String, contains('unknown --state "missing"'));
   });
 
-  test('models rejects invalid capability filter values', () async {
-    final cases = {
-      '--min-context=1e309': '--min-context',
-      '--min-context=-1': '--min-context',
-      '--task=banana': '--task',
-      '--tier-floor=banana': '--tier-floor',
-      '--tier-ceiling=': '--tier-ceiling',
-    };
-    for (final entry in cases.entries) {
+  const invalidCapabilityFilters = {
+    '--min-context=1e309': '--min-context',
+    '--min-context=-1': '--min-context',
+    '--task=banana': '--task',
+    '--tier-floor=banana': '--tier-floor',
+    '--tier-ceiling=': '--tier-ceiling',
+  };
+  for (final entry in invalidCapabilityFilters.entries) {
+    test('models rejects invalid capability filter ${entry.key}', () async {
       final result = await runCollectCli(
         ['models', entry.key],
         environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
@@ -1020,8 +1070,8 @@ void main() {
       expectExitCode(result, 64);
       expect(result.stderr as String, contains(entry.value));
       expect(result.stdout as String, isEmpty);
-    }
-  });
+    });
+  }
 
   test('models rejects an inverted tier range', () async {
     final result = await runCollectCli(
@@ -1034,8 +1084,8 @@ void main() {
     expect(result.stdout as String, isEmpty);
   });
 
-  test('suggest rejects invalid risk policy values', () async {
-    for (final value in ['banana', 'NaN', '-1', '6']) {
+  for (final value in ['banana', 'NaN', '-1', '6']) {
+    test('suggest rejects invalid risk policy $value', () async {
       final result = await runCollectCli(
         ['suggest', '--json', '--risk=$value'],
         environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
@@ -1044,8 +1094,8 @@ void main() {
       expectExitCode(result, 64);
       expect(result.stderr as String, contains('--risk'));
       expect(result.stdout as String, isEmpty);
-    }
-  });
+    });
+  }
 
   test('invalid simulated command does not emit normal output', () async {
     final result = await runCli([

@@ -172,10 +172,10 @@ release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` or
 `vMAJOR.MINOR.PATCH-rc.N` selects one exact tag for a reproducible rollback.
 
 The current stable release is
-[v0.11.11](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11). Its
-[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920) enforces the exact immutable 14-asset contract.
-Its [three-OS Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701) covers exact-tag installation, upgrade
-from 0.11.8, persistent state, source setup, stable-channel resolution, canonical
+[v0.11.13](https://github.com/blisspixel/quotabot/releases/tag/v0.11.13). Its
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38232223042) enforces the exact immutable 14-asset contract.
+Its [three-OS Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38238648896) covers exact-tag installation, upgrade
+from 0.11.11, persistent state, source setup, stable-channel resolution, canonical
 unversioned acquisition, desktop installation on all three OSes, Windows/Linux
 startup, and macOS bundle checks.
 Every patch release follows the same published-artifact path.
@@ -229,14 +229,20 @@ and install-smoke workflows add `--signer-workflow`, `--source-ref`,
 quotabot doctor
 ```
 
-Each row shows a state and, when useful, the exact next step:
+Each collected provider row shows a state and, when useful, the exact next step.
+Tools that have never produced local evidence and stopped local runtimes can be
+omitted; `doctor` is a snapshot of observed sources, not an installation inventory.
+Run `quotabot verify` to inspect the complete built-in registry, including its
+`undetected` sources. A CLI executable alone does not prove a signed-in account.
 
 | State           | Meaning                                                        |
 |-----------------|---------------------------------------------------------------|
 | `live`          | Working now; Claude/Codex have a usable host credential or quotabot grant. |
 | `cached`        | Last good read (age shown in the row); reopen that app or connect quotabot (step 4). |
 | `PROVIDER DRIFT` | A fresh read was rejected; the row is unavailable for routing and shows stale last-trusted quota only when one exists. |
-| `no live data`  | That tool is not installed, not signed in, or has not run on this machine yet. |
+| `no live data`  | A collected source has no quota windows or useful status metadata yet. |
+| `sign-in needed` | A collected subscription has no quota evidence and reports missing or rejected credentials. This is setup readiness, not measured quota. |
+| `ERROR` | A read, transport, or evidence-validation failure; inspect its detail. |
 | `OUT OF QUOTA`  | The binding window is spent; the row shows when it resets.     |
 
 Rows can also include compact trust context: live versus cached state, normalized
@@ -249,6 +255,14 @@ names the spend and when it resets. It does not also mark that line last known
 and repeat that the refresh failed. A rate limit or outage is one short note,
 without "last known". A sign-in repair, and a reset that has already passed,
 still get their own note. A percentage that is not spent still says last known.
+
+`doctor --json` uses the normal snapshot envelope and adds each observed row's
+`read_state` plus `next_step` when one applies. Its `source_class` declares the
+adapter's source type, including on failed attempts; it is not proof of a live
+reading. Require `ok`, trusted windows, freshness, and routing eligibility before
+using quota. Sign-in readiness preserves `ok: false` and the original error.
+Other snapshot commands retain the normalized snapshot fields without these
+doctor presentation fields.
 
 For Claude, read the shared session and weekly windows separately from any
 model-scoped Fable row. A spent or missing Fable pool does not mean the whole
@@ -412,7 +426,7 @@ Updater-capable releases from 0.10.0-rc.16 through 0.10.1 can report that GitHub
 release discovery exceeded its response bound after the repository's historical
 release metadata grows. That affects channel discovery, not exact-tag download
 verification. An affected install can rerun the unpinned one-line installer or
-select the exact stable `v0.11.11` tag once. Version 0.10.2
+select the exact stable `v0.11.13` tag once. Version 0.10.2
 and later use GitHub's dedicated Latest endpoint for stable discovery and retain
 smaller bounded pages for preview discovery.
 
