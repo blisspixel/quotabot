@@ -8,6 +8,10 @@ import 'package:quotabot_collector/util.dart'
 const _nativeBegin = 'QUOTABOT_NATIVE_STACK_BEGIN';
 const _nativeEnd = 'QUOTABOT_NATIVE_STACK_END';
 
+class _NativeInspectionDeadline implements Exception {
+  const _NativeInspectionDeadline();
+}
+
 /// Export-only, moving-thread observations are suggestive labels, not proof
 /// of a particular Dart thread, descriptor, call site, or completed operation.
 Map<String, Object?>? projectNativeStackLabels(String text) {
@@ -77,6 +81,8 @@ Future<String> snapshotTimedOutNative(
   String processState, {
   Future<Process> Function(List<String> arguments, Directory ownedDirectory)?
       startInspectorForTesting,
+  void Function(Process inspector, Directory ownedDirectory)?
+      onInspectorStartedForTesting,
 }) async {
   if (!Platform.isWindows) return 'native inspection unavailable';
   final programFiles = Platform.environment['ProgramFiles(x86)'];
@@ -87,15 +93,20 @@ Future<String> snapshotTimedOutNative(
   StreamSubscription<List<int>>? output;
   StreamSubscription<List<int>>? errors;
   var exited = false;
+  int? inspectorExit;
+  var oversized = false;
   var lateOwnsDirectory = false;
   String? ownedPath;
   String? tempRoot;
   final elapsed = Stopwatch()..start();
   Duration remaining() {
     final milliseconds = 3000 - elapsed.elapsedMilliseconds;
-    if (milliseconds <= 0) throw TimeoutException('native inspection expired');
+    if (milliseconds <= 0) throw const _NativeInspectionDeadline();
     return Duration(milliseconds: milliseconds);
   }
+
+  Future<T> withinBudget<T>(Future<T> work) => work.timeout(remaining(),
+      onTimeout: () => throw const _NativeInspectionDeadline());
 
   Future<void> reap(Process child) async {
     try {
@@ -146,7 +157,7 @@ Future<String> snapshotTimedOutNative(
     }
     temp = Directory.systemTemp.createTempSync('quotabot_native_snapshot_');
     ownedPath = temp.resolveSymbolicLinksSync();
-    await enforceOwnerOnlyDirectoryAsync(temp).timeout(remaining());
+    await withinBudget(enforceOwnerOnlyDirectoryAsync(temp));
     final symbols = Directory('${temp.path}/symbols')..createSync();
     final commands = File('${temp.path}/commands.txt')
       ..writeAsStringSync(
@@ -155,8 +166,9 @@ Future<String> snapshotTimedOutNative(
     final owned = temp;
     final launchBudget = remaining();
     final arguments = [
+      // No invasive attachment means debugger exit cannot terminate the target.
+      // Combining -pd with this mode rejects startup on supported CDB builds.
       '-pvr',
-      '-pd',
       '-sins',
       '-netsyms:no',
       '-noshell',
@@ -210,11 +222,11 @@ Future<String> snapshotTimedOutNative(
     }));
     inspector = await starting.timeout(launchBudget, onTimeout: () {
       lateOwnsDirectory = true;
-      throw TimeoutException('native inspection launch expired');
+      throw const _NativeInspectionDeadline();
     });
+    onInspectorStartedForTesting?.call(inspector, temp);
     final bytes = <int>[];
     var outputBytes = 0;
-    var oversized = false;
     void consume(List<int> chunk, {required bool retain}) {
       outputBytes += chunk.length;
       if (outputBytes > 64 * 1024) {
@@ -235,18 +247,24 @@ Future<String> snapshotTimedOutNative(
     final errorsDone = errors.asFuture<void>();
     final exit = inspector.exitCode.then((code) {
       exited = true;
+      inspectorExit = code;
       return code;
     });
     final completed = Future.wait([exit, outputDone, errorsDone]);
     unawaited(
         completed.then<void>((_) {}, onError: (Object _, StackTrace __) {}));
-    await inspector.stdin.close().timeout(remaining());
-    await completed.timeout(remaining());
+    await withinBudget(inspector.stdin.close());
+    await withinBudget(completed);
     if (oversized || await exit != 0) return 'native inspection incomplete';
     final projected = projectNativeStackLabels(utf8.decode(bytes));
     return projected == null
         ? 'native inspection incomplete'
         : jsonEncode(projected);
+  } on _NativeInspectionDeadline {
+    if (oversized || (inspectorExit != null && inspectorExit != 0)) {
+      return 'native inspection incomplete';
+    }
+    return 'native inspection unavailable (deadline)';
   } catch (_) {
     return 'native inspection unavailable';
   } finally {

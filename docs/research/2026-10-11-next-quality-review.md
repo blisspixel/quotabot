@@ -263,9 +263,10 @@ completion. Existing VM-only, traced, and untraced controls remain separate.
 For failed Windows controls without a service endpoint, an optional bounded
 native debugger inspects only the VM identified as the owned launcher's child
 by the process snapshot. Microsoft's [`-pvr` mode](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/cdb-command-line-options)
-does not suspend the target; `-pd` and explicit `qd` preserve it. A fresh owned
-working directory, fixed command file, local empty symbol path, disabled network
-symbols, and disabled shell commands isolate startup. The fixed
+does not suspend the target; explicit `qd` leaves it running. The initial
+additional `-pd` option was removed after the compatibility check below.
+A fresh owned working directory, fixed command file, local empty symbol path,
+disabled network symbols, and disabled shell commands isolate startup. The fixed
 [`kc` stack view](https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/k--kb--kc--kd--kp--kp--kv--display-stack-backtrace-)
 contains function labels without arguments. Startup and output share three
 seconds; both output streams share a 64 KiB ceiling, and bounded cleanup owns
@@ -400,6 +401,11 @@ prove a locked store, Keychain-only discovery, or idle-machine refresh. No
 credential value or account identifier was persisted in the verification
 receipt, and no inference request or host-state write was made.
 
+The user confirmed that the Mac and Windows sign-ins use the same subscription
+and requested skipping further Keychain validation. That check remains skipped.
+A fresh login and the successful credential-file read do not prove refresh after
+idle credential expiry, so the idle-machine acceptance boundary remains open.
+
 ## October 7 billing update
 
 Rechecked October 11. The [current SDK notice](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) adds monthly API
@@ -483,3 +489,36 @@ user, provider, cache, and temporary directories isolated. Its 26 focused tests
 pass with the original response and exit deadlines. Independent review found
 no weakened catalog assertions or restored user credential scope. The full
 corrected-tree gate remains required; the earlier failed receipt is preserved.
+
+### Bounded native debugger compatibility
+
+The [Windows diagnostic smoke on `25c389d`](https://github.com/blisspixel/quotabot/actions/runs/38199697382/job/114650136776)
+failed after the MCP lifecycle cases: the optional CDB helper returned incomplete
+inspection instead of projected labels. An isolated probe using Microsoft-signed
+CDB 10.0.26100.7705 reproduced successful debugger exit without either command
+marker. Its fixed startup error rejected detach-on-exit. Removing only `-pd`
+retained the documented noninvasive, nonsuspending
+[`-pvr` mode](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/cdb-command-line-options)
+and explicit [`qd`](https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/qd--quit-and-detach-).
+The owned target remained alive.
+
+The corrected probe still exceeded the helper's three-second cumulative budget.
+A separate exploratory observation completed in 4.465 seconds, with exit zero,
+one exact begin and end marker, 65 accepted export-label frames, and 7,948 output
+bytes. That observation establishes parser compatibility for this debugger
+version; it is not a pass under the maintained three-second deadline or proof of
+the hosted debugger's version. Only fixed counts and outcomes were retained.
+
+The maintained helper keeps its original three-second budget and output cap.
+An internal discriminator identifies only its own cumulative deadline; unrelated
+timeout exceptions remain ordinary failures. The real smoke requires either
+valid projected labels or that exact deadline outcome, then verifies inspector
+exit, temporary-directory removal, bounded completion, and target survival.
+Nonzero exits, malformed markers, overflow, and launch failure remain rejected;
+deterministic successful inspection still requires projected JSON. A real-host
+deadline pass proves containment and cleanup, not successful stack inspection.
+
+All 13 focused diagnostic checks passed locally with the isolated Microsoft
+debugger present and no skips; the real debugger case reported the deadline
+outcome. Formatting and strict analysis passed. Full local and hosted gates on
+the corrected signed tree remain required before publication.
