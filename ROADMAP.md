@@ -92,6 +92,17 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Next
 
+**First-run maintenance, source 0.11.14:** issues
+[#166](https://github.com/blisspixel/quotabot/issues/166) and
+[#167](https://github.com/blisspixel/quotabot/issues/167) arrived during 0.11.13
+publication verification. Separate absent quota from low measured quota, make
+doctor sign-in readiness explicit without changing normalized failure evidence,
+and document omitted sources. Prove isolated first-run text and JSON, preserve
+existing routing decisions and error states, then pass complete contributor,
+three-OS CI, tagged release, and published installation gates. Independent CLI
+validation cases retain their original deadlines. Version 0.11.13 remains the
+verified stable release until that publication completes.
+
 Version [0.11.11](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11) resolves
 [#155](https://github.com/blisspixel/quotabot/issues/155),
 [#156](https://github.com/blisspixel/quotabot/issues/156), and

@@ -588,3 +588,37 @@ discovery, and provider-policy compatibility remain unproven; no new grant or
 expanded token-discovery work was performed. Supported Claude metadata access,
 positive local execution scope, modern MCP, signing, and native daily-use
 acceptance remain in ROADMAP Next.
+
+## October 12 first-run follow-up
+
+Issues [166](https://github.com/blisspixel/quotabot/issues/166) and
+[167](https://github.com/blisspixel/quotabot/issues/167) arrived during final
+0.11.13 publication checks. Source review confirmed a shared local-fallback
+reason incorrectly called absent subscription evidence low quota. Source
+0.11.14 changes only the explanation for an empty eligible subscription set;
+candidate selection and decision codes remain unchanged. It uses unavailable
+quota wording because an empty evidence set cannot prove an account is absent.
+
+Doctor now distinguishes sign-in readiness from transport and validation
+failures when no quota windows or model-budget evidence exist. Its JSON adds
+presentation fields while preserving normalized failure evidence. Setup and
+schema documentation explain that undetected sources are omitted and `verify`
+inspects registry coverage. No placeholder quota observations are fabricated.
+The no-data doctor recommendation uses recovery steps already in its output.
+
+The documentation PR's [macOS job](https://github.com/blisspixel/quotabot/actions/runs/38239697277/job/114778978322)
+failed the existing invalid-capability CLI test at its 30-second test deadline.
+That test launches five independent source-JIT processes serially; the log
+records no production assertion failure or proof of a hung child. The correction
+parameterizes independent capability and risk cases, preserving their original
+per-test deadline and all rejection assertions. Missing native inventories were
+a downstream consequence of failing before packaging, not a packaging failure.
+
+The first-run fixture runs real collection against synthetic metadata with
+private user paths, no inherited credential environment, and empty PATH. An
+initial probe showed that HOME alone does not isolate the native Antigravity
+keyring; the corrected fixture creates a private disconnect marker before
+discovery. All HTTP requests are intercepted. Child startup, stdin, termination,
+reaping, output settlement, and private-directory ownership are explicit.
+Local first-run text and JSON checks pass. Complete release gates remain required
+before source 0.11.14 is described as released.

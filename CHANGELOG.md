@@ -4,6 +4,23 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.14 - 2026-10-12
+
+Truthful first-run guidance and independent CLI validation. Pending publication.
+
+- Distinguish unavailable subscription quota from measured low quota when
+  routing to a local runtime. Keep existing decision codes and candidate rules.
+- Show credential readiness as `sign-in needed` without claiming authoritative
+  quota evidence. Keep transport, stale-cache, and validation failures distinct.
+  Doctor JSON adds `read_state` and optional `next_step` while preserving the
+  normalized failure fields. Explain omitted sources and registry inspection.
+- Replace doctor's self-referencing no-data recommendation with recovery steps
+  in the current output. Retain concrete sign-in guidance.
+- Run independent invalid capability and risk flags as separate CLI tests,
+  preserving the original per-test deadline and every rejection assertion.
+  Add isolated first-run text and JSON regression tests with synthetic metadata
+  and owned child-process cleanup.
+
 ## 0.11.13 - 2026-10-12
 
 Windows MCP pipe ownership and release recovery.

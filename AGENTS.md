@@ -303,6 +303,11 @@ remaining-percent value (0..100); higher means more budget left. The shapes:
   and adds `drift_reason` plus `drift_observed_at`; it preserves last-trusted
   windows when they exist, while a migrated legacy quarantine uses an empty
   window list and `ok: false`.
+  Source 0.11.14 adds presentation-only `read_state` and optional `next_step`
+  to observed rows in `doctor --json`. Undetected sources remain omitted;
+  `verify` reports registry coverage. A `sign-in needed` row preserves
+  `ok: false` and is not live quota evidence. Source class on a failed read
+  declares the adapter's source type, not a successful quota capture.
 - `suggest` is `quotabot.suggest.v1`: `recommended`, `ranked`, `reason`, a
   complete plain-language `explanation`, a guaranteed `fallback`,
   `routing_policy`, `quota_stretch_threshold_percent`, `decision_code`, and

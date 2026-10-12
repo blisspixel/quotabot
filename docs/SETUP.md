@@ -229,14 +229,20 @@ and install-smoke workflows add `--signer-workflow`, `--source-ref`,
 quotabot doctor
 ```
 
-Each row shows a state and, when useful, the exact next step:
+Each collected provider row shows a state and, when useful, the exact next step.
+Tools that have never produced local evidence and stopped local runtimes can be
+omitted; `doctor` is a snapshot of observed sources, not an installation inventory.
+Run `quotabot verify` to inspect the complete built-in registry, including its
+`undetected` sources. A CLI executable alone does not prove a signed-in account.
 
 | State           | Meaning                                                        |
 |-----------------|---------------------------------------------------------------|
 | `live`          | Working now; Claude/Codex have a usable host credential or quotabot grant. |
 | `cached`        | Last good read (age shown in the row); reopen that app or connect quotabot (step 4). |
 | `PROVIDER DRIFT` | A fresh read was rejected; the row is unavailable for routing and shows stale last-trusted quota only when one exists. |
-| `no live data`  | That tool is not installed, not signed in, or has not run on this machine yet. |
+| `no live data`  | A collected source has no quota windows or useful status metadata yet. |
+| `sign-in needed` | A collected subscription has no quota evidence and reports missing or rejected credentials. This is setup readiness, not measured quota. |
+| `ERROR` | A read, transport, or evidence-validation failure; inspect its detail. |
 | `OUT OF QUOTA`  | The binding window is spent; the row shows when it resets.     |
 
 Rows can also include compact trust context: live versus cached state, normalized
@@ -249,6 +255,14 @@ names the spend and when it resets. It does not also mark that line last known
 and repeat that the refresh failed. A rate limit or outage is one short note,
 without "last known". A sign-in repair, and a reset that has already passed,
 still get their own note. A percentage that is not spent still says last known.
+
+`doctor --json` uses the normal snapshot envelope and adds each observed row's
+`read_state` plus `next_step` when one applies. Its `source_class` declares the
+adapter's source type, including on failed attempts; it is not proof of a live
+reading. Require `ok`, trusted windows, freshness, and routing eligibility before
+using quota. Sign-in readiness preserves `ok: false` and the original error.
+Other snapshot commands retain the normalized snapshot fields without these
+doctor presentation fields.
 
 For Claude, read the shared session and weekly windows separately from any
 model-scoped Fable row. A spent or missing Fable pool does not mean the whole

@@ -11,6 +11,7 @@ models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
 > **Current stable:** 0.11.13. quotabot remains under active 0.x development.
+> **Pending publication:** 0.11.14.
 > **Next:** confirm a supported Claude quota integration before expanding
 > credential discovery, prove account-wide freshness on idle machines through
 > a permitted path, and strengthen execution-scope evidence for local-only
