@@ -256,9 +256,11 @@ source setup, and stable-channel resolution on Windows, macOS, and Linux.
 Desktop checks verify Windows/Linux startup and the installed macOS bundle.
 
 Current Windows and macOS artifacts remain unsigned transition artifacts.
-Native publisher signing, real-account idle-machine refresh, Keychain-only
-discovery, stronger local execution-scope evidence, and modern MCP support
-retain their own acceptance criteria in [roadmap Next](ROADMAP.md#next).
+Native publisher signing, supported Claude quota integration, real-account
+idle-machine refresh, stronger local execution-scope evidence, and modern MCP
+support retain their own acceptance criteria in [roadmap Next](ROADMAP.md#next).
+Expanded Claude credential discovery is deferred pending a supported path or
+provider confirmation.
 Automated readiness and synthetic tests do not establish native assistive
 technology interaction or provider-account truth. Build and validation details
 are in [Building](docs/BUILDING.md), [Security](SECURITY.md), and the

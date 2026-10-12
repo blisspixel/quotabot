@@ -83,13 +83,17 @@ desktop widget, and routing.
 ## 1. Make provider evidence available
 
 quotabot normally reuses the account state each provider's own app has already
-saved. Claude, Codex, Grok, and Antigravity also support an optional
-quotabot-owned OAuth grant for longer-lived reads on an idle machine or account
-pinning. There is no quotabot account.
+saved. Codex, Grok, and Antigravity also support an optional quotabot-owned
+OAuth grant for longer-lived reads on an idle machine or account pinning.
+Claude host-token reuse and the implemented grant flow have unresolved
+compatibility with the current provider credential policy. Do not treat this
+implementation as approval to create a new Claude grant or expand token
+discovery. See the [dated policy review](research/2026-10-11-next-quality-review.md)
+and [Claude source boundary](DATA_SOURCES.md#claude-anthropic). There is no quotabot account.
 
 | Provider class | Default evidence | Optional quotabot action | Refresh and scope |
 |---|---|---|---|
-| Claude | Claude Code OAuth token | `quotabot login claude` | live while the host credential is valid; the grant is designed to keep the account-wide read live on an idle machine |
+| Claude | implemented Claude Code token reuse | grant implementation exists; provider-policy compatibility unresolved | existing reads may be live while credentials remain valid; idle-machine refresh is unproven |
 | Codex | Account-wide Codex OAuth usage metadata | `quotabot login codex` | the grant is designed to keep the account-wide read live on an idle machine; mixed session files are never read |
 | Grok | current Grok CLI token and account file | `quotabot login grok` | own grant refreshes a matching locally discovered account and can pin it |
 | Antigravity | signed-in `agy` CLI or IDE account and refresh material, then local state fallback | `quotabot login antigravity` | own grant refreshes a matching locally discovered account and can pin it |
@@ -98,8 +102,10 @@ pinning. There is no quotabot account.
 | Ollama, LM Studio, Lemonade | reachable local server | start the runtime server | live inventory only; never served from cache |
 | Manual entries | user-supplied local window | `quotabot manual set` | self-reported and never refreshed automatically |
 
-Quotabot-owned grants are stored locally and are not synchronized. Run the
-relevant `quotabot login` once on each idle machine that needs its own live read.
+Quotabot-owned grants are stored locally and are not synchronized. For Codex,
+Grok, and Antigravity, run the relevant `quotabot login` on each machine that
+needs that connection. Claude requires a supported metadata authentication path
+or provider confirmation before further grant work.
 
 Providers that depend on local host-app account discovery show "no live data"
 until that app has run on this machine. A quotabot-owned grant is also local to
@@ -280,19 +286,23 @@ quotabot suggest          # where to send the next request (step 6)
 
 ## 4. Keep a provider live on an idle machine or pin an account (optional)
 
-Claude, Codex, Grok, and Antigravity can reuse a valid credential from their host
-app for a zero-setup live read. Because a Claude or Codex host token refreshes
-only while that app runs on the machine, its account-wide read can become stale
-on an idle host. An optional quotabot login creates a separate refreshable grant
-designed to keep the read live there. Refresh and expired-host fall-through have
-deterministic automated coverage, but dated real-account evidence after an idle
-interval remains a tracked 1.0 acceptance item. Always inspect the actual machine
-with `quotabot doctor`. Grok and Antigravity account pinning still relies on
-locally discovered account identity, so run that provider app on this machine
-first and retain its local account state.
+Codex, Grok, and Antigravity can reuse usable host credentials or hold a
+separate refreshable quotabot grant. Codex host credentials can expire on an
+idle machine; its optional grant is designed to keep account-wide reads live.
+Refresh and expired-host fall-through have deterministic automated coverage,
+but dated real-account evidence after an idle interval remains a tracked 1.0
+acceptance item. Inspect the actual machine with `quotabot doctor`. Grok and
+Antigravity account pinning still relies on locally discovered account identity,
+so retain the provider app's local account state.
+
+Claude's existing token reuse and grant implementation are documented below
+for diagnosis. Current provider-policy compatibility is unresolved. Further
+Claude credential discovery and new grant work are deferred until a supported
+metadata path or provider confirmation exists; see the
+[policy review](research/2026-10-11-next-quality-review.md). A fresh host login
+does not prove idle-machine refresh.
 
 ```bash
-quotabot login claude        # opens a browser; paste back the code#state value
 quotabot login codex         # opens a browser; loopback capture
 quotabot login grok          # device-code flow; confirm in the browser
 quotabot login antigravity   # opens a browser; sign in with the account you want
@@ -301,11 +311,11 @@ quotabot verify --require-live --profile=NAME  # strict automation gate
 quotabot logout claude       # or: codex | grok | antigravity
 ```
 
-For Claude, the login succeeds only after the callback page displays the
-`code#state` value. Loading the consent page alone does not validate the request.
-If the browser reports an authorization error after you select Authorize, no
-code was issued: cancel the waiting CLI with Ctrl+C, confirm that quotabot is
-current, and retry the login rather than pasting another value.
+The existing `quotabot login claude` implementation expects a callback page
+with a `code#state` value. Loading consent alone proves neither technical
+completion nor provider permission. If an already running flow reports an
+authorization error, cancel it with Ctrl+C. This description is not a
+recommendation to start or retry a new Claude grant.
 
 These flows need no manual cloud project setup. Antigravity performs its
 provider-required account onboarding request automatically. quotabot stores its
@@ -604,9 +614,10 @@ procedures above.
 
 - **"no live data" for a provider you use:** open that provider's app once so it
   writes or refreshes local state, then re-run `quotabot doctor`. On an idle
-  machine, use `quotabot login claude` or `quotabot login codex` to establish a
-  separately refreshable path, inspect the account-wide row with
-  `quotabot doctor`, and use scoped `quotabot verify --require-live` when a
+  Codex machine, `quotabot login codex` can establish a separately refreshable
+  path. For Claude, use the provider's own sign-in flow and consult the policy
+  boundary above before further integration work. Inspect the
+  account-wide row with `quotabot doctor`, and use scoped `quotabot verify --require-live` when a
   script must enforce freshness.
 - **NVIDIA NIM stays missing:** make sure `NVIDIA_API_KEY` or `nvapi` is visible
   in the same shell that starts quotabot. A valid key shows availability with
@@ -616,9 +627,9 @@ procedures above.
 - **Claude disagrees with interactive `/usage`:** check the row's source and age,
   then run `quotabot check claude --json` and `quotabot verify`. Compare the
   current-window bars and reset times, not `/usage`'s approximate contribution
-  breakdown based on local sessions. On an idle machine, use `quotabot login
-  claude` so quotabot can refresh its own account-wide grant. A cached value
-  whose reset passed stays stale and unavailable; it never becomes an inferred
+  breakdown based on local sessions. A supported Claude idle-machine refresh
+  path remains unresolved; a fresh host sign-in does not validate one. A
+  cached value whose reset passed stays stale and unavailable; it never becomes an inferred
   100% free. Do not automate `claude -p /usage` or `/quota`, because print mode
   executes a prompt rather than exposing a stable quota API. If a fresh
   authoritative row still differs, retain the redacted verification output and

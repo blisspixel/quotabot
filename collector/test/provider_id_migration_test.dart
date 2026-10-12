@@ -1978,34 +1978,32 @@ void main() {
     );
   });
 
-  test('released long legacy stems keep their filenames and lock domains',
-      () async {
-    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final accounts = [
-      for (final length in const [161, 170, 200, 220])
-        List.filled(length, 'a').join(),
-    ];
-    for (var index = 0; index < accounts.length; index++) {
-      final account = accounts[index];
+  // Filename and lock-domain cases each get the unchanged production budget.
+  // Batch limits and resumable progress have dedicated tests above.
+  for (final length in const [161, 170, 200, 220]) {
+    test(
+        'released long legacy stem $length keeps its filename and lock domains',
+        () async {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final account = List.filled(length, 'a').join();
       roleFile('${_oldProvider}_$account.json').writeAsStringSync(
-        jsonEncode(snapshot(account, now + index, 10 + index.toDouble())),
+        jsonEncode(snapshot(account, now, 10)),
       );
-    }
 
-    final report = await coordinateProviderIdCacheMigration(
-      aliases: _aliases,
-      root: root,
-    );
-    expect(report.state, 'complete');
-    expect(report.carriedRecords, accounts.length);
-    setProviderIdAliasesForTesting(_aliases);
+      final migrationElapsed = Stopwatch()..start();
+      final report = await coordinateProviderIdCacheMigration(
+        aliases: _aliases,
+        root: root,
+      );
+      final migrationReason = '${jsonEncode(report.toJson())}; '
+          'elapsed_ms=${migrationElapsed.elapsedMilliseconds}';
+      expect(report.state, 'complete', reason: migrationReason);
+      expect(report.carriedRecords, 1, reason: migrationReason);
+      setProviderIdAliasesForTesting(_aliases);
 
-    for (final account in accounts) {
       final digest = accountIdentityDigest(account);
-      expect(
-        roleFile('${_newProvider}_account_$digest.json').existsSync(),
-        isTrue,
-      );
+      final target = roleFile('${_newProvider}_account_$digest.json');
+      expect(target.existsSync(), isTrue);
       expect(roleFile('${_newProvider}_$account.json').existsSync(), isFalse);
       expect(loadAccountSnapshot(_newProvider, account)?.account, account);
 
@@ -2032,38 +2030,29 @@ void main() {
         ),
       );
       expect(acquired.any((path) => path.contains('oversize_')), isFalse);
-    }
 
-    final canonicalBeforeConflict = <String, String>{};
-    for (var index = 0; index < accounts.length; index++) {
-      final account = accounts[index];
-      final currentMap = snapshot(account, now + 10 + index, 30)
+      final currentMap = snapshot(account, now + 10, 30)
         ..['provider'] = _newProvider;
       final current = ProviderQuota.fromJson(currentMap);
       saveSnapshot(
         current,
-        observedAtMicros: (now + 10 + index) * 1000000,
+        observedAtMicros: (now + 10) * 1000000,
       );
-      final target = roleFile(
-        '${_newProvider}_account_${accountIdentityDigest(account)}.json',
-      );
-      canonicalBeforeConflict[account] = target.readAsStringSync();
+      final canonicalBeforeConflict = target.readAsStringSync();
       roleFile('${_oldProvider}_$account.json').writeAsStringSync(
-        jsonEncode(snapshot(account, now + 20 + index, 60)),
+        jsonEncode(snapshot(account, now + 20, 60)),
       );
-    }
 
-    final conflict = await coordinateProviderIdCacheMigration(
-      aliases: _aliases,
-      root: root,
-    );
-    expect(conflict.state, 'partial');
-    expect(conflict.quarantinedRecords, accounts.length);
-    for (final account in accounts) {
-      final target = roleFile(
-        '${_newProvider}_account_${accountIdentityDigest(account)}.json',
+      final conflictElapsed = Stopwatch()..start();
+      final conflict = await coordinateProviderIdCacheMigration(
+        aliases: _aliases,
+        root: root,
       );
-      expect(target.readAsStringSync(), canonicalBeforeConflict[account]);
+      final conflictReason = '${jsonEncode(conflict.toJson())}; '
+          'elapsed_ms=${conflictElapsed.elapsedMilliseconds}';
+      expect(conflict.state, 'partial', reason: conflictReason);
+      expect(conflict.quarantinedRecords, 1, reason: conflictReason);
+      expect(target.readAsStringSync(), canonicalBeforeConflict);
       expect(
         providerIdMigrationTierQuarantined(
           _newProvider,
@@ -2072,8 +2061,8 @@ void main() {
         ),
         isTrue,
       );
-    }
-  });
+    });
+  }
 
   test('separate coordinators fail closed while one process owns startup',
       () async {

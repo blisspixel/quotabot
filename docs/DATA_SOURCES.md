@@ -334,7 +334,9 @@ PROV-DM conformance.
   idle machine it eventually expires. quotabot then refreshes its own grant if
   connected; if neither token works it reports the token as expired (pointing at
   `claude` or `quotabot login claude`) and the cache serves the last trusted
-  value marked stale.
+  value marked stale. Those repair strings describe the existing implementation;
+  they do not establish provider permission or recommend a new grant. Follow the
+  current Claude policy boundary above before further authentication work.
 
 ## Grok (xAI)
 
@@ -504,8 +506,11 @@ Antigravity can run two ways:
 - Opportunistic: reuse the token the CLI or IDE currently holds for the bounded
   provider operations documented above. This is live only while the credential
   remains usable.
-- Connected: after `login claude`, `login codex`, `login grok`, or
-  `login antigravity`, quotabot holds its own OAuth grant and refreshes silently.
+- Connected implementation: after `login claude`, `login codex`, `login grok`,
+  or `login antigravity`, quotabot holds its own OAuth grant and refreshes silently.
+  Claude compatibility with the current provider credential policy remains
+  unresolved, as documented in the [Claude boundary](#claude-anthropic); this description
+  is not a recommendation to create new Claude grants.
   All work without manual cloud project setup. Antigravity performs its
   provider-required account onboarding request automatically. Grok uses the
   device-code flow; Antigravity and Codex use a loopback plus PKCE

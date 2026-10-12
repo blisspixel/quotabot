@@ -8,6 +8,11 @@ Notable changes to quotabot. Newest first.
 
 Windows MCP pipe ownership and release recovery. Pending publication.
 
+- Include the unpublished 0.11.12 MCP maintenance: SDK 2.4.2, a 256 KiB UTF-8
+  per-message ceiling, incomplete-frame overflow closure, and explicit legacy
+  initialization through 2025-11-25. Preserve subscriptions and reject invalid
+  tool arguments before collection, cache access, or lease writes. Keep protocol
+  errors bounded and avoid echoing rejected frames or unsupported resource URIs.
 - Replace only Windows pipe input with an owned reader while retaining the MCP
   SDK parser, 256 KiB frame limit, subscriptions, and serialized output queue.
   Bound read-ahead to one 64 KiB chunk; preserve byte order and pause/cancel

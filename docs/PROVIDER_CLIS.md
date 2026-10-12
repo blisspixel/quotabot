@@ -64,13 +64,15 @@ and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
   [current Fable plan guide](https://support.claude.com/en/articles/15424964-claude-fable-models-on-your-plan).
 - quotabot reads: the OAuth usage and profile metadata endpoints, reusing the
   token Claude Code stores.
-  Live with no quotabot login when Claude Code has a valid signed-in token here;
-  `quotabot login claude` adds a self-refreshing grant designed to keep the
-  account-wide read live on a machine you have not opened Claude Code on
-  recently. Inspect the result with `quotabot doctor`, and use scoped
-  `quotabot verify --require-live` when automation must enforce freshness;
-  real-account evidence after an idle interval remains a tracked 1.0 acceptance
-  item.
+  The existing implementation can read live metadata with a usable local token
+  and includes `quotabot login claude` grant refresh. Compatibility with the
+  current provider credential policy remains unresolved; these technical paths
+  are not a recommendation to create new grants or expand token discovery.
+  See the [policy review](research/2026-10-11-next-quality-review.md). Inspect
+  source and age with `quotabot doctor`, and use scoped
+  `quotabot verify --require-live` when automation must enforce freshness.
+  A provider-permitted refresh path and real-account evidence after an idle
+  interval remain 1.0 acceptance requirements.
 - The usage endpoint does not return a stable account id, but the profile
 endpoint returns account and organization ids. quotabot hashes those ids to
 form the stable live snapshot, cache, drift, and lease identity and to collapse

@@ -178,8 +178,9 @@ release adds reset confirmation, provider-scoped metadata retry coordination,
 explicit admission evidence and current Grok billing support.
 The previous increments provide inspectable desktop models, conservative
 hardware evidence, and tested advisory harness and Agent Plugins setup. Further
-work still needs native Claude Keychain discovery, idle-machine grant evidence,
-and native identity before expanding local-only promises.
+work still needs supported Claude quota authentication before expanded Keychain
+discovery, dated idle-machine refresh evidence through permitted paths, and
+native identity before expanding local-only promises.
 The September research records the current code baseline, primary sources,
 uncertainties, and concrete tests for
 [local models](docs/research/2026-09-local-models.md),
@@ -556,9 +557,10 @@ The repository workflow and deterministic verification work are prepared, but
 final closure requires the project owner to provision a Windows code-signing
 identity, Apple Developer Program membership, a Developer ID identity, protected
 release credentials, and successful native rehearsals. Continue native macOS
-and Linux provider records, native accessibility smoke, and dated idle-machine
-validation of the Claude and Codex grants now; repeat the required evidence on
-the signed candidate before the frozen 1.0 rehearsal.
+and Linux provider records and native accessibility smoke. Collect dated
+idle-machine refresh evidence through supported paths; resolve Claude's current
+credential-policy compatibility before further grant work. Repeat the required
+evidence on the signed candidate before the frozen 1.0 rehearsal.
 
 ### Local-resource visibility
 
@@ -691,7 +693,7 @@ milestone sections below.
 |---|---|---|---|
 | Core contracts and automated quality | Stable 0.11.11 | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the 0.11.11 immutable release and unpinned three-OS Latest smoke passed; earlier live RC-to-stable evidence remains historical | Keep the current stable line green and resolve any new reproducible defect before signing activation |
 | Integration trust boundary | Stable 0.11.11 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
-| Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
+| Provider truth and drift handling | Partial | Drift fails closed; the existing Claude flow has technical live evidence, while current credential-policy compatibility is unresolved; token parsing, account cleanup, disconnect, parser, and cache provenance have deterministic coverage | Establish a supported Claude metadata path before further grant work; validate idle refresh through permitted paths, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
 | Provider-ID cache continuity | Stable 0.10.1 | The bounded coordinator, exact role validation, mixed-version locks, durable prepared receipts, crash recovery, branch-conflict quarantine, and empty shipped alias map passed [ordinary hosted CI](https://github.com/blisspixel/quotabot/actions/runs/33542805801), the immutable [candidate release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1-rc.1), and the complete [three-OS lifecycle](https://github.com/blisspixel/quotabot/actions/runs/33562140830) | Add an alias only for a real provider rename and retain the same fail-closed migration evidence when one exists |
 | Installation and update | Stable 0.11.11 | The immutable stable release, unpinned GitHub Latest smoke, three-OS stable-channel, clean install, prior-stable upgrade, persistence, source-setup, desktop installation, Windows/Linux startup, and macOS bundle checks passed; earlier releases retain a historical live RC-to-stable update record | Repeat the complete path on the signed rehearsal and frozen 1.0 candidate |

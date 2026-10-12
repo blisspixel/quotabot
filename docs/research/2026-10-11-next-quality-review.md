@@ -522,3 +522,36 @@ All 13 focused diagnostic checks passed locally with the isolated Microsoft
 debugger present and no skips; the real debugger case reported the deadline
 outcome. Formatting and strict analysis passed. Full local and hosted gates on
 the corrected signed tree remain required before publication.
+
+### Legacy migration fixture isolation
+
+The clean `f6f5d7f` local gate stopped at the four-length legacy filename test:
+the first migration returned `partial` instead of `complete` after approximately
+16 seconds. That receipt records 2,395 passed collector tests, three skips, and
+one failure; subsequent coverage, desktop, and integration gates did not run.
+The test did not retain migration report fields, so the exact reason for that
+partial result is unproven. The failed gate remains evidence, not a passing run.
+
+The unchanged test passed separately. A second focused run with coverage also
+passed and measured 12.790 seconds for its initial four-record migration, with
+four carried records, no invalid or quarantined records, and no truncation.
+That shows little margin beneath the unchanged 15-second production budget.
+It supports budget-pressure susceptibility without proving the earlier cause.
+
+The filename contract now runs independently for lengths 161, 170, 200, and 220.
+Each case still requires completion under the default production limits, one
+carried record, canonical hashed filenames, both exact legacy/current lock
+domains, no oversize substitution, one quarantined conflict, and unchanged
+canonical bytes. Report fields and elapsed time appear only in assertion failure
+reasons. Dedicated bulk, bounded-duration, and resumable-progress tests remain
+unchanged. Independent review confirmed that all per-account assertions remain.
+All six focused checks passed with coverage: the four filename cases plus the
+unchanged resumable-progress and bounded-duration cases. Strict analysis and
+formatting passed, as did the 24 release-handoff checks. Full corrected-tree
+local and hosted gates remain required before publication.
+
+The active setup and strategy documents now distinguish the existing Claude
+implementation from unresolved provider-policy compatibility and defer new
+grants and expanded discovery. Release 0.11.13 notes explicitly include the
+unpublished 0.11.12 MCP maintenance so publication includes its compatibility
+and validation changes. The stable release designation remains 0.11.11.
