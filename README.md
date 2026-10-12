@@ -13,9 +13,10 @@ on-device capacity directly or fall back when subscription caps are low.
 > **Current stable:** 0.11.11. quotabot remains under active 0.x development.
 > **Pending publication:** 0.11.13.
 > **Release validation:** the protected 0.11.12 candidate remains unpublished.
-> **Next:** support Claude discovery for macOS Keychain sign-ins and prove
-> account-wide quota refresh on idle machines, then strengthen execution-scope
-> evidence for local-only advice. Native signing proceeds alongside product
+> **Next:** confirm a supported Claude quota integration before expanding
+> credential discovery, prove account-wide freshness on idle machines through
+> a permitted path, and strengthen execution-scope evidence for local-only
+> advice. Native signing proceeds alongside product
 > development and remains a 1.0 release gate. See [roadmap Next](ROADMAP.md#next)
 > and the [documentation index](docs/README.md).
 

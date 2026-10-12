@@ -59,9 +59,12 @@ by being correct, quiet, and predictable, not by being large.
   usage read, that read is the source of truth even on a machine the user has
   not actively used the tool on recently. A configured refreshable quotabot
   grant must keep that read live by refreshing its own grant rather than
-  depending on the host app to have run there. The implementation and fixtures
-  exist; dated real-account idle-machine evidence remains a 1.0 gate. Without a
-  usable host credential or local grant, it preserves last-trusted evidence as
+  depending on the host app to have run there, through provider-permitted
+  authentication. Current Claude credential-policy compatibility remains
+  unresolved; local ownership alone does not establish permission. The
+  implementation and fixtures exist; dated real-account idle-machine evidence
+  remains a 1.0 gate. Without a usable host credential or local grant, it
+  preserves last-trusted evidence as
   stale and gives an explicit repair step. A machine-scoped fallback is only
   ever shown when nothing account-wide is available, and it is always labeled
   as this-machine.
@@ -97,8 +100,16 @@ shared Claude captures, and concrete local
 model advice. The [October 11 issue review](docs/research/2026-10-11-issue-review.md)
 records decisions and validation limits.
 
-Follow-up priorities remain Claude Keychain discovery and idle-machine account
-proof, positive local execution scope, and modern MCP compatibility. Extend
+Follow-up priorities are a supported Claude quota integration and idle-machine
+account proof, positive local execution scope, and modern MCP compatibility.
+The October 12 primary-policy review supersedes the earlier unconditional
+Keychain-discovery priority: defer expanded token discovery and new OAuth/grant
+work until a supported metadata authentication path or provider confirmation
+exists. Existing metadata-only behavior is described, not certified as permitted.
+Research a user-configured projection of documented status-line quota fields
+without credentials, host-setting writes, or requests to populate them. Resolve
+provider capture age, missing windows, and account binding before routing; this
+session-fed alternative does not prove idle-machine freshness. Extend
 successful-read sharing to another provider only after proving its credential and
 account identity seam; profile settings and unproven account sharing are deferred.
 
@@ -109,8 +120,8 @@ Use these concrete increments to assess progress:
 | Increment | User outcome | Acceptance boundary |
 |---|---|---|
 | Bounded MCP maintenance, source 0.11.13 | A malformed stdio peer cannot buffer an unlimited frame; existing clients keep working. | SDK 2.4.2, explicit legacy mode, 256 KiB UTF-8 ceiling, incomplete-frame closure, no post-overflow dispatch, subscription delivery and cancellation, four legacy revisions, client fallback, independent review, full gates and published install smoke. |
-| Claude host credential discovery | A signed-in user can see Claude without another login, including a selected alternate config directory. | One bounded injectable discovery path for collection and cache identity; native Keychain-only and file-fallback evidence; locked store, replacement, mismatch, disconnect, own-grant fallback; no host writes or guessed plan dates. |
-| Idle-machine account truth | The quota view stays current when work happens on another machine. | Sanitized two-machine comparison across host-token expiry and quotabot-owned refresh; original capture/reset scope visible; host files unchanged; no collection inference. |
+| Supported Claude quota integration | A signed-in user can see clearly scoped quota through a permitted integration. | First establish a supported metadata path or provider confirmation before expanding token handling. Research a credential-free status-line projection with original response age and account isolation. If credential discovery is permitted, require one bounded path for collection and cache identity, native storage evidence, replacement/disconnect tests, and no host writes or guessed plan dates. |
+| Idle-machine account truth | The quota view stays current when work happens on another machine. | A provider-permitted refresh path plus sanitized two-machine comparison across credential expiry; original capture/reset scope visible; host files unchanged; no collection inference. Session-fed status-line evidence alone cannot satisfy this gate. |
 | Positive execution scope | A stronger local-only choice explains where execution is proven. | Producer plus endpoint-scope evidence, direct/forwarded/WSL/LM Link/composite cases; unknown stays unknown; loaded context and advertised maximum remain separate. |
 | Modern MCP compatibility | Current clients can use the modern wire path without losing older clients. | Separate stdio and authenticated HTTP matrix for discovery-free calls, mirrored metadata, private cache scope, independent subscriptions, cancellation, bounds, and shutdown against exact clients. |
 
@@ -229,7 +240,12 @@ support. This maintenance does not wait for post-1.0 stabilization.
    `daily-cloudcode-pa.googleapis.com`), validated on 2026-09-08 against a
    Google AI Pro account whose Gemini five-hour and weekly buckets were
    consumed while the non-prefixed Cloud Code Assist host still reported a
-   full unused balance. The remaining gap is Claude on macOS: it can store its
+   full unused balance. Before expanding Claude credentials, establish a
+   supported metadata authentication path or provider confirmation under the
+   current credential policy. Investigate a user-configured, credential-free
+   status-line quota projection with explicit age and account limits. The
+   following host-discovery design is deferred until permission is established.
+   The remaining storage gap is Claude on macOS: it can store its
    credentials only in the login Keychain, so a Keychain-only sign-in is
    undiscoverable without a usable quotabot-owned grant; `os_secret_store.dart` already
    implements a Keychain read but is wired only to Antigravity. Use one bounded,

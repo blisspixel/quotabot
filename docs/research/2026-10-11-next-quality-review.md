@@ -424,3 +424,62 @@ those balances separate from subscription headroom. Future support requires
 bounded provider-owned balance and expiry metadata, exact organization and
 credential scope, and explicit continuation controls before any spend advice.
 This research changes documentation, not routing eligibility or collector calls.
+
+## October 12 credential-policy review
+
+Rechecked October 12 UTC with independent review. The current
+[credential-use policy](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)
+restricts third-party Claude.ai login and collecting, storing, or intermediating
+credentials/tokens. The [authentication page](https://code.claude.com/docs/en/authentication#credential-management)
+describes Claude Code's own storage and configuration scope; it does not grant
+external-reader access. No explicit quota-only exception was found.
+
+Current collection reuses a host OAuth token or refreshes a locally stored grant
+obtained through Claude Code's public OAuth client. The default grant requests
+`user:profile user:inference`; its storage being quotabot-owned does not prove a
+separately authorized third-party client. Reads make no inference calls, but
+compatibility with the credential policy remains unresolved. This is evidence
+and an implementation-planning limit, not a legal determination or a silent
+authentication change. It supersedes the earlier unconditional proposal to
+expand Keychain discovery; ROADMAP Next now gates that work on a supported
+metadata path or provider confirmation.
+
+Claude Code documents credential-free [status-line quota fields](https://code.claude.com/docs/en/statusline#rate-limit-usage):
+five-hour and seven-day used percentages and reset epochs, present for Pro/Max
+after an existing session response. Each window may be independently absent and
+is dropped after reset. Gateway spend limits are separate. This is a research
+alternative, not a shipped collector or a Team/Enterprise entitlement claim.
+Never start a model request merely to populate the fields. A future user-configured
+projection must exclude session titles, prompt identifiers, transcript/workspace
+paths, and raw payloads before quotabot ingestion. Repeated script execution
+cannot invent a fresh provider capture; source age and account binding must be
+resolved before routing. Session-fed evidence cannot satisfy idle-machine proof.
+
+### Windows desktop checkout paths
+
+The pinned app lock resolves `native_toolchain_c` 0.19.2. Its MSVC invocation
+passes absolute source and output paths through `cmd.exe`; the official
+[0.19.3 changelog](https://pub.dev/packages/native_toolchain_c/versions/0.19.3/changelog)
+identifies and fixes the resulting space-path defect. Existing SDK remapping
+does not remap checkout or hook-output paths. BUILDING now requires a space-free
+absolute checkout for Windows desktop compilation and names the portable release
+fallback. This does not establish a defect in a built desktop artifact. The
+collector lock already resolves 0.19.3; overriding Flutter's dependency constraints
+or changing its pinned toolchain is not part of this maintenance release.
+
+### Isolated source-smoke compiler discovery
+
+The clean signed `25c389d` local gate passed all 2,399 collector tests with
+three platform/environment skips and 91.63 percent line coverage, plus all 455
+desktop tests with one skip and 87.52 percent coverage. It then failed the
+source MCP harness smoke: the sanitized child environment made `vswhere` report
+no installed compiler for the native build hook. A controlled probe found zero
+instances with the original environment and one when either `ProgramData` or
+`SYSTEMDRIVE` was restored. This was a compiler-discovery failure before MCP
+initialization, not evidence of a runtime shutdown failure.
+
+The harness now retains those two machine installation roots while keeping
+user, provider, cache, and temporary directories isolated. Its 26 focused tests
+pass with the original response and exit deadlines. Independent review found
+no weakened catalog assertions or restored user credential scope. The full
+corrected-tree gate remains required; the earlier failed receipt is preserved.

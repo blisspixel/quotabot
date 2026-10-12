@@ -196,6 +196,18 @@ PROV-DM conformance.
 
 ## Claude (Anthropic)
 
+- Credential-policy boundary, checked October 12 UTC: Anthropic's
+  [authentication and credential-use policy](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)
+  restricts third-party Claude.ai login and credential/token handling. Its
+  storage documentation does not establish permission for an external quota
+  reader, and no quota-only exception was found. Compatibility of the existing
+  host-token reuse and locally stored grants remains unresolved. Metadata-only
+  reads and local ownership are technical properties, not provider authorization.
+  Expanded discovery and new OAuth/grant work are deferred pending a supported
+  path or provider confirmation. This records policy evidence without making a
+  legal determination or silently changing shipped authentication. See the
+  [dated review](research/2026-10-11-next-quality-review.md#october-12-credential-policy-review).
+
 - Billing boundary, checked October 11: [monthly API credits](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-and-team-plans)
   belong to a linked Console organization and are separate from OAuth plan
   limits. This collector does not measure that credit balance. Credit eligibility

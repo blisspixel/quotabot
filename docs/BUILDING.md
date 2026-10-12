@@ -48,6 +48,16 @@ SDK whose path contains spaces: Windows uses a junction view, and macOS/Linux
 copy the launcher scripts and dart-sdk into a space-free tree. Junctions, subst
 drives, and 8.3 short names are not enough, because Dart reports the long path.
 
+For Windows desktop source builds, use a checkout whose absolute path contains
+no spaces, such as `C:\GitHub\quotabot`. The pinned Flutter dependency resolves
+`native_toolchain_c` 0.19.2, whose MSVC source/output quoting defect is
+[documented as fixed in 0.19.3](https://pub.dev/packages/native_toolchain_c/versions/0.19.3/changelog).
+SDK remapping does not repair checkout or hook-output paths. Keep the pinned
+toolchain and lockfiles; move the checkout or use the verified portable desktop
+release. A desktop compilation failure still permits CLI installation and
+preserves the prior installed desktop. The collector's separate 0.19.3 lock and
+prebuilt payloads are distinct from this desktop source-build limitation.
+
 The CLI command is exposed through your per-user bin
 (`%LOCALAPPDATA%\quotabot\bin` on Windows, `~/.local/bin` on macOS and Linux).
 On macOS and Linux, that command shim launches the stable complete payload at
