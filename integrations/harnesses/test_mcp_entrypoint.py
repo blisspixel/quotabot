@@ -52,7 +52,18 @@ class McpEntrypointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="quotabot mcp smoke ") as temporary:
             env = {
                 name: os.environ[name]
-                for name in ("PATH", "SYSTEMROOT", "SystemRoot", "WINDIR", "PATHEXT")
+                # Visual Studio discovers its machine-wide installation catalog
+                # through these Windows roots. Keep user and provider state
+                # isolated below, while allowing source native assets to build.
+                for name in (
+                    "PATH",
+                    "SYSTEMROOT",
+                    "SystemRoot",
+                    "SYSTEMDRIVE",
+                    "ProgramData",
+                    "WINDIR",
+                    "PATHEXT",
+                )
                 if name in os.environ
             }
             for name in (

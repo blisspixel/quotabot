@@ -68,7 +68,8 @@ Write-Host "=== quotabot installer ==="
 function Install-QuotabotPayload {
     param(
         [Parameter(Mandatory)][string]$SourceRoot,
-        [Parameter(Mandatory)][string]$InstallRoot
+        [Parameter(Mandatory)][string]$InstallRoot,
+        [switch]$RequiresPipeBridge
     )
 
     New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
@@ -122,6 +123,10 @@ function Install-QuotabotPayload {
         }
         if (-not (Test-Path -LiteralPath (Join-Path $stagedPayload 'lib\sqlite3.dll') -PathType Leaf)) {
             throw 'Staged payload is missing lib\sqlite3.dll'
+        }
+        if ($RequiresPipeBridge -and
+            -not (Test-Path -LiteralPath (Join-Path $stagedPayload 'lib\quotabot_pipe_input.dll') -PathType Leaf)) {
+            throw 'Staged payload is missing lib\quotabot_pipe_input.dll'
         }
         Move-Item -LiteralPath $stagedPayload -Destination $versionRoot
         $versionStaged = $true
@@ -310,7 +315,11 @@ try {
         (-not $expectedVersion -and $reportedVersion -notmatch '^quotabot [0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?$')) {
         throw "Downloaded quotabot executable reported an unexpected version: $reportedVersion"
     }
-    Install-QuotabotPayload -SourceRoot $extractPath -InstallRoot $installRoot
+    # Use the verified executable version, including for an unpinned latest
+    # download. Older rollback payloads legitimately predate this native asset.
+    $payloadVersion = [version](($reportedVersion.Substring(9) -split '-')[0])
+    Install-QuotabotPayload -SourceRoot $extractPath -InstallRoot $installRoot `
+        -RequiresPipeBridge:($payloadVersion -ge [version]'0.11.13')
     Write-Host "Installed to $installRoot"
 } catch {
     Write-Error "Install failed: $($_.Exception.Message). Make sure the release publishes '$assetName' and its required .sha256 sidecar at https://github.com/$repo/releases"

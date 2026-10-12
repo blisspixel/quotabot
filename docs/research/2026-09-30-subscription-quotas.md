@@ -1,5 +1,11 @@
 # Claude and Codex quota review
 
+> Update 2026-10-11: the October 7 notice adds linked-Console API credits for
+> eligible Max and Team plans. Subscription-authenticated SDK use still draws
+> plan limits; the paused June SDK-credit proposal remains unavailable. See the
+> [dated correction](2026-10-11-next-quality-review.md#october-7-billing-update).
+> The original dated observations below are preserved as historical evidence.
+
 Observed 2026-09-30. This review uses fetched provider documentation and the
 repository source. It did not read host credentials, contact authenticated
 quota endpoints, or run inference. Public policy, implemented parsing, and

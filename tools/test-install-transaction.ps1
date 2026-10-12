@@ -191,6 +191,30 @@ try {
     Assert-NoTransactionDebris -InstallRoot $successInstall
     Assert-VersionCount -InstallRoot $successInstall -Expected 1
 
+    # Legacy generations remain installable. A modern generation must retain
+    # its pipe asset before activation, including the source setup path.
+    $incompleteSource = Join-Path $testRoot "$label-missing-pipe-source"
+    New-TestPayload -Root $incompleteSource -Version '0.11.13'
+    $missingBridgeRejected = $false
+    try {
+      Install-QuotabotPayload -SourceRoot $incompleteSource -InstallRoot $successInstall -RequiresPipeBridge
+    } catch {
+      $missingBridgeRejected = $_.Exception.Message -like '*missing lib\quotabot_pipe_input.dll*'
+      if (-not $missingBridgeRejected) { throw }
+    }
+    if (-not $missingBridgeRejected) {
+      throw "$relativeScript activated a modern payload without its pipe bridge."
+    }
+    $preservedGeneration = Assert-ActivatedPayload -InstallRoot $successInstall -Expected 'new'
+    if ($preservedGeneration -ine $firstGeneration) {
+      throw "$relativeScript changed the active generation after rejecting a missing bridge."
+    }
+    Assert-NoTransactionDebris -InstallRoot $successInstall
+    Assert-VersionCount -InstallRoot $successInstall -Expected 1
+    Set-Content -LiteralPath (Join-Path $incompleteSource 'lib\quotabot_pipe_input.dll') -Value 'bridge' -NoNewline
+    Install-QuotabotPayload -SourceRoot $incompleteSource -InstallRoot $successInstall -RequiresPipeBridge
+    $null = Assert-ActivatedPayload -InstallRoot $successInstall -Expected '0.11.13'
+
     $secondSource = Join-Path $testRoot "$label-second-source"
     New-TestPayload -Root $secondSource -Version 'newer'
     Install-QuotabotPayload -SourceRoot $secondSource -InstallRoot $successInstall
@@ -347,6 +371,33 @@ try {
   }
 
   $setupScript = Join-Path $repositoryRoot 'tools\setup.ps1'
+  Import-InstallFunction -Path $setupScript -Name 'Install-QuotabotDartRunShim'
+  $shimToolchain = Join-Path $testRoot 'shim toolchain'
+  $shimInstall = Join-Path $testRoot 'shim install'
+  $shimCollector = Join-Path $testRoot 'shim collector'
+  New-Item -ItemType Directory -Force -Path $shimToolchain, $shimInstall, $shimCollector | Out-Null
+  $fakeDart = Join-Path $shimToolchain 'dart.bat'
+  $existingLauncher = Join-Path $shimInstall 'quotabot.cmd'
+  Set-Content -LiteralPath $existingLauncher -Value 'previous launcher' -NoNewline
+  Set-Content -LiteralPath $fakeDart -Value "@echo off`r`nexit /b 7" -Encoding ASCII
+  $shimFailed = $false
+  try {
+    Install-QuotabotDartRunShim -DartBin $shimToolchain -CollectorDir $shimCollector -InstallDir $shimInstall
+  } catch {
+    $shimFailed = $_.Exception.Message -like '*Existing launchers were preserved*'
+    if (-not $shimFailed) { throw }
+  }
+  if (-not $shimFailed) { throw 'Setup installed a source shim whose native preflight failed.' }
+  Assert-Content -Path $existingLauncher -Expected 'previous launcher'
+  if (Test-Path -LiteralPath (Join-Path $shimInstall 'quotabot.bat')) {
+    throw 'Failed source preflight wrote a second launcher.'
+  }
+  Set-Content -LiteralPath $fakeDart -Value "@echo off`r`nexit /b 0" -Encoding ASCII
+  Install-QuotabotDartRunShim -DartBin $shimToolchain -CollectorDir $shimCollector -InstallDir $shimInstall
+  $installedShim = Get-Content -LiteralPath $existingLauncher -Raw
+  if (-not $installedShim.Contains($shimCollector) -or -not $installedShim.Contains($fakeDart)) {
+    throw 'A validated source shim did not retain its selected checkout and toolchain.'
+  }
   Import-InstallFunction -Path $setupScript -Name 'Install-QuotabotDesktopPayload'
   Import-InstallFunction -Path $setupScript -Name 'Install-QuotabotPayloadPair'
   Import-InstallFunction -Path $setupScript -Name 'Get-QuotabotSourceReleaseTag'

@@ -37,9 +37,11 @@ flowchart LR
 The harness owns the final selection and request. quotabot receives only the
 bounded metadata needed to explain availability.
 
-The immediate product gain is reliable provider evidence: discover Claude
-credentials for Keychain-only macOS sign-ins and prove account-wide refresh on
-idle machines. Every recommendation depends on those inputs. The following
+The immediate product gain is reliable provider evidence through a supported
+Claude quota integration and account-wide refresh on idle machines. Establish
+provider permission before expanding Claude credential discovery or grants;
+research credential-free, explicitly scoped status-line metadata in parallel. Every recommendation depends on those inputs. The
+following
 gains make that evidence useful in everyday work: inspectable local-model
 choices, dependable native behavior, and explicit connections to the agent
 harnesses people use. The 0.11.0 increment adds
@@ -192,10 +194,13 @@ turns into paid API spend.
   acquisition gap for a first-class 1.0 release.
 - Native keyboard and screen-reader evidence is still incomplete even though
   automated focus, scaling, contrast, and semantics coverage is strong.
-- Claude and Codex grants still need dated idle-machine validation against real
-  accounts. Claude credential generations now fail closed and cannot share
-  cache or drift evidence, but the usage endpoint still provides no
-  provider-backed identity for durable account labels or deduplication.
+- Idle-machine refresh still needs dated real-account evidence. Claude first
+  needs a provider-permitted metadata authentication path or confirmation;
+  existing technical grant tests do not establish permission. Its usage endpoint
+  has no stable account id, but current profile account and organization ids
+  establish a hashed pool identity. Only matching provider-proven pools share
+  captures and preserve cache/drift continuity; unproven credentials remain
+  isolated. See the [policy review](research/2026-10-11-next-quality-review.md).
 - Calibration now withholds thin-sample headlines and validates a fitted
   lookback on later history, but it still needs rolling-origin evaluation,
   block-aware uncertainty, and a broader sanitized replay corpus before any
@@ -322,11 +327,14 @@ evidence, versions, and uncertainty. The rationale for the order is:
 ### Immediate product priority: reliable provider evidence
 
 A signed-in account that cannot be discovered and a stale machine that cannot
-refresh its quota both undermine the default recommendation. Close the remaining
-Claude macOS credential-source gap through the existing adapter and identity
-seams, then collect dated idle-machine evidence for the shipped grant recovery.
-Deterministic tests prove recovery behavior; a real account cross-check proves
-that the live read reflects the account the user actually consumes.
+refresh its quota both undermine the default recommendation. Establish a
+supported Claude metadata integration before expanding token discovery or new
+grants. A credential-free status-line projection needs original response age
+and account isolation; session-fed evidence cannot prove idle-machine freshness.
+After permission is established, validate supported native credential sources
+and collect dated two-machine evidence across expiry. Deterministic tests prove
+implemented recovery behavior; a real account cross-check separately establishes
+which account a live read reflects.
 
 Signing provisioning proceeds independently. Missing owner identities do not
 block these product fixes or the native evidence that can be gathered now.
@@ -394,8 +402,10 @@ rehearsals still require project-owner authority.
 ### After signed-artifact rehearsal: close the remaining 1.0 evidence gates
 
 The remaining gates are native macOS and Linux provider records, dated Claude
-and Codex idle-machine grant validation, native accessibility smoke, and the
-final exact-candidate rehearsal. v0.9.9 proves the tag, artifact, checksum,
+and Codex idle-machine refresh validation through supported provider paths,
+native accessibility smoke, and the final exact-candidate rehearsal. Claude
+credential-policy compatibility must be resolved before further grant work.
+v0.9.9 proves the tag, artifact, checksum,
 provenance, and lifecycle foundation. Stable v0.10.2 adds explicit GitHub Latest,
 bounded stable-channel discovery, self-update, and canonical unversioned
 acquisition coverage, but all evidence

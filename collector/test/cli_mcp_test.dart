@@ -5,9 +5,14 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:mcp_dart/mcp_dart.dart';
 import 'package:quotabot_collector/mcp_server_entrypoint.dart';
+import 'package:quotabot_collector/util.dart'
+    show enforceOwnerOnlyDirectoryAsync;
 import 'package:test/test.dart';
 
+import 'support/native_exit_diagnostics.dart';
 import 'support/process_exit_diagnostics.dart';
+import 'support/stdin_eof_diagnostics.dart';
+import 'support/vm_exit_diagnostics.dart';
 
 const _token = '0123456789abcdef0123456789abcdef';
 
@@ -23,10 +28,8 @@ Map<String, Object?> _initialize(int id, {String revision = '2025-11-25'}) => {
     };
 
 Future<int> _exitWithin(
-  Process process,
-  Duration deadline,
-  List<String> diagnostics,
-) =>
+        Process process, Duration deadline, List<String> diagnostics,
+        {File? vmServiceInfo, bool inspectStdin = false}) =>
     process.exitCode.timeout(deadline, onTimeout: () async {
       final marker = diagnostics.lastIndexWhere((line) =>
           line == 'fixture CLI main returned' ||
@@ -43,9 +46,28 @@ Future<int> _exitWithin(
       final phases = bounded
           .map((line) => line.length <= 200 ? line : line.substring(0, 200))
           .join(' | ');
-      final snapshot = await snapshotTimedOutProcess(process, diagnostics);
+      final vmMarkers =
+          diagnostics.where((line) => line.startsWith('fixture VM pid: '));
+      final vmPid = vmMarkers.length == 1
+          ? int.tryParse(vmMarkers.single.substring('fixture VM pid: '.length))
+          : null;
+      final observedState = await Future.wait([
+        snapshotTimedOutProcess(process, diagnostics),
+        vmServiceInfo != null && vmPid != null
+            ? snapshotTimedOutVm(vmServiceInfo, vmPid,
+                inspectStdin: inspectStdin)
+            : Future.value('VM inspection not enabled'),
+      ]);
+      final snapshot = observedState[0];
+      final vm = observedState[1];
+      final native = await snapshotTimedOutNative(process, snapshot);
+      // The open-stdin deadline has already failed. Preserve that failure even
+      // if closing the parent's writer now releases the remaining resource.
+      final eof = Platform.isWindows
+          ? await observeStdinEofAfterFailure(process)
+          : 'stdin EOF observation not enabled';
       throw TimeoutException(
-          'MCP did not exit; stderr: $phases; process state: $snapshot',
+          'MCP did not exit; stderr: $phases; process state: $snapshot; VM state: $vm; native state: $native; post-failure observation: $eof',
           deadline);
     });
 
@@ -54,6 +76,7 @@ void main() {
   late HttpServer runtime;
   late StreamSubscription<HttpRequest> runtimeRequests;
   var collections = 0;
+  final vmServiceFiles = <int, File>{};
 
   setUp(() async {
     temp = Directory.systemTemp.createTempSync('quotabot_cli_mcp_');
@@ -75,15 +98,31 @@ void main() {
   Future<Process> start(List<String> args,
       {bool standalone = false,
       String? entrypoint,
-      bool traceShutdown = true}) async {
+      bool traceShutdown = true,
+      bool inspectVm = false}) async {
     final runtimeUrl = 'http://127.0.0.1:${runtime.port}';
+    File? serviceInfo;
+    if (inspectVm) {
+      final private = Directory.systemTemp.createTempSync('quotabot_mcp_vm_');
+      addTearDown(() {
+        vmServiceFiles
+            .removeWhere((_, file) => file.parent.path == private.path);
+        if (private.existsSync()) private.deleteSync(recursive: true);
+      });
+      await enforceOwnerOnlyDirectoryAsync(private);
+      serviceInfo = File('${private.path}/service.json');
+    }
     final process = await Process.start(
       Platform.resolvedExecutable,
       [
+        if (inspectVm) '--no-dds',
         if (traceShutdown &&
             Platform.isWindows &&
             (entrypoint == 'test/support/mcp_diagnostic_cli.dart' ||
-                (entrypoint == 'test/support/mcp_fixture_server.dart' &&
+                entrypoint == 'test/support/mcp_stdin_diagnostic_cli.dart' ||
+                ((entrypoint == 'test/support/mcp_fixture_server.dart' ||
+                        entrypoint ==
+                            'test/support/mcp_stdin_diagnostic_server.dart') &&
                     args.contains('--http'))))
           '--trace-shutdown',
         '--packages=.dart_tool/package_config.json',
@@ -108,8 +147,11 @@ void main() {
         'LMSTUDIO_HOST': runtimeUrl,
         'LEMONADE_HOST': runtimeUrl,
         'QUOTABOT_TEST_MCP_BEARER': _token,
+        if (serviceInfo != null)
+          'QUOTABOT_TEST_VM_SERVICE_INFO': serviceInfo.path,
       },
     );
+    if (serviceInfo != null) vmServiceFiles[process.pid] = serviceInfo;
     addTearDown(() async {
       process.kill();
       await process.exitCode.timeout(const Duration(seconds: 10));
@@ -316,17 +358,31 @@ void main() {
     expect(temp.listSync(), isEmpty);
   });
 
-  for (final (terminated, traceShutdown) in [
-    (false, true),
-    (true, true),
-    if (Platform.isWindows) ...[(false, false), (true, false)],
+  for (final (terminated, traceShutdown, inspectVm, inspectStdin) in [
+    // Run instrumented cases first so fail-fast retains their comparison even
+    // when a later original control reproduces the shutdown timeout.
+    if (Platform.isWindows) ...[
+      (false, true, true, true),
+      (true, true, true, true),
+      (false, true, true, false),
+      (true, true, true, false),
+    ],
+    (false, true, false, false),
+    (true, true, false, false),
+    if (Platform.isWindows) ...[
+      (false, false, false, false),
+      (true, false, false, false),
+    ],
   ]) {
     test(
-        'stdio closes oversized UTF-8 input, newline=$terminated, trace=$traceShutdown',
+        'stdio closes oversized UTF-8 input, newline=$terminated, trace=$traceShutdown, inspect=$inspectVm, stdinState=$inspectStdin',
         () async {
       final process = await start(['mcp'],
-          entrypoint: 'test/support/mcp_diagnostic_cli.dart',
-          traceShutdown: traceShutdown);
+          entrypoint: inspectStdin
+              ? 'test/support/mcp_stdin_diagnostic_cli.dart'
+              : 'test/support/mcp_diagnostic_cli.dart',
+          traceShutdown: traceShutdown,
+          inspectVm: inspectVm);
       final lines = StreamIterator(
           utf8.decoder.bind(process.stdout).transform(const LineSplitter()));
       final errorLines = <String>[];
@@ -372,7 +428,9 @@ void main() {
       }
       await process.stdin.flush();
       expect(
-          await _exitWithin(process, const Duration(seconds: 10), errorLines),
+          await _exitWithin(process, const Duration(seconds: 10), errorLines,
+              vmServiceInfo: vmServiceFiles[process.pid],
+              inspectStdin: inspectStdin),
           0);
       expect(await lines.moveNext(), isFalse);
       await errors;
@@ -381,7 +439,9 @@ void main() {
       expect(collections, 0);
       expect(temp.listSync(), isEmpty);
       await process.stdin.close();
-    });
+      // The process still must exit within ten seconds. The harness separately
+      // allows bounded observation and teardown after that deadline fails.
+    }, timeout: const Timeout(Duration(seconds: 45)));
   }
 
   test('MCP help forms match the standalone server without collection',
@@ -546,6 +606,8 @@ void main() {
   }
 
   for (final mode in [
+    if (Platform.isWindows) 'stdin state signal fixture',
+    if (Platform.isWindows) 'VM inspection signal fixture',
     'CLI',
     'signal fixture',
     if (Platform.isWindows) 'untraced signal fixture',
@@ -553,6 +615,7 @@ void main() {
     test('$mode MCP HTTP requires auth and serves metadata without collection',
         () async {
       final fixture = mode != 'CLI';
+      final inspectStdin = mode == 'stdin state signal fixture';
       final probe = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
       final port = probe.port;
       await probe.close();
@@ -563,8 +626,13 @@ void main() {
         '--path=/test-mcp',
         '--token-env=QUOTABOT_TEST_MCP_BEARER',
       ],
-          entrypoint: fixture ? 'test/support/mcp_fixture_server.dart' : null,
-          traceShutdown: mode != 'untraced signal fixture');
+          entrypoint: inspectStdin
+              ? 'test/support/mcp_stdin_diagnostic_server.dart'
+              : fixture
+                  ? 'test/support/mcp_fixture_server.dart'
+                  : null,
+          traceShutdown: mode != 'untraced signal fixture',
+          inspectVm: inspectStdin || mode == 'VM inspection signal fixture');
       final output = utf8.decoder.bind(process.stdout).join();
       final ready = Completer<void>();
       final errorLines = <String>[];
@@ -622,7 +690,9 @@ void main() {
         // The drain budget is 5s; keep this above that so a slow Windows runner
         // can still finish after HTTP close.
         expect(
-            await _exitWithin(process, const Duration(seconds: 20), errorLines),
+            await _exitWithin(process, const Duration(seconds: 20), errorLines,
+                vmServiceInfo: vmServiceFiles[process.pid],
+                inspectStdin: inspectStdin),
             0);
       } else {
         process.kill();
@@ -637,6 +707,8 @@ void main() {
       expect(errorLines.join('\n'), isNot(contains(_token)));
       expect(collections, 0);
       expect(temp.listSync(), isEmpty);
-    });
+      // The process still must exit within twenty seconds. This extra harness
+      // time cannot turn that failure into success; it only budgets diagnostics.
+    }, timeout: const Timeout(Duration(seconds: 45)));
   }
 }

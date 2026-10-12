@@ -21,12 +21,18 @@ pwsh tools/setup.ps1          # Windows; add -CliOnly for just the CLI
 bash tools/setup.sh           # macOS / Linux; add --cli-only for just the CLI
 ```
 
-The CLI does not need the desktop OS toolchain. If those tools are missing, or
+The Windows source CLI requires Visual Studio Desktop development with C++ for
+its small native pipe-reader bridge. It does not require ATL or desktop plugins;
+the prebuilt CLI requires no compiler. macOS and Linux CLI builds retain their
+existing native-asset path. If desktop tools are missing, or
 the desktop build fails, setup still installs the CLI, skips the tray app, and
 prints the repair step. If Dart is missing or `dart build cli` fails, setup
 downloads the checksum-verified release CLI instead of exiting. If that
 download also fails and Dart is present, it installs a `dart run` shim from
-this checkout. Re-run the same command after adding the tools to
+this checkout. Windows validates that source execution and its native hooks work
+before replacing a launcher with that shim. If both source execution and the
+release download fail, it preserves existing launchers and reports the repair
+step. Re-run the same command after adding the tools to
 install the desktop app. On Windows that is Visual Studio C++ ATL plus plugin
 symlink permission from Windows Developer Mode or an elevated terminal; on
 macOS, Xcode command-line tools; on Linux, clang, cmake, ninja, pkg-config, and
@@ -41,6 +47,16 @@ directory for that compile. Desktop packagers on every OS also remap a Flutter
 SDK whose path contains spaces: Windows uses a junction view, and macOS/Linux
 copy the launcher scripts and dart-sdk into a space-free tree. Junctions, subst
 drives, and 8.3 short names are not enough, because Dart reports the long path.
+
+For Windows desktop source builds, use a checkout whose absolute path contains
+no spaces, such as `C:\GitHub\quotabot`. The pinned Flutter dependency resolves
+`native_toolchain_c` 0.19.2, whose MSVC source/output quoting defect is
+[documented as fixed in 0.19.3](https://pub.dev/packages/native_toolchain_c/versions/0.19.3/changelog).
+SDK remapping does not repair checkout or hook-output paths. Keep the pinned
+toolchain and lockfiles; move the checkout or use the verified portable desktop
+release. A desktop compilation failure still permits CLI installation and
+preserves the prior installed desktop. The collector's separate 0.19.3 lock and
+prebuilt payloads are distinct from this desktop source-build limitation.
 
 The CLI command is exposed through your per-user bin
 (`%LOCALAPPDATA%\quotabot\bin` on Windows, `~/.local/bin` on macOS and Linux).

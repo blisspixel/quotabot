@@ -59,9 +59,12 @@ by being correct, quiet, and predictable, not by being large.
   usage read, that read is the source of truth even on a machine the user has
   not actively used the tool on recently. A configured refreshable quotabot
   grant must keep that read live by refreshing its own grant rather than
-  depending on the host app to have run there. The implementation and fixtures
-  exist; dated real-account idle-machine evidence remains a 1.0 gate. Without a
-  usable host credential or local grant, it preserves last-trusted evidence as
+  depending on the host app to have run there, through provider-permitted
+  authentication. Current Claude credential-policy compatibility remains
+  unresolved; local ownership alone does not establish permission. The
+  implementation and fixtures exist; dated real-account idle-machine evidence
+  remains a 1.0 gate. Without a usable host credential or local grant, it
+  preserves last-trusted evidence as
   stale and gives an explicit repair step. A machine-scoped fallback is only
   ever shown when nothing account-wide is available, and it is always labeled
   as this-machine.
@@ -97,8 +100,16 @@ shared Claude captures, and concrete local
 model advice. The [October 11 issue review](docs/research/2026-10-11-issue-review.md)
 records decisions and validation limits.
 
-Follow-up priorities remain Claude Keychain discovery and idle-machine account
-proof, positive local execution scope, and modern MCP compatibility. Extend
+Follow-up priorities are a supported Claude quota integration and idle-machine
+account proof, positive local execution scope, and modern MCP compatibility.
+The October 12 primary-policy review supersedes the earlier unconditional
+Keychain-discovery priority: defer expanded token discovery and new OAuth/grant
+work until a supported metadata authentication path or provider confirmation
+exists. Existing metadata-only behavior is described, not certified as permitted.
+Research a user-configured projection of documented status-line quota fields
+without credentials, host-setting writes, or requests to populate them. Resolve
+provider capture age, missing windows, and account binding before routing; this
+session-fed alternative does not prove idle-machine freshness. Extend
 successful-read sharing to another provider only after proving its credential and
 account identity seam; profile settings and unproven account sharing are deferred.
 
@@ -108,11 +119,36 @@ Use these concrete increments to assess progress:
 
 | Increment | User outcome | Acceptance boundary |
 |---|---|---|
-| Bounded MCP maintenance, source 0.11.12 | A malformed stdio peer cannot buffer an unlimited frame; existing clients keep working. | SDK 2.4.2, explicit legacy mode, 256 KiB UTF-8 ceiling, incomplete-frame closure, no post-overflow dispatch, subscription delivery and cancellation, four legacy revisions, client fallback, independent review, full gates and published install smoke. |
-| Claude host credential discovery | A signed-in user can see Claude without another login, including a selected alternate config directory. | One bounded injectable discovery path for collection and cache identity; native Keychain-only and file-fallback evidence; locked store, replacement, mismatch, disconnect, own-grant fallback; no host writes or guessed plan dates. |
-| Idle-machine account truth | The quota view stays current when work happens on another machine. | Sanitized two-machine comparison across host-token expiry and quotabot-owned refresh; original capture/reset scope visible; host files unchanged; no collection inference. |
+| Bounded MCP maintenance, source 0.11.13 | A malformed stdio peer cannot buffer an unlimited frame; existing clients keep working. | SDK 2.4.2, explicit legacy mode, 256 KiB UTF-8 ceiling, incomplete-frame closure, no post-overflow dispatch, subscription delivery and cancellation, four legacy revisions, client fallback, independent review, full gates and published install smoke. |
+| Supported Claude quota integration | A signed-in user can see clearly scoped quota through a permitted integration. | First establish a supported metadata path or provider confirmation before expanding token handling. Research a credential-free status-line projection with original response age and account isolation. If credential discovery is permitted, require one bounded path for collection and cache identity, native storage evidence, replacement/disconnect tests, and no host writes or guessed plan dates. |
+| Idle-machine account truth | The quota view stays current when work happens on another machine. | A provider-permitted refresh path plus sanitized two-machine comparison across credential expiry; original capture/reset scope visible; host files unchanged; no collection inference. Session-fed status-line evidence alone cannot satisfy this gate. |
 | Positive execution scope | A stronger local-only choice explains where execution is proven. | Producer plus endpoint-scope evidence, direct/forwarded/WSL/LM Link/composite cases; unknown stays unknown; loaded context and advertised maximum remain separate. |
 | Modern MCP compatibility | Current clients can use the modern wire path without losing older clients. | Separate stdio and authenticated HTTP matrix for discovery-free calls, mirrored metadata, private cache scope, independent subscriptions, cancellation, bounds, and shutdown against exact clients. |
+
+**Windows lifecycle release hold:** the tagged 0.11.12 gate reproduced a source-JIT
+HTTP shutdown timeout after main returned, with launcher and VM both alive.
+The subsequent instrumented overflow failures captured a runnable main isolate
+with one live socket event port. The latest read-only projection identifies stdin
+destruction still pending after stream cancellation; the native call or lost
+completion that caused it remains unproven.
+The EOF follow-up also failed an untraced overflow control; closing its parent
+writer after failure did not produce an observed exit within one second.
+The mixed-clock Claude sharing fixture is corrected and passes its full local
+gate and prior hosted failure point. The subsequent Windows gate reached the
+ownership probe and failed at the unchanged shutdown deadline. Native stack
+inspection was incomplete. The Windows-only owned pipe reader is integrated in source 0.11.13, with the
+SDK parser and output queue retained. Its direct-FFI prototype was rejected after
+JIT error capture failed; a narrow native bridge captures results atomically.
+Focused overflow, startup, late-cleanup, pause, and deterministic cancellation
+races pass locally. Compiled bundles also pass synchronous and overlapped pipe
+shutdown and missing-library checks. Independent source review is complete;
+the Windows desktop release build also passes locally. Full contributor,
+installation, and hosted acceptance remain required. None is a released fix.
+Retain traced, untraced, and separately instrumented controls, unchanged exit
+deadlines, and bounded process/VM evidence. Localize the remaining lifetime before
+release; passing earlier PR and main gates did not establish a fix. The protected
+0.11.12 tag remains unpublished. See the
+[dated evidence](docs/research/2026-10-11-next-quality-review.md#tagged-release-recurrence).
 
 Native daily-use checks accompany each affected surface: keyboard and screen
 reader behavior, large text and mixed DPI, offline repair, sleep recovery, and
@@ -142,8 +178,9 @@ release adds reset confirmation, provider-scoped metadata retry coordination,
 explicit admission evidence and current Grok billing support.
 The previous increments provide inspectable desktop models, conservative
 hardware evidence, and tested advisory harness and Agent Plugins setup. Further
-work still needs native Claude Keychain discovery, idle-machine grant evidence,
-and native identity before expanding local-only promises.
+work still needs supported Claude quota authentication before expanded Keychain
+discovery, dated idle-machine refresh evidence through permitted paths, and
+native identity before expanding local-only promises.
 The September research records the current code baseline, primary sources,
 uncertainties, and concrete tests for
 [local models](docs/research/2026-09-local-models.md),
@@ -163,8 +200,10 @@ The [September 30 review](docs/research/2026-09-30-review.md) refreshes
 [code quality](docs/research/2026-09-30-code-quality.md). Version 0.11.7
 updates the curated models, removes retired Spark, and excludes explicitly
 non-text Lemonade deployments from generation advice. These changes were not
-part of 0.11.6. Anthropic's current notice pauses the previously announced
-separate SDK credits; the September 13 billing conclusion is superseded.
+part of 0.11.6. The October 7 notice adds linked-Console API credits for
+eligible Max and Team plans while subscription-authenticated SDK use retains
+plan limits. The paused June SDK-credit proposal remains unavailable. See the
+[dated October 11 correction](docs/research/2026-10-11-next-quality-review.md#october-7-billing-update).
 Preserve the priority on measured provider truth and bounded execution evidence
 rather than treating every newly announced model or router as an adapter task.
 
@@ -182,7 +221,7 @@ canonical owner publication with fresh asset and provenance checks, and immutabl
 publication. Published install smoke upgrades from 0.11.8. Source commit:
 `0fa28b83797c7f4e9b2a28f10a139f6e89914901`. Native interaction and account evidence remain separate.
 
-**Immediate compatibility maintenance, in preparation for 0.11.12:** the September 13
+**Immediate compatibility maintenance, in preparation for 0.11.13:** the September 13
 [MCP and Agent Plugins review](docs/research/2026-09-13-mcp-agent-plugins.md)
 confirms that stable `mcp_dart` now implements the final July protocol and its
 2.4.2 release bounds incoming stdio messages. Source takes that update with
@@ -202,7 +241,12 @@ support. This maintenance does not wait for post-1.0 stabilization.
    `daily-cloudcode-pa.googleapis.com`), validated on 2026-09-08 against a
    Google AI Pro account whose Gemini five-hour and weekly buckets were
    consumed while the non-prefixed Cloud Code Assist host still reported a
-   full unused balance. The remaining gap is Claude on macOS: it can store its
+   full unused balance. Before expanding Claude credentials, establish a
+   supported metadata authentication path or provider confirmation under the
+   current credential policy. Investigate a user-configured, credential-free
+   status-line quota projection with explicit age and account limits. The
+   following host-discovery design is deferred until permission is established.
+   The remaining storage gap is Claude on macOS: it can store its
    credentials only in the login Keychain, so a Keychain-only sign-in is
    undiscoverable without a usable quotabot-owned grant; `os_secret_store.dart` already
    implements a Keychain read but is wired only to Antigravity. Use one bounded,
@@ -308,8 +352,10 @@ support. This maintenance does not wait for post-1.0 stabilization.
    environment prerequisites. The primary integration job is account and plan
    availability advice through supported access under provider terms. Record
    execution-surface billing separately: current subscription-authenticated
-   Claude SDK use shares subscription limits, while API-key use has separate
-   billing. Verify exact account, authentication, client/model access, and
+   Claude SDK use shares subscription limits. API-key use follows linked
+   Console credits and billing controls; the current OAuth collector does not
+   measure that balance. Any future credit collection needs provider-owned
+   balance, expiry, organization scope, and explicit paid-continuation evidence. Verify exact account, authentication, client/model access, and
    disabled paid continuation rather than inferring them from a green bar. MCP
    access does not establish automatic dispatch or permission to bypass a
    limit. Any future explicit model-selection command is secondary and must
@@ -511,9 +557,10 @@ The repository workflow and deterministic verification work are prepared, but
 final closure requires the project owner to provision a Windows code-signing
 identity, Apple Developer Program membership, a Developer ID identity, protected
 release credentials, and successful native rehearsals. Continue native macOS
-and Linux provider records, native accessibility smoke, and dated idle-machine
-validation of the Claude and Codex grants now; repeat the required evidence on
-the signed candidate before the frozen 1.0 rehearsal.
+and Linux provider records and native accessibility smoke. Collect dated
+idle-machine refresh evidence through supported paths; resolve Claude's current
+credential-policy compatibility before further grant work. Repeat the required
+evidence on the signed candidate before the frozen 1.0 rehearsal.
 
 ### Local-resource visibility
 
@@ -646,7 +693,7 @@ milestone sections below.
 |---|---|---|---|
 | Core contracts and automated quality | Stable 0.11.11 | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, Latest-release, and install-lifecycle regressions are covered; the 0.11.11 immutable release and unpinned three-OS Latest smoke passed; earlier live RC-to-stable evidence remains historical | Keep the current stable line green and resolve any new reproducible defect before signing activation |
 | Integration trust boundary | Stable 0.11.11 baseline | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
-| Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
+| Provider truth and drift handling | Partial | Drift fails closed; the existing Claude flow has technical live evidence, while current credential-policy compatibility is unresolved; token parsing, account cleanup, disconnect, parser, and cache provenance have deterministic coverage | Establish a supported Claude metadata path before further grant work; validate idle refresh through permitted paths, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
 | Provider-ID cache continuity | Stable 0.10.1 | The bounded coordinator, exact role validation, mixed-version locks, durable prepared receipts, crash recovery, branch-conflict quarantine, and empty shipped alias map passed [ordinary hosted CI](https://github.com/blisspixel/quotabot/actions/runs/33542805801), the immutable [candidate release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1-rc.1), and the complete [three-OS lifecycle](https://github.com/blisspixel/quotabot/actions/runs/33562140830) | Add an alias only for a real provider rename and retain the same fail-closed migration evidence when one exists |
 | Installation and update | Stable 0.11.11 | The immutable stable release, unpinned GitHub Latest smoke, three-OS stable-channel, clean install, prior-stable upgrade, persistence, source-setup, desktop installation, Windows/Linux startup, and macOS bundle checks passed; earlier releases retain a historical live RC-to-stable update record | Repeat the complete path on the signed rehearsal and frozen 1.0 candidate |

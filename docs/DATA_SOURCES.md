@@ -196,6 +196,24 @@ PROV-DM conformance.
 
 ## Claude (Anthropic)
 
+- Credential-policy boundary, checked October 12 UTC: Anthropic's
+  [authentication and credential-use policy](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)
+  restricts third-party Claude.ai login and credential/token handling. Its
+  storage documentation does not establish permission for an external quota
+  reader, and no quota-only exception was found. Compatibility of the existing
+  host-token reuse and locally stored grants remains unresolved. Metadata-only
+  reads and local ownership are technical properties, not provider authorization.
+  Expanded discovery and new OAuth/grant work are deferred pending a supported
+  path or provider confirmation. This records policy evidence without making a
+  legal determination or silently changing shipped authentication. See the
+  [dated review](research/2026-10-11-next-quality-review.md#october-12-credential-policy-review).
+
+- Billing boundary, checked October 11: [monthly API credits](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-and-team-plans)
+  belong to a linked Console organization and are separate from OAuth plan
+  limits. This collector does not measure that credit balance. Credit eligibility
+  or a green subscription bar cannot establish API-key access, remaining credits,
+  or disabled paid continuation.
+
 - Successful reads with provider-proven account identity can share the exact
   admitted capture across commands for 30 seconds by default. The scope is the
   current credential generation; different credentials do not share a read
@@ -316,7 +334,9 @@ PROV-DM conformance.
   idle machine it eventually expires. quotabot then refreshes its own grant if
   connected; if neither token works it reports the token as expired (pointing at
   `claude` or `quotabot login claude`) and the cache serves the last trusted
-  value marked stale.
+  value marked stale. Those repair strings describe the existing implementation;
+  they do not establish provider permission or recommend a new grant. Follow the
+  current Claude policy boundary above before further authentication work.
 
 ## Grok (xAI)
 
@@ -486,8 +506,11 @@ Antigravity can run two ways:
 - Opportunistic: reuse the token the CLI or IDE currently holds for the bounded
   provider operations documented above. This is live only while the credential
   remains usable.
-- Connected: after `login claude`, `login codex`, `login grok`, or
-  `login antigravity`, quotabot holds its own OAuth grant and refreshes silently.
+- Connected implementation: after `login claude`, `login codex`, `login grok`,
+  or `login antigravity`, quotabot holds its own OAuth grant and refreshes silently.
+  Claude compatibility with the current provider credential policy remains
+  unresolved, as documented in the [Claude boundary](#claude-anthropic); this description
+  is not a recommendation to create new Claude grants.
   All work without manual cloud project setup. Antigravity performs its
   provider-required account onboarding request automatically. Grok uses the
   device-code flow; Antigravity and Codex use a loopback plus PKCE

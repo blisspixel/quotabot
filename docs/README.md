@@ -19,9 +19,10 @@ persistent state, source setup, and stable-channel discovery on Windows,
 macOS, and Linux. Desktop checks cover Windows/Linux startup and the macOS
 installed bundle.
 
-Native publisher signing, real-account idle-machine refresh, Claude Keychain
-discovery, stronger execution-scope proof, and modern MCP compatibility remain
-in [ROADMAP Next](../ROADMAP.md#next). Current Windows and macOS binaries remain
+Native publisher signing, supported Claude quota integration, real-account
+idle-machine refresh, stronger execution-scope proof, and modern MCP compatibility
+remain in [ROADMAP Next](../ROADMAP.md#next). Expanded Claude credential discovery
+is deferred pending a supported path or provider confirmation. Current Windows and macOS binaries remain
 unsigned. Synthetic tests and automated startup are separate from native
 screen-reader interaction and independently known provider-account usage.
 

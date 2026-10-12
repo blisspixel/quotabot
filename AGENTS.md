@@ -17,9 +17,10 @@ its supported access under provider terms. Advice does not grant API access,
 bypass a limit, or authorize paid fallback.
 
 Match advice to the harness's supported access, authentication, account, and
-billing surface. Anthropic's current notice pauses the announced separate SDK
-credits: subscription-authenticated SDK and print-mode use still draws
-subscription limits, while API-key use has separate billing. A healthy provider
+billing surface. Anthropic's [October 7 notice](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) adds monthly
+API credits for eligible Max and Team plans in a linked Console organization.
+Subscription-authenticated SDK and print-mode use still draws plan limits;
+API-key use follows the linked organization's balance and billing controls. A healthy provider
 bar does not establish credentials, model access, or disabled paid continuation.
 See the dated [provider review](docs/research/2026-09-30-subscription-quotas.md)
 for current source evidence. Print mode remains forbidden for quota collection.
@@ -125,7 +126,7 @@ for that surface.
   server uses legacy `initialize` negotiation through `2025-11-25`;
   `2026-07-28` stateless support remains pending. See the
   [verified revision matrix](docs/research/2026-09-13-mcp-agent-plugins.md).
-  Source 0.11.12 also caps incoming stdio messages at 256 KiB of UTF-8 before
+  Source 0.11.13 also caps incoming stdio messages at 256 KiB of UTF-8 before
   each newline, closing on overflow even when the newline never arrives.
   Schema-invalid tool arguments return `isError: true` before handler work.
   Tools:

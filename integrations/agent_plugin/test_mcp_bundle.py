@@ -29,6 +29,13 @@ LEGACY_PROTOCOL_VERSIONS = (
     "Set QUOTABOT_PLUGIN_TEST_EXECUTABLE to an existing native quotabot 0.11.0+ CLI",
 )
 class PreparedPluginBundleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_bundle_closes_overflow_with_writer_held_open(self) -> None:
+        for terminated in (False, True):
+            with self.subTest(terminated=terminated):
+                await self._assert_prepared_bundle(
+                    "2025-11-25", overflow=True, terminated=terminated
+                )
+
     async def test_prepared_package_initializes_lists_tools_and_exits_on_eof(
         self,
     ) -> None:
@@ -36,7 +43,9 @@ class PreparedPluginBundleTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(protocol_version=protocol_version):
                 await self._assert_prepared_bundle(protocol_version)
 
-    async def _assert_prepared_bundle(self, protocol_version: str) -> None:
+    async def _assert_prepared_bundle(
+        self, protocol_version: str, *, overflow: bool = False, terminated: bool = False
+    ) -> None:
         assert EXECUTABLE is not None
         executable = Path(EXECUTABLE).resolve()
         self.assertTrue(executable.is_file(), "The requested native CLI must exist")
@@ -149,8 +158,18 @@ class PreparedPluginBundleTests(unittest.IsolatedAsyncioTestCase):
                         "suggest_model",
                     }.issubset(names)
                 )
-                process.stdin.close()
-                await asyncio.wait_for(process.stdin.wait_closed(), timeout=5)
+                if overflow:
+                    process.stdin.write("é".encode("utf-8") * (REPLY_LIMIT // 2 + 1))
+                    if terminated:
+                        process.stdin.write(b"\n")
+                    try:
+                        await asyncio.wait_for(process.stdin.drain(), timeout=5)
+                    except (BrokenPipeError, ConnectionResetError):
+                        # The frame was rejected while the writer was flushing.
+                        pass
+                else:
+                    process.stdin.close()
+                    await asyncio.wait_for(process.stdin.wait_closed(), timeout=5)
                 self.assertEqual(await asyncio.wait_for(process.wait(), timeout=10), 0)
                 self.assertEqual(
                     await asyncio.wait_for(
@@ -161,11 +180,18 @@ class PreparedPluginBundleTests(unittest.IsolatedAsyncioTestCase):
                 )
                 stderr = await asyncio.wait_for(error_output, timeout=5)
                 self.assertLessEqual(len(stderr), 32768)
-                self.assertIn(
-                    stderr.strip(),
-                    (b"", b"[DEBUG][mcp_dart.server.stdio] Stdin closed."),
-                    "Only the pinned SDK's ordinary EOF diagnostic is expected",
-                )
+                if overflow:
+                    self.assertNotIn("é".encode("utf-8"), stderr)
+                    self.assertIn(
+                        stderr.strip(),
+                        (b"", b"quotabot MCP: metadata or transport error"),
+                    )
+                else:
+                    self.assertIn(
+                        stderr.strip(),
+                        (b"", b"[DEBUG][mcp_dart.server.stdio] Stdin closed."),
+                        "Only the pinned SDK's ordinary EOF diagnostic is expected",
+                    )
                 self.assertEqual(list(profile.iterdir()), [])
                 self.assertEqual(list(plugin_data.iterdir()), [])
             finally:
