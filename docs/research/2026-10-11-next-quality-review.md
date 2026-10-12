@@ -207,7 +207,7 @@ requests receive shutdown through a callback returning `void`. The native close
 completion is separate and is not exposed by public `Stdin`. The transport
 already awaits subscription cancellation, so repeating that await is not a fix.
 
-Windows [`FileHandle::IsClosed`](https://github.com/dart-lang/sdk/blob/3.12.2/runtime/bin/eventhandler_win.cc#L407-L408)
+Windows [`FileHandle::IsClosed`](https://github.com/dart-lang/sdk/blob/3.12.2/runtime/bin/eventhandler_win.cc#L438-L439)
 withholds the destroyed notification while a read or write remains pending.
 Its synchronous stdin reader posts completion after `ReadFile` returns.
 [`CancelIoEx`](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex)
@@ -277,6 +277,42 @@ labels suggestive. Missing or incomplete inspection remains inconclusive.
 
 Both observations precede the existing post-failure EOF experiment and always
 preserve the original exit timeout. No production lifecycle change is included.
+
+### Fixture clock failure before observation
+
+The [Windows job for signed source `3af8177`](https://github.com/blisspixel/quotabot/actions/runs/38193114323/job/114629913993)
+stopped before reaching the MCP cases. The six-adapter Claude sharing test froze
+its gate clock during setup, while the adapter captured real time later. Slow
+setup made the capture appear future-dated, and the production gate correctly
+refused to save a sharing receipt. This run supplies no new shutdown evidence.
+
+The test now aligns its gate clock when the first mocked usage request arrives,
+after the adapter has captured its timestamp. Later explicit advances remain
+controlled. A deliberate 60-second initial skew reproduces the old failure
+without waiting; the corrected seven-test file passes, retaining expiry,
+credential replacement, and drift assertions. Production clock admission is
+unchanged. Independent review found no concrete flaw in this correction.
+
+The preceding exact signed tree passed the complete local Windows gate: 2,388
+collector tests with two environment-related skips, 455 desktop tests with one
+skip, clean formatting and analysis, and 92.90 and 87.52 percent line coverage.
+The fixture correction requires its own full and hosted gates. Publication
+remains held.
+
+The pinned SDK also creates a
+[`FILE_FLAG_OVERLAPPED` child stdin handle](https://github.com/dart-lang/sdk/blob/3.12.2/runtime/bin/process_win.cc#L230-L252),
+then wraps stdin in a
+[`StdHandle` without overlapped support](https://github.com/dart-lang/sdk/blob/3.12.2/runtime/bin/eventhandler_win.h#L319-L320)
+and calls
+[`ReadFile` with a null `OVERLAPPED`](https://github.com/dart-lang/sdk/blob/3.12.2/runtime/bin/eventhandler_win.cc#L320-L343).
+Microsoft's [documented contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-readfile)
+requires a valid `OVERLAPPED` for an overlapped-opened handle. This source
+mismatch deserves upstream investigation, but is not proof of the observed hang.
+An isolated local named-pipe experiment observed pending input immediately
+after handle closure, then completion before its sole writer closed. A transient
+pending-I/O flag therefore does not establish persistent retention or EOF
+dependence. Native runtime attribution still requires the failed-run ownership
+observations or a minimal pinned-Dart reproduction.
 
 ### Native Mac baseline
 

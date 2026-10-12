@@ -60,6 +60,10 @@ void main() {
             200);
       }
       usages++;
+      // The adapter captures real time before reaching this mocked request.
+      // Align the gate before saving its first receipt, then advance only the
+      // fixture clock so slow host setup cannot create future-dated captures.
+      if (usages == 1) clock = nowEpoch();
       await Future<void>.delayed(const Duration(milliseconds: 30));
       return http.Response(
           jsonEncode({
@@ -91,6 +95,8 @@ void main() {
 
   test('six independent adapters reuse one live read with original provenance',
       () async {
+    // Reproduce setup/capture skew without a wall-clock delay.
+    clock -= 60;
     final first = await adapter().collectAccounts();
     expect(first.single.ok, isTrue);
     for (var i = 0; i < 5; i++) {
@@ -101,7 +107,7 @@ void main() {
       expect(shared.toJson()['shared_from_capture_at'], first.single.asOf);
       expect(
           sanitizeProviderQuota(shared).sharedFromCaptureAt, first.single.asOf);
-      final verification = buildVerificationReport([shared], nowEpoch(),
+      final verification = buildVerificationReport([shared], clock,
           os: Platform.operatingSystem,
           requireLive: true,
           registry: [providerAdapterById('claude')!]);
