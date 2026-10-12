@@ -6,7 +6,7 @@ Notable changes to quotabot. Newest first.
 
 ## 0.11.14 - 2026-10-12
 
-Truthful first-run guidance and independent CLI validation. Pending publication.
+Truthful first-run guidance and independent CLI validation.
 
 - Distinguish unavailable subscription quota from measured low quota when
   routing to a local runtime. Keep existing decision codes and candidate rules.
