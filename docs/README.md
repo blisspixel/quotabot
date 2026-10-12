@@ -4,27 +4,36 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.11.11. It shares recent successful
-Claude captures without changing their age, makes local routing advice name a
-concrete model and context shortfall, fixes absent-tool discovery, and includes
-selected security updates. See the [changelog](../CHANGELOG.md) and
-[October 11 issue review](research/2026-10-11-issue-review.md).
+The current verified stable release is 0.11.13.
 
-The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38153000563),
-[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920), and
-[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701).
-Immutable publication includes fourteen verified archive/checksum assets.
-Published install smoke verifies clean installation, upgrade from 0.11.8,
-persistent state, source setup, and stable-channel discovery on Windows,
-macOS, and Linux. Desktop checks cover Windows/Linux startup and the macOS
-installed bundle.
+Version [0.11.13](https://github.com/blisspixel/quotabot/releases/tag/v0.11.13) ships bounded MCP input and
+owned Windows pipe cancellation, retaining legacy negotiation, subscriptions,
+and the existing response and shutdown deadlines. Installation validates the
+native bridge before activation. It includes the 0.11.11 discovery, shared
+Claude capture, and concrete local-model advice improvements. See the
+[changelog](../CHANGELOG.md) and
+[quality review](research/2026-10-11-next-quality-review.md).
 
+The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38208637717),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38232223042), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38238648896).
+The immutable fourteen-asset set contains four CLI and three desktop
+archive/checksum pairs. Publication verified exact workflow provenance and
+fresh downloads. Unpinned Latest smoke covers clean install, upgrade from
+0.11.11, persistent state, source setup, and stable-channel resolution on
+Windows, macOS, and Linux. Desktop checks verify Windows/Linux startup and
+the installed macOS bundle. Published CLI and desktop payloads were also
+installed and checked on this Windows machine.
+
+Current Windows and macOS artifacts remain unsigned transition artifacts.
 Native publisher signing, supported Claude quota integration, real-account
-idle-machine refresh, stronger execution-scope proof, and modern MCP compatibility
-remain in [ROADMAP Next](../ROADMAP.md#next). Expanded Claude credential discovery
-is deferred pending a supported path or provider confirmation. Current Windows and macOS binaries remain
-unsigned. Synthetic tests and automated startup are separate from native
-screen-reader interaction and independently known provider-account usage.
+idle-machine refresh, stronger local execution-scope evidence, and modern MCP
+support retain their own acceptance criteria in [roadmap Next](../ROADMAP.md#next).
+Expanded Claude credential discovery is deferred pending a supported path or
+provider confirmation. The protected 0.11.12 candidate remains unpublished.
+Automated checks do not establish native assistive-technology interaction or
+provider-account truth. See [Building](BUILDING.md), [Security](../SECURITY.md),
+and [Setup](SETUP.md).
 
 ## Install and first success
 

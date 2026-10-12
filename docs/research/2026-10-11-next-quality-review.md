@@ -555,3 +555,36 @@ implementation from unresolved provider-policy compatibility and defer new
 grants and expanded discovery. Release 0.11.13 notes explicitly include the
 unpublished 0.11.12 MCP maintenance so publication includes its compatibility
 and validation changes. The stable release designation remains 0.11.11.
+
+## Released 0.11.13 verification
+
+Version 0.11.13, desktop build 68, was published immutably from `853e13200c2ac6a9b1d0e61046a34821a300c5ef`.
+The [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38208637717),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38232223042), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38238648896) passed. The exact fourteen-asset set was verified with fresh
+downloads and workflow provenance. Unpinned Latest smoke upgrades from 0.11.11.
+The clean signed `7f343c4` contributor gate passed with 91.72 percent
+collector line coverage and 87.52 percent desktop line coverage; its tree
+matches the released source. Earlier failed receipts remain preserved.
+The preceding `dba9e85` gate completed every command successfully but its
+clean-tree wrapper rejected seven regenerated Flutter files. Separate canonical
+blob comparisons proved all seven unchanged; an index refresh produced no
+staged changes. That original rejected receipt remains intact and is not the
+final clean gate evidence.
+
+All published Windows CLI and desktop payload files matched after installation
+on the local machine, with metadata preserved. Installed version and Latest
+stable resolution passed. The native MCP suite passed all twenty checks with
+no skips, including legacy negotiation, synchronous and overlapped pipe
+overflow/EOF, unchanged shutdown bounds, and missing-library rejection.
+The published desktop passed isolated native window/tray readiness and cleanup
+with unchanged bundle bytes. Automated readiness is separate from interactive
+keyboard/screen-reader acceptance and account-wide provider truth.
+
+The user confirmed that Mac and Windows use the same Claude subscription, then
+skipped further Mac Keychain validation. The earlier macOS 0.11.11 file-fallback
+check remains baseline evidence only. Idle credential refresh, Keychain-only
+discovery, and provider-policy compatibility remain unproven; no new grant or
+expanded token-discovery work was performed. Supported Claude metadata access,
+positive local execution scope, modern MCP, signing, and native daily-use
+acceptance remain in ROADMAP Next.

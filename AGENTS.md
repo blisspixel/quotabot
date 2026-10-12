@@ -61,13 +61,15 @@ verification, is [CLAUDE.md](CLAUDE.md).
 
 ## Project status
 
-The current verified stable release is 0.11.11. Callers should treat a snapshot
+The current verified stable release is 0.11.13. Callers should treat a snapshot
 with `drift_reason` as non-routable, keep measured percentages visible on
 admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
 explicit-spend evidence. Fresh quota publishes before advisory analytics.
 
-Version 0.11.11 adds shared successful Claude captures with original age,
+Version 0.11.13 adds bounded MCP input with owned Windows pipe cancellation
+and native-bridge installation checks, retaining legacy negotiation and existing
+shutdown deadlines. Version 0.11.11 added shared successful Claude captures with original age,
 concrete local-model/context advice, and truthful absent-tool detection.
 Version 0.11.8 added stronger explicit local-model matching,
 loaded context, composite execution exclusions, and metadata bounds. See
@@ -126,7 +128,7 @@ for that surface.
   server uses legacy `initialize` negotiation through `2025-11-25`;
   `2026-07-28` stateless support remains pending. See the
   [verified revision matrix](docs/research/2026-09-13-mcp-agent-plugins.md).
-  Source 0.11.13 also caps incoming stdio messages at 256 KiB of UTF-8 before
+  Version 0.11.13 also caps incoming stdio messages at 256 KiB of UTF-8 before
   each newline, closing on overflow even when the newline never arrives.
   Schema-invalid tool arguments return `isError: true` before handler work.
   Tools:

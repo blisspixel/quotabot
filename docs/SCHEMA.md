@@ -9,7 +9,7 @@ The Omarchy bar widget writes a separate redacted display file,
 [integrations/omarchy/README.md](../integrations/omarchy/README.md).
 That file is not a snapshot, a suggestion, or an MCP response.
 
-Source 0.11.12 preserves quota JSON schemas and the legacy MCP protocol while
+Version 0.11.13 preserves quota JSON schemas and the legacy MCP protocol while
 upgrading its SDK. MCP schema-invalid tool arguments return `isError: true`
 with text diagnostics rather than JSON-RPC `invalidParams`. Malformed request
 parameters remain protocol errors. Rejection happens before tool side effects.

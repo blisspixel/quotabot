@@ -4,9 +4,9 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-## 0.11.13 - 2026-10-11
+## 0.11.13 - 2026-10-12
 
-Windows MCP pipe ownership and release recovery. Pending publication.
+Windows MCP pipe ownership and release recovery.
 
 - Include the unpublished 0.11.12 MCP maintenance: SDK 2.4.2, a 256 KiB UTF-8
   per-message ceiling, incomplete-frame overflow closure, and explicit legacy

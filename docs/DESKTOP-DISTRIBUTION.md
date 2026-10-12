@@ -36,11 +36,11 @@ Immutability applies prospectively to releases published after
 it was enabled on July 18, 2026. v0.9.4 and later releases are locked under that
 policy; v0.9.2 and earlier releases were not changed retroactively.
 
-The current verified [0.11.11 release](https://github.com/blisspixel/quotabot/releases/tag/v0.11.11)
+The current verified [0.11.13 release](https://github.com/blisspixel/quotabot/releases/tag/v0.11.13)
 contains all three desktop archive/checksum pairs inside the exact fourteen-asset
-set. Its [Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38155116920) and
-[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38159387701) passed.
-The unpinned Latest smoke covers clean installation, upgrade from 0.11.8,
+set. Its [Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38232223042) and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38238648896) passed.
+The unpinned Latest smoke covers clean installation, upgrade from 0.11.11,
 persistent state, source setup, and stable-channel resolution on Windows, macOS,
 and Linux. Desktop checks cover Windows/Linux startup and the macOS bundle.
 Application signing and notarization remain pre-1.0 native trust gates.
