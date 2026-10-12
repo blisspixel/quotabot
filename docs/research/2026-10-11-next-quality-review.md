@@ -187,6 +187,66 @@ invalid endpoint scope, VM PID mismatch, redirects, oversized responses, and
 stalled bodies. A socket category can narrow shared native socket ownership;
 it cannot identify stdin rather than HTTP or prove a particular leaked handle.
 
+### Captured main-isolate retention
+
+The [instrumented Windows gate](https://github.com/blisspixel/quotabot/actions/runs/38188588751/job/114616209351)
+failed on source `15bc90b2a6f8d0dda96ae0531e0700a0fbefbdd1` in the
+unterminated UTF-8 overflow case. After the original ten-second deadline and
+main-return marker, the PID-verified VM reported one application isolate, two
+system isolates, and a runnable main isolate with exactly one live socket event
+port. No timer port or debugger pause was present. This occurrence is therefore
+main event-loop retention, before isolate shutdown, rather than later global
+cleanup. It does not establish the state of the earlier HTTP failures.
+
+Stdin is the leading ownership inference in this fixture: no quota collection
+runs, stdout and stderr are synchronous file consumers, and the service owns
+its sockets in its system isolate. The port category itself does not identify
+the descriptor. The pinned SDK's
+[`_Socket` cancellation](https://github.com/dart-lang/sdk/blob/3.12.2/sdk/lib/_internal/vm/bin/socket_patch.dart)
+requests receive shutdown through a callback returning `void`. The native close
+completion is separate and is not exposed by public `Stdin`. The transport
+already awaits subscription cancellation, so repeating that await is not a fix.
+
+Windows [`FileHandle::IsClosed`](https://github.com/dart-lang/sdk/blob/3.12.2/runtime/bin/eventhandler_win.cc#L407-L408)
+withholds the destroyed notification while a read or write remains pending.
+Its synchronous stdin reader posts completion after `ReadFile` returns.
+[`CancelIoEx`](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex)
+requests cancellation and does not wait for completion. These source boundaries
+justify observing native read completion next; they do not establish a specific
+cancellation race or justify a speculative runtime patch.
+
+The exact signed tree passed the complete local Windows gate: 2,374 collector
+tests, 455 desktop tests, and line coverage of 92.86 and 87.52 percent. Hosted
+Linux and macOS passed. Local success does not override the captured hosted Windows
+failure, and publication remains held.
+
+The next narrow discriminator closes the parent's owned stdin writer only after
+the original Windows deadline has failed and passive process/VM snapshots have
+completed. Writer closure and subsequent exit observation share one second.
+Only fixed observation categories and an exit code are reported. The test
+always throws the original timeout, even if EOF is followed by process exit.
+Recovery would support dependence on the open pipe, without distinguishing a
+blocked native read from delayed socket-close delivery. Non-recovery is
+inconclusive. Real-child tests cover both an EOF-released process and a process
+that consumes EOF but retains a receive port. Final teardown still owns killing
+and reaping the process. This is diagnosis, not a production correction.
+
+### Native Mac baseline
+
+On October 12 UTC, the attested published 0.11.11 arm64 CLI was checked on a
+signed-in macOS 27.0 host using Claude Code 2.1.296. A targeted fresh Claude
+metadata read succeeded through the existing credential-file fallback. It
+reported authoritative live, account-wide evidence, with `stale: false` and
+`per_machine: false`. The host credential file was byte-for-byte unchanged.
+The isolated temporary CLI and metadata directories were removed afterward;
+this was not a global Mac installation or a 0.11.12 artifact check.
+
+The selected default Keychain item was visible, but its bounded secret read
+over SSH returned exit 36 without a recognized error category. This does not
+prove a locked store, Keychain-only discovery, or idle-machine refresh. No
+credential value or account identifier was persisted in the verification
+receipt, and no inference request or host-state write was made.
+
 ## October 7 billing update
 
 Rechecked October 11. The [current SDK notice](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) adds monthly API

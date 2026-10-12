@@ -10,6 +10,7 @@ import 'package:quotabot_collector/util.dart'
 import 'package:test/test.dart';
 
 import 'support/process_exit_diagnostics.dart';
+import 'support/stdin_eof_diagnostics.dart';
 import 'support/vm_exit_diagnostics.dart';
 
 const _token = '0123456789abcdef0123456789abcdef';
@@ -57,8 +58,13 @@ Future<int> _exitWithin(
       ]);
       final snapshot = observedState[0];
       final vm = observedState[1];
+      // The open-stdin deadline has already failed. Preserve that failure even
+      // if closing the parent's writer now releases the remaining resource.
+      final eof = Platform.isWindows
+          ? await observeStdinEofAfterFailure(process)
+          : 'stdin EOF observation not enabled';
       throw TimeoutException(
-          'MCP did not exit; stderr: $phases; process state: $snapshot; VM state: $vm',
+          'MCP did not exit; stderr: $phases; process state: $snapshot; VM state: $vm; post-failure observation: $eof',
           deadline);
     });
 

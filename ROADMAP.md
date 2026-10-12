@@ -116,6 +116,9 @@ Use these concrete increments to assess progress:
 
 **Windows lifecycle release hold:** the tagged 0.11.12 gate reproduced a source-JIT
 HTTP shutdown timeout after main returned, with launcher and VM both alive.
+The subsequent instrumented overflow failure captured a runnable main isolate
+with one live socket event port. Stdin is the leading ownership inference;
+native read completion remains unproven.
 Retain traced, untraced, and separately instrumented controls, unchanged exit
 deadlines, and bounded process/VM evidence. Localize the remaining lifetime before
 release; passing earlier PR and main gates did not establish a fix. The protected
