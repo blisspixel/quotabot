@@ -17,9 +17,10 @@ its supported access under provider terms. Advice does not grant API access,
 bypass a limit, or authorize paid fallback.
 
 Match advice to the harness's supported access, authentication, account, and
-billing surface. Anthropic's current notice pauses the announced separate SDK
-credits: subscription-authenticated SDK and print-mode use still draws
-subscription limits, while API-key use has separate billing. A healthy provider
+billing surface. Anthropic's [October 7 notice](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) adds monthly
+API credits for eligible Max and Team plans in a linked Console organization.
+Subscription-authenticated SDK and print-mode use still draws plan limits;
+API-key use follows the linked organization's balance and billing controls. A healthy provider
 bar does not establish credentials, model access, or disabled paid continuation.
 See the dated [provider review](docs/research/2026-09-30-subscription-quotas.md)
 for current source evidence. Print mode remains forbidden for quota collection.

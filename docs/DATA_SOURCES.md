@@ -196,6 +196,12 @@ PROV-DM conformance.
 
 ## Claude (Anthropic)
 
+- Billing boundary, checked October 11: [monthly API credits](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-and-team-plans)
+  belong to a linked Console organization and are separate from OAuth plan
+  limits. This collector does not measure that credit balance. Credit eligibility
+  or a green subscription bar cannot establish API-key access, remaining credits,
+  or disabled paid continuation.
+
 - Successful reads with provider-proven account identity can share the exact
   admitted capture across commands for 30 seconds by default. The scope is the
   current credential generation; different credentials do not share a read

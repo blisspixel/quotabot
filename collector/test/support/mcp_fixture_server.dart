@@ -5,9 +5,14 @@ import 'package:quotabot_collector/mcp_server_entrypoint.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/util.dart';
 
+import 'fixture_vm_service.dart';
+
 /// Exercises the server lifecycle with synthetic metadata only, including
 /// subscription polling. It never invokes a real provider collector.
 Future<void> main(List<String> args) async {
+  if (Platform.environment.containsKey('QUOTABOT_TEST_VM_SERVICE_INFO')) {
+    await startFixtureVmService();
+  }
   final http = args.contains('--http');
   if (http) stderr.writeln('fixture VM pid: $pid');
   await runQuotabotMcpServer(

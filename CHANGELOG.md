@@ -4,6 +4,12 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- Add bounded, test-only VM lifetime inspection alongside the original traced
+  and untraced MCP exit controls. Keep authenticated service coordinates private,
+  verify the fixture VM and main isolate, and emit only fixed metadata counts.
+  The tagged 0.11.12 Windows gate reproduced the shutdown timeout; that candidate
+  remains unpublished. These diagnostics do not claim a root-cause correction.
+
 ## 0.11.12 - 2026-10-11
 
 Bounded MCP input with explicit legacy compatibility.

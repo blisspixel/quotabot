@@ -12,6 +12,7 @@ on-device capacity directly or fall back when subscription caps are low.
 
 > **Current stable:** 0.11.11. quotabot remains under active 0.x development.
 > **Pending publication:** 0.11.12.
+> **Release held:** its tagged Windows lifecycle gate failed.
 > **Next:** support Claude discovery for macOS Keychain sign-ins and prove
 > account-wide quota refresh on idle machines, then strengthen execution-scope
 > evidence for local-only advice. Native signing proceeds alongside product

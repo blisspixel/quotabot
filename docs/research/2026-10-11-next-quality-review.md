@@ -135,3 +135,79 @@ Modern MCP requires its own stdio/HTTP discovery, metadata, private caching,
 subscription ownership, cancellation, and shutdown matrix against exact client
 versions. Native keyboard, large-text, offline recovery, and signed fresh-install
 evidence remain separate from synthetic widgets and hosted packaging.
+
+## Tagged release recurrence
+
+The [comparison PR gate](https://github.com/blisspixel/quotabot/actions/runs/38180972710)
+and [exact-main gate](https://github.com/blisspixel/quotabot/actions/runs/38183206726)
+passed with both traced and untraced open-stdin controls. The protected
+`v0.11.12` tag points directly to `b00cb743b8a1b412b454cc30e826378827bb98e0`.
+Its [tagged Windows gate](https://github.com/blisspixel/quotabot/actions/runs/38185720265/job/114607519058)
+then timed out in the traced HTTP signal fixture after its unchanged twenty-second
+exit deadline. Both launcher and VM remained present after fixture main returned.
+No post-main shutdown phase was captured. The tag remains unpublished, and
+0.11.11 remains the verified Latest release. No failed job was rerun.
+
+The absence of later trace output does not establish that cleanup was never
+entered: pinned [`StartCleanup`](https://github.com/dart-lang/sdk/blob/3.12.2/runtime/vm/dart.cc#L101-L115)
+precedes the first shutdown trace and may wait for active API calls. The remaining
+lifetime still needs direct evidence. Passing
+native AOT checks cannot establish the state of the source-JIT kernel path.
+
+An [upstream June 22 change](https://github.com/dart-lang/sdk/commit/dd8cd808fac16a61908ad5a1569bc1fa0f6b1c52)
+waits for asynchronous VM service and kernel startup before transitioning into
+cleanup. The pinned path lacks that wait. Its stated startup/cleanup race is a
+candidate, but the failed runs did not capture the required startup state or
+later cleanup phases. The change spans both newer runtime-service and legacy
+service paths. A matching shutdown symptom alone does not establish its trigger
+here; no toolchain change or speculative application workaround was taken.
+
+The next diagnostic keeps existing traced no-service cases and untraced controls,
+and runs separate service-enabled cases first so fail-fast cannot skip their
+comparison. Service startup is awaited and can change the race; instrumented
+success alone is not a correction. A parent-owned, owner-only temporary directory
+holds the authenticated numeric-loopback URI, expected VM PID, and main-isolate
+ID. DDS and service URL output are disabled. The handoff is removed when consumed.
+
+After the original exit deadline fails, native process and VM inspection start
+together. VM reads use only the pinned protocol's
+[`getVM`, `getIsolate`, and `getPorts`](https://github.com/dart-lang/sdk/blob/3.12.2/runtime/vm/service/service.md),
+with PID verification before isolate requests, one three-second request/body
+budget, a 64 KiB response cap, direct connections, disabled redirects, and owned
+client closure. Output contains fixed booleans, capped counts, allowlisted pause
+kinds, and port categories. It excludes names, IDs, URI/authentication, source,
+allocation locations, raw errors, and objects. No heap or object RPC is used.
+Partial verified metadata remains visible if a later inspection request fails.
+The original process timeout remains a failure even if inspection cannot connect
+or the target exits during observation.
+
+A native negative probe deliberately retains receive ports after main returns.
+It checks port detection and private-name suppression. Additional tests cover
+invalid endpoint scope, VM PID mismatch, redirects, oversized responses, and
+stalled bodies. A socket category can narrow shared native socket ownership;
+it cannot identify stdin rather than HTTP or prove a particular leaked handle.
+
+## October 7 billing update
+
+Rechecked October 11. The [current SDK notice](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) adds monthly API
+credits for eligible Max and Team plans; it preserves subscription-authenticated
+SDK and print-mode access through plan limits. The separate June SDK-credit
+proposal remains unavailable. This supersedes treating the June pause as the
+whole current policy.
+
+The [credit guide](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-and-team-plans) distinguishes linked-Console API-key execution
+from subscription authentication. Interactive Claude Code and extra usage are
+outside this credit pool. Purchased balances, auto-reload, or invoicing can
+continue spending after included credits run out.
+
+The [Platform contract](https://platform.claude.com/docs/en/about-claude/api-credits-for-subscribers) gives Max 5x $100 and Max 20x $200 monthly;
+Team receives $20 per Standard or $100 per Premium seat, pooled up to $500.
+Credits expire each billing cycle, monthly on annual plans, without rollover
+and belong to one linked organization. Auto-reload follows the purchased balance
+and can charge even while included credits remain. Eligibility alone is not a measured balance or execution grant.
+
+The existing OAuth usage collector does not collect Console API credits. Keep
+those balances separate from subscription headroom. Future support requires
+bounded provider-owned balance and expiry metadata, exact organization and
+credential scope, and explicit continuation controls before any spend advice.
+This research changes documentation, not routing eligibility or collector calls.

@@ -1,5 +1,11 @@
 # Project review and next product increment
 
+> Update 2026-10-11: the October 7 notice adds linked-Console API credits for
+> eligible Max and Team plans. Subscription-authenticated SDK use still draws
+> plan limits; the paused June SDK-credit proposal remains unavailable. See the
+> [dated correction](2026-10-11-next-quality-review.md#october-7-billing-update).
+> The original dated observations below are preserved as historical evidence.
+
 Reviewed 2026-09-13 against stable 0.11.5, commit
 `4c502b777389003f1a25f5a0556e234db3b369b6`, and current primary documentation.
 The review covers the current README, roadmap, editing and architecture

@@ -114,6 +114,14 @@ Use these concrete increments to assess progress:
 | Positive execution scope | A stronger local-only choice explains where execution is proven. | Producer plus endpoint-scope evidence, direct/forwarded/WSL/LM Link/composite cases; unknown stays unknown; loaded context and advertised maximum remain separate. |
 | Modern MCP compatibility | Current clients can use the modern wire path without losing older clients. | Separate stdio and authenticated HTTP matrix for discovery-free calls, mirrored metadata, private cache scope, independent subscriptions, cancellation, bounds, and shutdown against exact clients. |
 
+**Windows lifecycle release hold:** the tagged 0.11.12 gate reproduced a source-JIT
+HTTP shutdown timeout after main returned, with launcher and VM both alive.
+Retain traced, untraced, and separately instrumented controls, unchanged exit
+deadlines, and bounded process/VM evidence. Localize the remaining lifetime before
+release; passing earlier PR and main gates did not establish a fix. The protected
+0.11.12 tag remains unpublished. See the
+[dated evidence](docs/research/2026-10-11-next-quality-review.md#tagged-release-recurrence).
+
 Native daily-use checks accompany each affected surface: keyboard and screen
 reader behavior, large text and mixed DPI, offline repair, sleep recovery, and
 update/rollback state preservation. Measure first-answer and recovery latency
@@ -163,8 +171,10 @@ The [September 30 review](docs/research/2026-09-30-review.md) refreshes
 [code quality](docs/research/2026-09-30-code-quality.md). Version 0.11.7
 updates the curated models, removes retired Spark, and excludes explicitly
 non-text Lemonade deployments from generation advice. These changes were not
-part of 0.11.6. Anthropic's current notice pauses the previously announced
-separate SDK credits; the September 13 billing conclusion is superseded.
+part of 0.11.6. The October 7 notice adds linked-Console API credits for
+eligible Max and Team plans while subscription-authenticated SDK use retains
+plan limits. The paused June SDK-credit proposal remains unavailable. See the
+[dated October 11 correction](docs/research/2026-10-11-next-quality-review.md#october-7-billing-update).
 Preserve the priority on measured provider truth and bounded execution evidence
 rather than treating every newly announced model or router as an adapter task.
 
@@ -308,8 +318,10 @@ support. This maintenance does not wait for post-1.0 stabilization.
    environment prerequisites. The primary integration job is account and plan
    availability advice through supported access under provider terms. Record
    execution-surface billing separately: current subscription-authenticated
-   Claude SDK use shares subscription limits, while API-key use has separate
-   billing. Verify exact account, authentication, client/model access, and
+   Claude SDK use shares subscription limits. API-key use follows linked
+   Console credits and billing controls; the current OAuth collector does not
+   measure that balance. Any future credit collection needs provider-owned
+   balance, expiry, organization scope, and explicit paid-continuation evidence. Verify exact account, authentication, client/model access, and
    disabled paid continuation rather than inferring them from a green bar. MCP
    access does not establish automatic dispatch or permission to bypass a
    limit. Any future explicit model-selection command is secondary and must
