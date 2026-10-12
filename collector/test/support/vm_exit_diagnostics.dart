@@ -4,10 +4,12 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'fixture_vm_service.dart';
+import 'stdin_state_schema.dart';
 
 /// Reads only selected VM metadata after the original process deadline fires.
 /// Never emits URI/auth, names, ids, objects, errors, source, or heap contents.
-Future<String> snapshotTimedOutVm(File handoff, int expectedPid) async {
+Future<String> snapshotTimedOutVm(File handoff, int expectedPid,
+    {bool inspectStdin = false}) async {
   final client = HttpClient()
     ..connectionTimeout = const Duration(seconds: 1)
     ..findProxy = (_) => 'DIRECT';
@@ -44,7 +46,8 @@ Future<String> snapshotTimedOutVm(File handoff, int expectedPid) async {
       String method, [
       Map<String, String>? parameters,
     ]) async {
-      if (!const {'getVM', 'getIsolate', 'getPorts'}.contains(method)) {
+      if (!const {'getVM', 'getIsolate', 'getPorts', stdinStateExtension}
+          .contains(method)) {
         throw StateError('Unsupported VM inspection');
       }
       final target = uri.resolve(method).replace(queryParameters: parameters);
@@ -145,6 +148,12 @@ Future<String> snapshotTimedOutVm(File handoff, int expectedPid) async {
     }
     result['port_categories'] = categories;
     result['port_count_capped'] = entries.length > 128;
+    if (inspectStdin) {
+      final state = await read(stdinStateExtension, {'isolateId': isolateId});
+      final projected = projectStdinState(state);
+      if (projected == null) throw StateError('Stdin state unavailable');
+      result['stdin_state'] = projected;
+    }
     result['inspection_complete'] = true;
     return jsonEncode(result);
   } catch (_) {

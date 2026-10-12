@@ -119,6 +119,10 @@ HTTP shutdown timeout after main returned, with launcher and VM both alive.
 The subsequent instrumented overflow failure captured a runnable main isolate
 with one live socket event port. Stdin is the leading ownership inference;
 native read completion remains unproven.
+The EOF follow-up also failed an untraced overflow control; closing its parent
+writer after failure did not produce an observed exit within one second.
+The next test-only probes distinguish stdin closure state and bounded native
+stack labels. Neither probe is a correction or evidence to publish.
 Retain traced, untraced, and separately instrumented controls, unchanged exit
 deadlines, and bounded process/VM evidence. Localize the remaining lifetime before
 release; passing earlier PR and main gates did not establish a fix. The protected

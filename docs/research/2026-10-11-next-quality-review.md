@@ -231,6 +231,53 @@ inconclusive. Real-child tests cover both an EOF-released process and a process
 that consumes EOF but retains a receive port. Final teardown still owns killing
 and reaping the process. This is diagnosis, not a production correction.
 
+### EOF follow-up and next ownership probes
+
+The [EOF follow-up Windows job](https://github.com/blisspixel/quotabot/actions/runs/38190677639/job/114622577157)
+failed on source `ea33fd55995cceefd3c13b58c630cae38e107f17` in the
+untraced, unterminated UTF-8 overflow control. Main returned, but the launcher
+and VM remained present after the unchanged ten-second deadline. The parent's
+writer closed after process observation; no exit was observed in the subsequent
+one-second budget. This negative result is inconclusive. No VM service was
+enabled in this control, so the earlier captured socket state cannot be assigned
+to this occurrence. Its instrumented comparisons passed, further limiting what
+a passing instrumented case alone establishes.
+
+That exact signed tree passed the full local Windows gate: 2,376 collector
+tests and 455 desktop tests, with one environment-related skip in each package,
+clean formatting and analysis, and 92.86 and 87.52 percent line coverage. Hosted
+Linux and macOS passed. Hosted Windows failed; no failed job was rerun and the
+release remains held.
+
+The next JIT-only fixture wrappers register one fixed authenticated service
+extension. Only after failure, the parent can request a projection of known
+stdin ownership and closure booleans. The handler validates the exact method
+and matching isolate parameter before inspecting anything, catches exceptions
+without serializing them, reads no stdin contents, retains no reflected objects,
+and adds no timer. The mirrors import stays outside existing compiled fixture
+graphs. The pinned [socket fields](https://github.com/dart-lang/sdk/blob/3.12.2/sdk/lib/_internal/vm/bin/socket_patch.dart)
+can distinguish closure not requested, destruction still pending, and stdin
+already closed. They cannot expose native pending reads or prove cancellation
+completion. Existing VM-only, traced, and untraced controls remain separate.
+
+For failed Windows controls without a service endpoint, an optional bounded
+native debugger inspects only the VM identified as the owned launcher's child
+by the process snapshot. Microsoft's [`-pvr` mode](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/cdb-command-line-options)
+does not suspend the target; `-pd` and explicit `qd` preserve it. A fresh owned
+working directory, fixed command file, local empty symbol path, disabled network
+symbols, and disabled shell commands isolate startup. The fixed
+[`kc` stack view](https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/k--kb--kc--kd--kp--kp--kv--display-stack-backtrace-)
+contains function labels without arguments. Startup and output share three
+seconds; both output streams share a 64 KiB ceiling, and bounded cleanup owns
+late helper processes. Raw debugger output is never persisted or reported.
+Only bounded, allowlisted label-category counts survive. The end marker means
+the command sequence completed, not that every stack unwound successfully.
+Missing symbols, moving threads, and nearest-export attribution make these
+labels suggestive. Missing or incomplete inspection remains inconclusive.
+
+Both observations precede the existing post-failure EOF experiment and always
+preserve the original exit timeout. No production lifecycle change is included.
+
 ### Native Mac baseline
 
 On October 12 UTC, the attested published 0.11.11 arm64 CLI was checked on a
