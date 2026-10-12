@@ -108,7 +108,7 @@ Use these concrete increments to assess progress:
 
 | Increment | User outcome | Acceptance boundary |
 |---|---|---|
-| Bounded MCP maintenance, source 0.11.12 | A malformed stdio peer cannot buffer an unlimited frame; existing clients keep working. | SDK 2.4.2, explicit legacy mode, 256 KiB UTF-8 ceiling, incomplete-frame closure, no post-overflow dispatch, subscription delivery and cancellation, four legacy revisions, client fallback, independent review, full gates and published install smoke. |
+| Bounded MCP maintenance, source 0.11.13 | A malformed stdio peer cannot buffer an unlimited frame; existing clients keep working. | SDK 2.4.2, explicit legacy mode, 256 KiB UTF-8 ceiling, incomplete-frame closure, no post-overflow dispatch, subscription delivery and cancellation, four legacy revisions, client fallback, independent review, full gates and published install smoke. |
 | Claude host credential discovery | A signed-in user can see Claude without another login, including a selected alternate config directory. | One bounded injectable discovery path for collection and cache identity; native Keychain-only and file-fallback evidence; locked store, replacement, mismatch, disconnect, own-grant fallback; no host writes or guessed plan dates. |
 | Idle-machine account truth | The quota view stays current when work happens on another machine. | Sanitized two-machine comparison across host-token expiry and quotabot-owned refresh; original capture/reset scope visible; host files unchanged; no collection inference. |
 | Positive execution scope | A stronger local-only choice explains where execution is proven. | Producer plus endpoint-scope evidence, direct/forwarded/WSL/LM Link/composite cases; unknown stays unknown; loaded context and advertised maximum remain separate. |
@@ -116,16 +116,23 @@ Use these concrete increments to assess progress:
 
 **Windows lifecycle release hold:** the tagged 0.11.12 gate reproduced a source-JIT
 HTTP shutdown timeout after main returned, with launcher and VM both alive.
-The subsequent instrumented overflow failure captured a runnable main isolate
-with one live socket event port. Stdin is the leading ownership inference;
-native read completion remains unproven.
+The subsequent instrumented overflow failures captured a runnable main isolate
+with one live socket event port. The latest read-only projection identifies stdin
+destruction still pending after stream cancellation; the native call or lost
+completion that caused it remains unproven.
 The EOF follow-up also failed an untraced overflow control; closing its parent
 writer after failure did not produce an observed exit within one second.
-The next test-only probes distinguish stdin closure state and bounded native
-stack labels. Neither probe is a correction or evidence to publish.
-The latest Windows job stopped before those cases on a mixed-clock Claude
-sharing fixture. Verify its test-only clock correction, then obtain the pending
-shutdown observations.
+The mixed-clock Claude sharing fixture is corrected and passes its full local
+gate and prior hosted failure point. The subsequent Windows gate reached the
+ownership probe and failed at the unchanged shutdown deadline. Native stack
+inspection was incomplete. The Windows-only owned pipe reader is integrated in source 0.11.13, with the
+SDK parser and output queue retained. Its direct-FFI prototype was rejected after
+JIT error capture failed; a narrow native bridge captures results atomically.
+Focused overflow, startup, late-cleanup, pause, and deterministic cancellation
+races pass locally. Compiled bundles also pass synchronous and overlapped pipe
+shutdown and missing-library checks. Independent source review is complete;
+the Windows desktop release build also passes locally. Full contributor,
+installation, and hosted acceptance remain required. None is a released fix.
 Retain traced, untraced, and separately instrumented controls, unchanged exit
 deadlines, and bounded process/VM evidence. Localize the remaining lifetime before
 release; passing earlier PR and main gates did not establish a fix. The protected
@@ -202,7 +209,7 @@ canonical owner publication with fresh asset and provenance checks, and immutabl
 publication. Published install smoke upgrades from 0.11.8. Source commit:
 `0fa28b83797c7f4e9b2a28f10a139f6e89914901`. Native interaction and account evidence remain separate.
 
-**Immediate compatibility maintenance, in preparation for 0.11.12:** the September 13
+**Immediate compatibility maintenance, in preparation for 0.11.13:** the September 13
 [MCP and Agent Plugins review](docs/research/2026-09-13-mcp-agent-plugins.md)
 confirms that stable `mcp_dart` now implements the final July protocol and its
 2.4.2 release bounds incoming stdio messages. Source takes that update with

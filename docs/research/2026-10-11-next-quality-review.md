@@ -314,6 +314,76 @@ pending-I/O flag therefore does not establish persistent retention or EOF
 dependence. Native runtime attribution still requires the failed-run ownership
 observations or a minimal pinned-Dart reproduction.
 
+### Confirmed pending stdin destruction
+
+The [Windows job for signed source `ab6215e`](https://github.com/blisspixel/quotabot/actions/runs/38195096487/job/114635882527)
+passed the former Claude fixture failure point, then failed the mirrored
+unterminated UTF-8 overflow control at its unchanged ten-second exit deadline.
+After fixture main returned, the PID-verified VM retained a runnable main
+isolate with one socket event port. The stdin projection reported
+`controllerClosed: true`, `isClosing: true`, `isClosed: false`, both directions
+closed, and `event_port_present: true`. This identifies native stdin destruction
+still pending after stream cancellation. It does not distinguish a pending
+native read from missing destruction delivery. Native stack inspection was
+incomplete. Closing the parent's writer afterward did not produce an observed
+exit within one second.
+
+That exact signed tree passed the complete local Windows gate: 2,388 collector
+tests with two environment-related skips, 455 desktop tests with one skip,
+clean formatting and analysis, and 92.86 and 87.52 percent line coverage.
+Hosted Linux and macOS passed; Windows failed. No failed job was rerun.
+
+The unshipped 0.11.13 source now integrates a Windows pipe-only input reader,
+retaining the SDK's parser and output transport. One worker turn owns a unique
+read buffer and `OVERLAPPED`; an explicit delivery permit bounds read-ahead.
+On stop, cancellation retries retain the exact worker thread and storage until
+I/O settles. The worker then waits for the parent to revoke cancellation before
+releasing resources and returning normally. The original stdin handle is never
+closed, and no isolate or process is forced to exit.
+
+The initial direct-FFI prototype was rejected when a multi-chunk JIT trial
+reported a failed Windows call with error zero. Eager symbol resolution was
+insufficient: the [Dart runtime's documented error-capture limitation](https://github.com/dart-lang/sdk/issues/38832)
+allows native error state to change across the FFI boundary. A narrow C bridge
+captures the read result and error before returning, keeping blocking calls
+non-leaf. Its trials do not establish production acceptance. Complete native
+pipe, JIT/AOT, startup, cancellation, late-cleanup, dependency, bundle, checksum,
+signing-inventory, missing-library, installation, and hosted evidence is required
+before publication. The protected 0.11.12 tag remains unchanged and
+unpublished; Latest remains 0.11.11.
+
+### Owned Windows input acceptance
+
+The revised primitive passed JIT and AOT trials against overlapped named pipes
+and synchronous anonymous pipes, preserving 256 KiB byte order across delivery
+pauses. A deterministic seam pauses the worker after its stop check but before
+native read registration. Cancellation first misses; retry cancellation then
+settles the registered read while the writer remains open. Disabling retries in
+a separate negative control leaves the process alive past its original five-second
+deadline. A startup failure with a retained chunk reports a fixed error and
+delivers no retained bytes. These are primitive results, separate from release
+acceptance.
+
+The maintained Windows suite contains eleven ownership scenarios, with EOF
+explicitly closing its writer and cancellation cases keeping theirs open. All
+eight existing oversized-input controls pass locally with their original deadlines
+and tracing/inspection flags. Independent review corrected early HTTP-fixture
+allocation and preserved failure reporting on an internal permit violation.
+
+The native bridge uses a Windows-only [Dart build hook](https://dart.dev/tools/hooks),
+with the build dependencies already resolved by each package promoted to direct
+collector dependencies. Their compatible constraints retain the original
+collector and Flutter lock versions. The compiled CLI bundle includes the bridge
+alongside SQLite. Native metadata-only tests pass legacy negotiation, EOF,
+unterminated and terminated overflow over both pipe kinds, and a copied bundle
+with its bridge deliberately missing. Source-shim fallback now validates native
+hooks before replacing any launcher.
+
+The Windows desktop release build also passes locally. Source 0.11.13 remains
+pending full contributor gates, installation, hosted platform checks, and
+immutable publication. The protected
+0.11.12 tag is unchanged. Latest and the installed verified version remain 0.11.11.
+
 ### Native Mac baseline
 
 On October 12 UTC, the attested published 0.11.11 arm64 CLI was checked on a

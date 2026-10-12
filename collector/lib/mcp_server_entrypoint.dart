@@ -10,6 +10,7 @@ import 'mcp_http.dart';
 import 'mcp_server_options.dart';
 import 'provider_id_migration.dart';
 import 'refresh_timer.dart';
+import 'src/io/windows_pipe_input.dart';
 import 'util.dart';
 
 /// Upper bound for waiting on an already-started MCP snapshot, adapters, grant
@@ -253,8 +254,16 @@ Future<void> _runMain(
       if (!done.isCompleted) done.complete();
     }
   };
-  await server.connect(StdioServerTransport(
-    maxIncomingMessageBytes: maxMcpStdioMessageBytes,
-  ));
-  await done.future;
+  final pipeInput = openWindowsPipeStdin();
+  try {
+    await server.connect(StdioServerTransport(
+      stdin: pipeInput?.stdin,
+      maxIncomingMessageBytes: maxMcpStdioMessageBytes,
+    ));
+    await done.future;
+  } finally {
+    // Cancellation owns native completion, even if connect fails. Never use a
+    // caller timeout or a forced exit as permission to release pending I/O.
+    await pipeInput?.close();
+  }
 }

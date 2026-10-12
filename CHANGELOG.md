@@ -4,6 +4,26 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.13 - 2026-10-11
+
+Windows MCP pipe ownership and release recovery. Pending publication.
+
+- Replace only Windows pipe input with an owned reader while retaining the MCP
+  SDK parser, 256 KiB frame limit, subscriptions, and serialized output queue.
+  Bound read-ahead to one 64 KiB chunk; preserve byte order and pause/cancel
+  behavior. Terminate pending reads before releasing worker storage or thread
+  ownership, including cancellation before read registration and late startup.
+- Bundle a small Windows native asset that captures the read result and error
+  atomically across FFI. Keep files, terminals, other platforms, and production
+  HTTP on their existing input paths. Validate complete bundles and missing
+  native-library failure, with synchronous and overlapped pipe regressions.
+- Validate a fallback Windows source shim before replacing existing launchers,
+  including its native build hooks. Preserve launchers when both source execution
+  and the verified release download are unavailable. Require the pipe bridge
+  before activating 0.11.13 or newer payloads, including unpinned Latest downloads,
+  while preserving older rollback compatibility. Document compiler needs.
+- Correct the Claude shared-capture test clock at the first metadata response;
+  preserve production capture-time validation under slow setup.
 - Add bounded, test-only VM lifetime inspection alongside the original traced
   and untraced MCP exit controls. Keep authenticated service coordinates private,
   verify the fixture VM and main isolate, and emit only fixed metadata counts.
@@ -12,7 +32,8 @@ Notable changes to quotabot. Newest first.
 
 ## 0.11.12 - 2026-10-11
 
-Bounded MCP input with explicit legacy compatibility.
+Bounded MCP input with explicit legacy compatibility. This protected candidate
+remains unpublished after its Windows lifecycle release gate failed.
 
 - Upgrade the MCP Dart SDK to 2.4.2 in both collector and desktop lockfiles.
   Limit incoming stdio messages to 256 KiB of UTF-8 before each newline,

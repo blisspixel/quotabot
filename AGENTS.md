@@ -126,7 +126,7 @@ for that surface.
   server uses legacy `initialize` negotiation through `2025-11-25`;
   `2026-07-28` stateless support remains pending. See the
   [verified revision matrix](docs/research/2026-09-13-mcp-agent-plugins.md).
-  Source 0.11.12 also caps incoming stdio messages at 256 KiB of UTF-8 before
+  Source 0.11.13 also caps incoming stdio messages at 256 KiB of UTF-8 before
   each newline, closing on overflow even when the newline never arrives.
   Schema-invalid tool arguments return `isError: true` before handler work.
   Tools:

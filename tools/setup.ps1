@@ -43,7 +43,8 @@ function Invoke-QuotabotPayloadTransaction {
   param(
     [string]$CliSourceRoot,
     [string]$DesktopSourceRoot,
-    [Parameter(Mandatory)][string]$InstallRoot
+    [Parameter(Mandatory)][string]$InstallRoot,
+    [switch]$RequiresPipeBridge
   )
 
   if (-not $CliSourceRoot -and -not $DesktopSourceRoot) {
@@ -127,6 +128,10 @@ function Invoke-QuotabotPayloadTransaction {
     }
     if (-not (Test-Path -LiteralPath (Join-Path $State.StagedPayload 'lib\sqlite3.dll') -PathType Leaf)) {
       throw 'Staged payload is missing lib\sqlite3.dll'
+    }
+    if ($RequiresPipeBridge -and
+        -not (Test-Path -LiteralPath (Join-Path $State.StagedPayload 'lib\quotabot_pipe_input.dll') -PathType Leaf)) {
+      throw 'Staged payload is missing lib\quotabot_pipe_input.dll'
     }
     Move-Item -LiteralPath $State.StagedPayload -Destination $State.VersionRoot
     $State.VersionStaged = $true
@@ -328,12 +333,14 @@ function Invoke-QuotabotPayloadTransaction {
 function Install-QuotabotPayload {
   param(
     [Parameter(Mandatory)][string]$SourceRoot,
-    [Parameter(Mandatory)][string]$InstallRoot
+    [Parameter(Mandatory)][string]$InstallRoot,
+    [switch]$RequiresPipeBridge
   )
 
   Invoke-QuotabotPayloadTransaction `
     -CliSourceRoot $SourceRoot `
-    -InstallRoot $InstallRoot
+    -InstallRoot $InstallRoot `
+    -RequiresPipeBridge:$RequiresPipeBridge
 }
 
 function Install-QuotabotDesktopPayload {
@@ -351,13 +358,15 @@ function Install-QuotabotPayloadPair {
   param(
     [Parameter(Mandatory)][string]$CliSourceRoot,
     [Parameter(Mandatory)][string]$DesktopSourceRoot,
-    [Parameter(Mandatory)][string]$InstallRoot
+    [Parameter(Mandatory)][string]$InstallRoot,
+    [switch]$RequiresPipeBridge
   )
 
   Invoke-QuotabotPayloadTransaction `
     -CliSourceRoot $CliSourceRoot `
     -DesktopSourceRoot $DesktopSourceRoot `
-    -InstallRoot $InstallRoot
+    -InstallRoot $InstallRoot `
+    -RequiresPipeBridge:$RequiresPipeBridge
 }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -470,6 +479,17 @@ function Install-QuotabotDartRunShim {
   }
   if (-not (Test-Path -LiteralPath $dart -PathType Leaf)) {
     throw "Dart toolchain is missing dart.bat / dart.exe under $DartBin"
+  }
+  # Source execution also runs native build hooks. Validate those before
+  # replacing a usable launcher when both compilation and download failed.
+  Push-Location $CollectorDir
+  try {
+    & $dart run bin\collect.dart --help | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      throw 'Source execution is unavailable. Install Visual Studio Desktop development with C++ or retry the release download. Existing launchers were preserved.'
+    }
+  } finally {
+    Pop-Location
   }
   New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
   $shim = @"
@@ -704,7 +724,7 @@ try {
   }
   if ($CliOnly -or $NoApp) {
     Write-Step "Installing the CLI to $installRoot"
-    Install-QuotabotPayload -SourceRoot $extractPath -InstallRoot $installRoot
+    Install-QuotabotPayload -SourceRoot $extractPath -InstallRoot $installRoot -RequiresPipeBridge
   } else {
     $desktopInstallRoot = Join-Path $installRoot 'desktop'
     $installedAppExe = Join-Path $desktopInstallRoot 'quotabot.exe'
@@ -786,7 +806,8 @@ try {
       Install-QuotabotPayloadPair `
         -CliSourceRoot $extractPath `
         -DesktopSourceRoot (Split-Path -Parent $builtAppExe) `
-        -InstallRoot $installRoot
+        -InstallRoot $installRoot `
+        -RequiresPipeBridge
       $desktopActivated = $true
 
       Write-Step 'Creating the Desktop shortcut'
@@ -803,7 +824,7 @@ try {
       $desktopSkipped = $true
       $NoApp = $true
       Write-Step "Installing the CLI to $installRoot"
-      Install-QuotabotPayload -SourceRoot $extractPath -InstallRoot $installRoot
+      Install-QuotabotPayload -SourceRoot $extractPath -InstallRoot $installRoot -RequiresPipeBridge
       $desktopFailure = $null
     } finally {
       if ($restartRequested) {

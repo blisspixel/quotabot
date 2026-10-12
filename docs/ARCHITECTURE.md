@@ -587,7 +587,18 @@ and idempotent, while reserve also collects live metadata.
 subscription loop. Clients subscribe with `resources/subscribe`; on an amber/red
 crossing, the server emits the standard `notifications/resources/updated` event
 for `quotas://alerts`, so clients react by reading the resource instead of
-polling a tool. `bin/mcp_server.dart` feeds the shared server factory over stdio
+polling a tool. Windows stdio pipes use `src/io/windows_pipe_input.dart` rather
+than the SDK's stdin socket. One worker owns each native read through terminal
+completion, while a one-chunk permit bounds reader read-ahead to 64 KiB. The
+SDK's separate frame buffer retains its 256 KiB per-message limit. Cancellation
+retries cover the interval before read registration, then revoke thread and
+storage eligibility before releasing the worker. No forced process exit or
+parent EOF is required for an oversized frame. A Windows-only build hook bundles
+`src/windows_pipe_input.c`, which captures the read result and Windows error
+atomically before returning through FFI. The existing MCP SDK retains framing,
+parsing, subscriptions, and its serialized output queue. Files, terminals, other
+operating systems, and production HTTP keep their existing input paths.
+`bin/mcp_server.dart` feeds the shared server factory over stdio
 by default or MCP Streamable HTTP when launched with `--http`. `mcp_http.dart`
 keeps HTTP opt-in and loopback-only, enables DNS-rebinding host/origin checks,
 rejects batch JSON-RPC payloads, requires a bearer token of at least 32

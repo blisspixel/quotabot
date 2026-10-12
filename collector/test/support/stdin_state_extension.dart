@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:mirrors';
 
+import 'package:quotabot_collector/src/io/windows_pipe_input.dart';
+
 import 'stdin_state_schema.dart';
 
 // JIT-only test support. Keep this import outside compiled fixture graphs.
@@ -34,6 +36,8 @@ Future<ServiceExtensionResponse> readStdinStateExtension(
 }
 
 Map<String, Object?> snapshotStdinState() {
+  // Inspecting io.stdin would instantiate the socket this mode never uses.
+  if (usingWindowsPipeStdin) return {'available': false};
   try {
     final library = reflectClass(Stdin).owner as LibraryMirror;
     InstanceMirror field(InstanceMirror object, String name) =>

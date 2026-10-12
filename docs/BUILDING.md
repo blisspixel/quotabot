@@ -21,12 +21,18 @@ pwsh tools/setup.ps1          # Windows; add -CliOnly for just the CLI
 bash tools/setup.sh           # macOS / Linux; add --cli-only for just the CLI
 ```
 
-The CLI does not need the desktop OS toolchain. If those tools are missing, or
+The Windows source CLI requires Visual Studio Desktop development with C++ for
+its small native pipe-reader bridge. It does not require ATL or desktop plugins;
+the prebuilt CLI requires no compiler. macOS and Linux CLI builds retain their
+existing native-asset path. If desktop tools are missing, or
 the desktop build fails, setup still installs the CLI, skips the tray app, and
 prints the repair step. If Dart is missing or `dart build cli` fails, setup
 downloads the checksum-verified release CLI instead of exiting. If that
 download also fails and Dart is present, it installs a `dart run` shim from
-this checkout. Re-run the same command after adding the tools to
+this checkout. Windows validates that source execution and its native hooks work
+before replacing a launcher with that shim. If both source execution and the
+release download fail, it preserves existing launchers and reports the repair
+step. Re-run the same command after adding the tools to
 install the desktop app. On Windows that is Visual Studio C++ ATL plus plugin
 symlink permission from Windows Developer Mode or an elevated terminal; on
 macOS, Xcode command-line tools; on Linux, clang, cmake, ninja, pkg-config, and
