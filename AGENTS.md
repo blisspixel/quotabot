@@ -61,12 +61,14 @@ verification, is [CLAUDE.md](CLAUDE.md).
 
 ## Project status
 
-The current verified stable release is 0.11.13. Callers should treat a snapshot
+The current verified stable release is 0.11.14. Callers should treat a snapshot
 with `drift_reason` as non-routable, keep measured percentages visible on
 admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
 explicit-spend evidence. Fresh quota publishes before advisory analytics.
 
+Version 0.11.14 separates absent subscription quota from measured low quota
+and adds doctor sign-in readiness without changing normalized failure evidence.
 Version 0.11.13 adds bounded MCP input with owned Windows pipe cancellation
 and native-bridge installation checks, retaining legacy negotiation and existing
 shutdown deadlines. Version 0.11.11 added shared successful Claude captures with original age,
