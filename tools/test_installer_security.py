@@ -1233,9 +1233,7 @@ foreach ($release in @('0.11.15', '0.11.15-rc.1')) {
                 bundle = root / "quotabot-desktop" / "v0.11.13"
                 asset = "quotabot-windows-x64-desktop.zip"
             else:
-                bundle = (
-                    root / ".local" / "share" / "quotabot-desktop" / "v0.11.13"
-                )
+                bundle = root / ".local" / "share" / "quotabot-desktop" / "v0.11.13"
                 asset = "quotabot-linux-x64-desktop.tar.gz"
             version_file = bundle / "data" / "flutter_assets" / "version.json"
             version_file.parent.mkdir(parents=True)
