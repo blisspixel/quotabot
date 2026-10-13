@@ -3493,6 +3493,7 @@ class _DashboardState extends State<Dashboard>
     return showDialog<void>(
       context: launchContext,
       builder: (resultContext) => AlertDialog(
+        scrollable: true,
         title: Text(result.ok ? 'Update installed' : 'Update failed'),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -3567,6 +3568,7 @@ class _DashboardState extends State<Dashboard>
                     : 'This build matches its latest GitHub release channel.'
               : 'This build is newer than its latest GitHub release channel.';
           return AlertDialog(
+            scrollable: true,
             title: Text(
               recommended == null
                   ? 'No stable update found'
