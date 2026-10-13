@@ -10,8 +10,8 @@ and recommends where to send the next request. It also shows supported local
 models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
-> **Current stable:** 0.11.14. quotabot remains under active 0.x development.
-> **Pending publication:** 0.11.15.
+> **Current stable:** 0.11.15. quotabot remains under active 0.x development.
+> **Pending publication:** 0.11.16.
 > **Next:** confirm a supported Claude quota integration before expanding
 > credential discovery, prove account-wide freshness on idle machines through
 > a permitted path, and strengthen execution-scope evidence for local-only
@@ -247,21 +247,21 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Version [0.11.14](https://github.com/blisspixel/quotabot/releases/tag/v0.11.14) distinguishes absent
-subscription quota from measured low quota and reports doctor sign-in readiness
-without treating it as quota evidence. It includes the 0.11.13 bounded MCP
-input and owned Windows pipe cancellation, retaining legacy negotiation,
-subscriptions, and the existing response and shutdown deadlines. See the
+Version [0.11.15](https://github.com/blisspixel/quotabot/releases/tag/v0.11.15) updates an existing
+managed desktop installation alongside the CLI and reopens a running managed
+tray after the swap. Fresh installs stay CLI-only; hand-extracted versioned
+copies remain in place. Earlier quota-readiness and bounded MCP contracts remain
+in effect. See the
 [changelog](CHANGELOG.md) and
 [quality review](docs/research/2026-10-11-next-quality-review.md).
 
-The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38253590698),
-[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38253692696), and
-[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38327594436).
+The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38404499404),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38414072512), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38429260783).
 The immutable fourteen-asset set contains four CLI and three desktop
 archive/checksum pairs. Publication verified exact workflow provenance and
 fresh downloads. Unpinned Latest smoke covers clean install, upgrade from
-0.11.13, persistent state, source setup, and stable-channel resolution on
+0.11.14, persistent state, source setup, and stable-channel resolution on
 Windows, macOS, and Linux. Desktop checks verify Windows/Linux startup and
 the installed macOS bundle.
 
