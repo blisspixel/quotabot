@@ -4,14 +4,7 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-- `quotabot update`, `quotabot doctor`, and the release installers name a
-  hand-extracted desktop bundle whose embedded version differs from the CLI.
-  The notice includes the path, archive name, checksum step, and extract
-  steps. That copy is not replaced. An upgrade that still runs an older
-  packaged installer prints the notice from the new CLI's doctor and the next
-  up-to-date update check.
-
-## 0.11.15 - 2026-10-12
+## 0.11.15 - 2026-10-13
 
 Managed desktop updates with the CLI.
 
@@ -19,6 +12,13 @@ Managed desktop updates with the CLI.
   managed desktop app to the same tag. A fresh install stays CLI-only. A
   running managed tray closes for the swap and opens again afterward.
   Hand-extracted versioned copies stay where they are.
+- `quotabot update`, `quotabot doctor`, and the release installers name a
+  hand-extracted desktop bundle whose embedded version differs from the CLI.
+  The notice includes the path, archive name, checksum step, and extract
+  steps. That copy is not replaced. The desktop dialog uses the installed CLI
+  version, and an archive name is included only when this release ships that
+  desktop asset. An upgrade that still runs an older packaged installer prints
+  the notice from the new CLI's doctor and the next up-to-date update check.
 
 ## 0.11.14 - 2026-10-12
 
