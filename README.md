@@ -10,8 +10,7 @@ and recommends where to send the next request. It also shows supported local
 models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
-> **Current stable:** 0.11.13. quotabot remains under active 0.x development.
-> **Pending publication:** 0.11.14.
+> **Current stable:** 0.11.14. quotabot remains under active 0.x development.
 > **Next:** confirm a supported Claude quota integration before expanding
 > credential discovery, prove account-wide freshness on idle machines through
 > a permitted path, and strengthen execution-scope evidence for local-only
@@ -21,8 +20,10 @@ on-device capacity directly or fall back when subscription caps are low.
 
 The [October 11 quality review](docs/research/2026-10-11-next-quality-review.md)
 checks these priorities against current provider and runtime contracts. Version
-0.11.13 pairs bounded MCP stdio with owned Windows pipe cancellation while
-preserving legacy negotiation; modern protocol support retains a separate acceptance matrix.
+0.11.14 distinguishes absent subscription quota from measured low quota and
+reports doctor sign-in readiness without treating it as quota evidence. It
+includes the 0.11.13 bounded MCP stdio and owned Windows pipe cancellation
+while preserving legacy negotiation; modern protocol support retains a separate acceptance matrix.
 
 Release notes state each artifact's Windows and macOS signing status. Current
 artifacts are unsigned; [signing readiness](docs/RELEASE-SIGNING.md) proceeds
@@ -238,24 +239,23 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-Version [0.11.13](https://github.com/blisspixel/quotabot/releases/tag/v0.11.13) ships bounded MCP input and
-owned Windows pipe cancellation, retaining legacy negotiation, subscriptions,
-and the existing response and shutdown deadlines. Installation validates the
-native bridge before activation. It includes the 0.11.11 discovery, shared
-Claude capture, and concrete local-model advice improvements. See the
+Version [0.11.14](https://github.com/blisspixel/quotabot/releases/tag/v0.11.14) distinguishes absent
+subscription quota from measured low quota and reports doctor sign-in readiness
+without treating it as quota evidence. It includes the 0.11.13 bounded MCP
+input and owned Windows pipe cancellation, retaining legacy negotiation,
+subscriptions, and the existing response and shutdown deadlines. See the
 [changelog](CHANGELOG.md) and
 [quality review](docs/research/2026-10-11-next-quality-review.md).
 
-The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38208637717),
-[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38232223042), and
-[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38238648896).
+The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38253590698),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38253692696), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38327594436).
 The immutable fourteen-asset set contains four CLI and three desktop
 archive/checksum pairs. Publication verified exact workflow provenance and
 fresh downloads. Unpinned Latest smoke covers clean install, upgrade from
-0.11.11, persistent state, source setup, and stable-channel resolution on
+0.11.13, persistent state, source setup, and stable-channel resolution on
 Windows, macOS, and Linux. Desktop checks verify Windows/Linux startup and
-the installed macOS bundle. Published CLI and desktop payloads were also
-installed and checked on this Windows machine.
+the installed macOS bundle.
 
 Current Windows and macOS artifacts remain unsigned transition artifacts.
 Native publisher signing, supported Claude quota integration, real-account
