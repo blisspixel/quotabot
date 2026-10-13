@@ -1297,7 +1297,18 @@ foreach ($release in @('0.11.15', '0.11.15-rc.1')) {
                 different.stdout + different.stderr,
             )
             self.assertIn("Hand-extracted desktop 0.11.13", different.stdout)
-            self.assertIn(str(bundle), different.stdout)
+            reported = next(
+                line
+                for line in different.stdout.splitlines()
+                if line.startswith("Hand-extracted desktop ")
+            )
+            path_at = reported.index(" at ") + 4
+            path_end = reported.index(" differs from CLI ", path_at)
+            reported_path = reported[path_at:path_end]
+            self.assertTrue(
+                os.path.samefile(reported_path, bundle),
+                f"{reported_path} is not {bundle}",
+            )
             self.assertIn(asset, different.stdout)
             self.assertIn(
                 "https://github.com/blisspixel/quotabot/releases/tag/v0.11.15",
