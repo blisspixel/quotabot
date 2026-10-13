@@ -82,6 +82,7 @@ fi
 echo "Downloading ${ASSET} from ${VERSION}..."
 
 tmpfile=$(mktemp)
+desktop_work=""
 checksum_file=$(mktemp)
 extract_dir=$(mktemp -d)
 transaction_versions_root=""
@@ -205,6 +206,9 @@ cleanup() {
   fi
   rm -f "$tmpfile" "$checksum_file"
   rm -rf "$extract_dir"
+  if [[ -n "${desktop_work:-}" ]]; then
+    rm -rf "$desktop_work"
+  fi
   return "$status"
 }
 trap cleanup EXIT
@@ -432,9 +436,118 @@ elif [[ "$reported_version" != "quotabot ${VERSION#v}" ]]; then
   exit 1
 fi
 
+stop_managed_executable() {
+  local target="$1"
+  local line pid args
+  local -a ps_args
+  managed_desktop_was_running=0
+  if [[ "$(uname -s)" == Darwin ]]; then
+    ps_args=(-axo pid=,command=)
+  else
+    ps_args=(-eo pid=,args=)
+  fi
+  while IFS= read -r line; do
+    pid="${line%% *}"
+    args="${line#"$pid"}"
+    args="${args#"${args%%[![:space:]]*}"}"
+    case "$args" in
+      "$target"|"$target "*)
+        if [[ -n "$pid" && "$pid" != "$$" && "$pid" != "$PPID" ]]; then
+          kill "$pid" 2>/dev/null || true
+          managed_desktop_was_running=1
+        fi
+        ;;
+    esac
+  done < <(ps "${ps_args[@]}")
+}
+
+download_verified_release_asset() {
+  local asset="$1"
+  local destination_dir="$2"
+  local asset_url expected actual
+  if [[ "$VERSION" == latest ]]; then
+    asset_url="https://github.com/${REPO}/releases/latest/download/${asset}"
+  else
+    asset_url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
+  fi
+  mkdir -p "$destination_dir"
+  curl -fsSL "$asset_url" -o "$destination_dir/$asset"
+  curl -fsSL "${asset_url}.sha256" -o "$destination_dir/$asset.sha256"
+  expected=$(awk 'NR==1 {print tolower($1)}' "$destination_dir/$asset.sha256")
+  if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "Invalid checksum file for ${asset}" >&2
+    return 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$destination_dir/$asset" | awk '{print tolower($1)}')
+  else
+    actual=$(shasum -a 256 "$destination_dir/$asset" | awk '{print tolower($1)}')
+  fi
+  if [[ "$actual" != "$expected" ]]; then
+    echo "Checksum mismatch for ${asset}" >&2
+    return 1
+  fi
+}
+
+# A managed desktop install follows the same tag as the CLI. A missing managed
+# app stays absent, and a hand-extracted versioned copy is left where it is.
+managed_desktop=""
+desktop_asset=""
+desktop_kind=""
+managed_desktop_was_running=0
+case "$OS" in
+  darwin)
+    if [[ -x "${HOME}/Applications/quotabot.app/Contents/MacOS/quotabot" ]]; then
+      managed_desktop="${HOME}/Applications/quotabot.app"
+      desktop_asset="quotabot-darwin-${ARCH}-desktop.zip"
+      desktop_kind="macos-app"
+    fi
+    ;;
+  linux)
+    if [[ -x "${HOME}/.local/share/quotabot-desktop/quotabot" ]]; then
+      managed_desktop="${HOME}/.local/share/quotabot-desktop"
+      desktop_asset="quotabot-linux-${ARCH}-desktop.tar.gz"
+      desktop_kind="linux-desktop"
+    fi
+    ;;
+esac
+desktop_work=""
+if [[ -n "$managed_desktop" ]]; then
+  echo "Updating the managed desktop app from ${VERSION}"
+  desktop_work="$(mktemp -d)"
+  download_verified_release_asset "$desktop_asset" "$desktop_work"
+  mkdir -p "$desktop_work/expanded"
+  if [[ "$desktop_kind" == macos-app ]]; then
+    ditto -x -k "$desktop_work/$desktop_asset" "$desktop_work/expanded"
+    if [[ ! -x "$desktop_work/expanded/quotabot.app/Contents/MacOS/quotabot" ]]; then
+      echo "Downloaded desktop archive did not contain quotabot.app" >&2
+      exit 1
+    fi
+    stop_managed_executable "$managed_desktop/Contents/MacOS/quotabot"
+    install_versioned_tree \
+      "$desktop_work/expanded/quotabot.app" "$managed_desktop" macos-app
+  else
+    tar -xzf "$desktop_work/$desktop_asset" -C "$desktop_work/expanded"
+    if [[ ! -x "$desktop_work/expanded/quotabot" ]]; then
+      echo "Downloaded desktop archive did not contain quotabot" >&2
+      exit 1
+    fi
+    stop_managed_executable "$managed_desktop/quotabot"
+    install_versioned_tree \
+      "$desktop_work/expanded" "$managed_desktop" linux-desktop
+  fi
+  rm -rf "$desktop_work"
+  desktop_work=""
+fi
+
 # Each release lives in a complete versioned directory. The stable install path
 # is one symlink, so upgrades become visible through one atomic rename.
-install_versioned_tree "$extract_dir" "$INSTALL_ROOT" cli
+if ! install_versioned_tree "$extract_dir" "$INSTALL_ROOT" cli; then
+  if [[ -n "$managed_desktop" ]]; then
+    echo "CLI activation failed after the managed desktop app was updated." >&2
+  fi
+  exit 1
+fi
 
 # Keep the PATH shim valid until its complete replacement is ready.
 wrapper_tmp=$(mktemp "$INSTALL_DIR/.quotabot.XXXXXX")
@@ -459,6 +572,16 @@ EOF
 chmod +x "$wrapper_tmp"
 mv -f "$wrapper_tmp" "$INSTALL_DIR/$BINARY_NAME"
 wrapper_tmp=""
+
+if [[ "$managed_desktop_was_running" -eq 1 && -n "$managed_desktop" ]]; then
+  if [[ "$OS" == darwin ]]; then
+    open "$managed_desktop"
+  else
+    nohup "$managed_desktop/quotabot" >/dev/null 2>&1 &
+    disown || true
+  fi
+  echo "Restarted the managed desktop app."
+fi
 
 # PATH check. Persist ~/.local/bin so a new terminal can find quotabot.
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then

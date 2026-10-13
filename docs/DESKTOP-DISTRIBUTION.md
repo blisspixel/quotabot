@@ -176,7 +176,14 @@ distributions may need equivalent GTK, AppIndicator, and system tray packages.
 
 ## Update, rollback, and uninstall
 
-Updates install safely beside the previous version:
+`quotabot update` updates the managed desktop location when it is already
+installed: `%LOCALAPPDATA%\quotabot\desktop` on Windows,
+`~/Applications/quotabot.app` on macOS, or
+`~/.local/share/quotabot-desktop` on Linux. It uses the same tag and checksum
+sidecar as the CLI. A running managed app is closed for the swap and opened
+again afterward. A fresh CLI install does not add a desktop app.
+
+A hand-extracted versioned copy stays beside the previous version:
 
 1. Download the new tag into a new versioned directory.
 2. Verify its checksum and attestation.

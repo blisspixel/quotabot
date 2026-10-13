@@ -3498,9 +3498,9 @@ class _DashboardState extends State<Dashboard>
           constraints: const BoxConstraints(maxWidth: 420),
           child: Text(
             result.ok
-                ? '${result.message} Restart this tray app after a matching '
-                      'desktop install. The CLI updater does not replace this '
-                      'window by itself.'
+                ? '${result.message} A managed tray app installed with '
+                      'quotabot is updated to the same release. This window '
+                      'closes during that swap and opens again afterward.'
                 : result.message,
           ),
         ),
@@ -3590,9 +3590,9 @@ class _DashboardState extends State<Dashboard>
                   Text(
                     status.updateAvailable
                         ? 'Install latest update runs the checksum-verified '
-                              'CLI updater. This tray window is not replaced '
-                              'automatically; restart it after a matching '
-                              'desktop install.'
+                              'updater. It replaces the CLI and, when this is '
+                              'the managed install, this tray app. The window '
+                              'closes during the swap and opens again afterward.'
                         : 'Open the release to review signing status, '
                               'checksums, assets, and update instructions.',
                   ),

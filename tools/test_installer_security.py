@@ -535,6 +535,29 @@ class InstallerSecurityTests(unittest.TestCase):
         for retained in ("'bin'", "'lib'", "'cli-versions'", "'desktop'"):
             self.assertIn(retained, reset)
 
+    def test_release_installers_update_an_existing_managed_desktop(self) -> None:
+        windows = (ROOT / "install.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "install.sh").read_text(encoding="utf-8")
+
+        self.assertIn("desktop\\quotabot.exe", windows)
+        self.assertIn("quotabot-windows-x64-desktop.zip", windows)
+        self.assertIn("function Install-ManagedQuotabotDesktop", windows)
+        self.assertIn("function Restore-ManagedQuotabotDesktop", windows)
+        self.assertLess(
+            windows.index("Updating the managed desktop app from $version"),
+            windows.index("Install-QuotabotPayload -SourceRoot $extractPath"),
+        )
+        self.assertIn(
+            '"${HOME}/Applications/quotabot.app/Contents/MacOS/quotabot"', posix
+        )
+        self.assertIn('"${HOME}/.local/share/quotabot-desktop/quotabot"', posix)
+        self.assertIn("quotabot-darwin-${ARCH}-desktop.zip", posix)
+        self.assertIn("quotabot-linux-${ARCH}-desktop.tar.gz", posix)
+        self.assertLess(
+            posix.index("Updating the managed desktop app from ${VERSION}"),
+            posix.index('install_versioned_tree "$extract_dir" "$INSTALL_ROOT" cli'),
+        )
+
     def test_windows_release_installer_uses_one_unique_temp_workspace(self) -> None:
         script = (ROOT / "install.ps1").read_text(encoding="utf-8")
 

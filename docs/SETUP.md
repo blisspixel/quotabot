@@ -34,7 +34,9 @@ is a fresh live adapter read. Automation that requires fresh evidence should use
 built-in fleet, so use `--profile=NAME` or `--exclude=PROVIDER,...` to select the
 intended adapter contact and verdict scope. A strict run that selects no adapter
 fails with exit 65 instead of passing vacuously.
-The one-line release installers install the CLI only. Tagged releases built by
+The one-line release installers install the CLI. When a managed desktop app is
+already installed, the same command updates that app to the same tag. A fresh
+install does not add a tray app. Tagged releases built by
 the current workflow also attach verified portable desktop bundles; follow
 [Desktop release bundles](DESKTOP-DISTRIBUTION.md) for checksum and provenance
 verification plus update, rollback, and uninstall behavior. To build and install

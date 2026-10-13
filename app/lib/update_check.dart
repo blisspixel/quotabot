@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-const String quotabotAppVersion = '0.11.14';
-const String quotabotAppBuild = '0.11.14+69';
+const String quotabotAppVersion = '0.11.15';
+const String quotabotAppBuild = '0.11.15+70';
 const String quotabotReleasesUrl =
     'https://github.com/blisspixel/quotabot/releases';
 const String quotabotReleasesApi =
@@ -443,8 +443,9 @@ String? defaultQuotabotCliPath({
   return null;
 }
 
-/// Runs `quotabot update --json`. That command updates the CLI, not this tray
-/// binary. Missing CLI paths fail closed with a hand-install message.
+/// Runs `quotabot update --json`. The packaged installer updates the CLI and,
+/// when a managed desktop app is already installed, that app. Missing CLI
+/// paths fail closed with a hand-install message.
 Future<QuotabotCliInstallResult> installQuotabotCliUpdate({
   String? executable,
   CliProcessRunner? runner,
