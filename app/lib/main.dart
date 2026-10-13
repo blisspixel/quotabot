@@ -3493,14 +3493,19 @@ class _DashboardState extends State<Dashboard>
     return showDialog<void>(
       context: launchContext,
       builder: (resultContext) => AlertDialog(
+        scrollable: true,
         title: Text(result.ok ? 'Update installed' : 'Update failed'),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
           child: Text(
             result.ok
-                ? '${result.message} Restart this tray app after a matching '
-                      'desktop install. The CLI updater does not replace this '
-                      'window by itself.'
+                ? '${result.message} A managed tray app installed with '
+                      'quotabot is updated to the same release. This window '
+                      'closes during that swap and opens again afterward. '
+                      'A hand-extracted versioned copy stays on its current '
+                      'build. Open releases, download the desktop archive for '
+                      'your OS, extract it into a new folder, quit the old '
+                      'copy, and launch the new one.'
                 : result.message,
           ),
         ),
@@ -3509,14 +3514,13 @@ class _DashboardState extends State<Dashboard>
             onPressed: () => Navigator.of(resultContext).pop(),
             child: const Text('Close'),
           ),
-          if (!result.ok)
-            TextButton(
-              onPressed: () {
-                Navigator.of(resultContext).pop();
-                unawaited(_openRelease(quotabotReleasesUrl));
-              },
-              child: const Text('Open releases'),
-            ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(resultContext).pop();
+              unawaited(_openRelease(quotabotReleasesUrl));
+            },
+            child: const Text('Open releases'),
+          ),
         ],
       ),
     );
@@ -3564,6 +3568,7 @@ class _DashboardState extends State<Dashboard>
                     : 'This build matches its latest GitHub release channel.'
               : 'This build is newer than its latest GitHub release channel.';
           return AlertDialog(
+            scrollable: true,
             title: Text(
               recommended == null
                   ? 'No stable update found'
@@ -3590,9 +3595,13 @@ class _DashboardState extends State<Dashboard>
                   Text(
                     status.updateAvailable
                         ? 'Install latest update runs the checksum-verified '
-                              'CLI updater. This tray window is not replaced '
-                              'automatically; restart it after a matching '
-                              'desktop install.'
+                              'updater. It replaces the CLI and, when this is '
+                              'the managed install, this tray app. The window '
+                              'closes during the swap and opens again afterward. '
+                              'For a hand-extracted versioned copy, open the '
+                              'release, download the desktop archive for your '
+                              'OS, extract it into a new folder, quit the old '
+                              'copy, and launch the new one.'
                         : 'Open the release to review signing status, '
                               'checksums, assets, and update instructions.',
                   ),

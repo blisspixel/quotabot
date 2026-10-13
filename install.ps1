@@ -63,6 +63,99 @@ function Get-QuotabotFileSha256 {
     }
 }
 
+function Stop-ManagedQuotabotDesktopProcesses {
+    param([Parameter(Mandatory)][string]$ExePath)
+
+    $resolved = [IO.Path]::GetFullPath($ExePath)
+    $stopped = @()
+    foreach ($proc in Get-Process -Name quotabot -ErrorAction SilentlyContinue) {
+        try {
+            if ($proc.Path -and ([IO.Path]::GetFullPath($proc.Path) -ieq $resolved)) {
+                Stop-Process -Id $proc.Id -Force
+                $stopped += $proc.Id
+            }
+        } catch {
+            # An inaccessible process path belongs to some other quotabot binary.
+        }
+    }
+    foreach ($id in $stopped) {
+        try { Wait-Process -Id $id -Timeout 10 } catch {}
+    }
+    return $stopped.Count -gt 0
+}
+
+function Install-ManagedQuotabotDesktop {
+    param(
+        [Parameter(Mandatory)][string]$SourceRoot,
+        [Parameter(Mandatory)][string]$InstallRoot
+    )
+
+    $transaction = [guid]::NewGuid().ToString('N')
+    $destination = Join-Path $InstallRoot 'desktop'
+    $staged = Join-Path $InstallRoot ".quotabot-desktop-new-$transaction"
+    $backup = Join-Path $InstallRoot ".quotabot-desktop-previous-$transaction"
+    $lockPath = Join-Path $InstallRoot '.quotabot-desktop-install.lock'
+    $installLock = $null
+    $backedUp = $false
+    $activated = $false
+
+    try {
+        try {
+            $installLock = [IO.File]::Open(
+                $lockPath,
+                [IO.FileMode]::OpenOrCreate,
+                [IO.FileAccess]::ReadWrite,
+                [IO.FileShare]::None
+            )
+        } catch {
+            throw 'Another quotabot install is already activating a bundle. Re-run after it finishes.'
+        }
+
+        Copy-Item -LiteralPath $SourceRoot -Destination $staged -Recurse
+        if (-not (Test-Path -LiteralPath (Join-Path $staged 'quotabot.exe') -PathType Leaf)) {
+            throw 'Staged desktop payload is missing quotabot.exe'
+        }
+        if (Test-Path -LiteralPath $destination) {
+            Move-Item -LiteralPath $destination -Destination $backup
+            $backedUp = $true
+        }
+        Move-Item -LiteralPath $staged -Destination $destination
+        $activated = $true
+        if ($backedUp) { return $backup }
+        return $null
+    } catch {
+        $installError = $_.Exception.Message
+        if ($activated -and (Test-Path -LiteralPath $destination)) {
+            Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
+            $activated = $false
+        }
+        if ($backedUp -and (Test-Path -LiteralPath $backup) -and -not (Test-Path -LiteralPath $destination)) {
+            Move-Item -LiteralPath $backup -Destination $destination
+            $backedUp = $false
+        }
+        if (Test-Path -LiteralPath $staged) {
+            Remove-Item -LiteralPath $staged -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        throw "Could not replace the managed desktop app; it was left intact or restored. Close it and re-run. ($installError)"
+    } finally {
+        if ($installLock) { $installLock.Dispose() }
+        Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Restore-ManagedQuotabotDesktop {
+    param(
+        [Parameter(Mandatory)][string]$InstallRoot,
+        [Parameter(Mandatory)][string]$BackupPath
+    )
+
+    $destination = Join-Path $InstallRoot 'desktop'
+    if (Test-Path -LiteralPath $destination) {
+        Remove-Item -LiteralPath $destination -Recurse -Force
+    }
+    Move-Item -LiteralPath $BackupPath -Destination $destination
+}
+
 Write-Host "=== quotabot installer ==="
 
 function Install-QuotabotPayload {
@@ -318,8 +411,57 @@ try {
     # Use the verified executable version, including for an unpinned latest
     # download. Older rollback payloads legitimately predate this native asset.
     $payloadVersion = [version](($reportedVersion.Substring(9) -split '-')[0])
-    Install-QuotabotPayload -SourceRoot $extractPath -InstallRoot $installRoot `
-        -RequiresPipeBridge:($payloadVersion -ge [version]'0.11.13')
+    $managedDesktopExe = Join-Path $installRoot 'desktop\quotabot.exe'
+    $desktopBackup = $null
+    $restartDesktop = $false
+    if (Test-Path -LiteralPath $managedDesktopExe -PathType Leaf) {
+        $desktopAsset = 'quotabot-windows-x64-desktop.zip'
+        $desktopDownload = Join-Path $workPath $desktopAsset
+        $desktopChecksum = Join-Path $workPath "$desktopAsset.sha256"
+        $desktopExtract = Join-Path $workPath 'desktop-expanded'
+        $desktopUrl = "https://github.com/$repo/releases/download/v$($reportedVersion.Substring(9))/$desktopAsset"
+        Write-Host "Updating the managed desktop app from $version"
+        Invoke-WebRequest -Uri $desktopUrl -OutFile $desktopDownload -UseBasicParsing
+        Invoke-WebRequest -Uri "$desktopUrl.sha256" -OutFile $desktopChecksum -UseBasicParsing
+        try {
+            $desktopExpected = ((Get-Content $desktopChecksum -Raw) -split '\s+')[0].ToLowerInvariant()
+            if ($desktopExpected -notmatch '^[0-9a-f]{64}$') {
+                throw "Invalid checksum file for $desktopAsset"
+            }
+            $desktopActual = Get-QuotabotFileSha256 -Path $desktopDownload
+            if ($desktopActual -ne $desktopExpected) {
+                throw "Checksum mismatch for $desktopAsset"
+            }
+        } finally {
+            Remove-Item -LiteralPath $desktopChecksum -Force -ErrorAction SilentlyContinue
+        }
+        Expand-Archive -LiteralPath $desktopDownload -DestinationPath $desktopExtract -Force
+        if (-not (Test-Path -LiteralPath (Join-Path $desktopExtract 'quotabot.exe') -PathType Leaf)) {
+            throw 'Downloaded desktop archive did not contain quotabot.exe'
+        }
+        $restartDesktop = Stop-ManagedQuotabotDesktopProcesses -ExePath $managedDesktopExe
+        $desktopBackup = Install-ManagedQuotabotDesktop -SourceRoot $desktopExtract -InstallRoot $installRoot
+    }
+    try {
+        Install-QuotabotPayload -SourceRoot $extractPath -InstallRoot $installRoot `
+            -RequiresPipeBridge:($payloadVersion -ge [version]'0.11.13')
+    } catch {
+        if ($desktopBackup -and (Test-Path -LiteralPath $desktopBackup)) {
+            Restore-ManagedQuotabotDesktop -InstallRoot $installRoot -BackupPath $desktopBackup
+        }
+        throw
+    }
+    if ($desktopBackup -and (Test-Path -LiteralPath $desktopBackup)) {
+        try {
+            Remove-Item -LiteralPath $desktopBackup -Recurse -Force
+        } catch {
+            Write-Warning "The new desktop app is active, but the previous payload could not be removed: $desktopBackup"
+        }
+    }
+    if ($restartDesktop -and (Test-Path -LiteralPath $managedDesktopExe -PathType Leaf)) {
+        Start-Process -FilePath $managedDesktopExe -WorkingDirectory (Split-Path -Parent $managedDesktopExe) | Out-Null
+        Write-Host "Restarted the managed desktop app."
+    }
     Write-Host "Installed to $installRoot"
 } catch {
     Write-Error "Install failed: $($_.Exception.Message). Make sure the release publishes '$assetName' and its required .sha256 sidecar at https://github.com/$repo/releases"

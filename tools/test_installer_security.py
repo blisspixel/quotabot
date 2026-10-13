@@ -1,14 +1,227 @@
+import hashlib
 import os
 import shutil
 import subprocess
+import sys
+import tarfile
+import tempfile
 import unittest
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class InstallerSecurityTests(unittest.TestCase):
+    def test_windows_desktop_download_uses_the_verified_cli_tag(self) -> None:
+        pwsh = shutil.which("pwsh")
+        if pwsh is None:
+            self.skipTest("PowerShell is unavailable")
+        command = r"""
+param([string]$Installer)
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw 'Installer parse failed' }
+$assignment = $ast.Find({ param($node)
+    $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+    $node.Left.Extent.Text -eq '$desktopUrl'
+}, $true)
+if (-not $assignment) { throw 'Desktop download URL was not found' }
+$repo = 'blisspixel/quotabot'
+$desktopAsset = 'quotabot-windows-x64-desktop.zip'
+$version = 'latest'
+foreach ($release in @('0.11.15', '0.11.15-rc.1')) {
+    $reportedVersion = "quotabot $release"
+    Invoke-Expression $assignment.Extent.Text
+    $expected = "https://github.com/blisspixel/quotabot/releases/download/v$release/quotabot-windows-x64-desktop.zip"
+    if ($desktopUrl -cne $expected) { throw "Unexpected desktop URL: $desktopUrl" }
+}
+"""
+        with tempfile.TemporaryDirectory(prefix="quotabot desktop URL ") as directory:
+            fixture = Path(directory) / "check.ps1"
+            fixture.write_text(command)
+            result = subprocess.run(
+                [
+                    pwsh,
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-File",
+                    str(fixture),
+                    str(ROOT / "install.ps1"),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipIf(os.name == "nt", "POSIX installer activation")
+    def test_latest_install_pins_managed_desktop_to_the_verified_cli_tag(self) -> None:
+        bash = shutil.which("bash")
+        self.assertIsNotNone(bash)
+        assert bash is not None
+        with tempfile.TemporaryDirectory(prefix="quotabot latest ") as directory:
+            root = Path(directory)
+            home = root / "home"
+            assets = root / "assets"
+            commands = root / "commands"
+            commands.mkdir()
+            payload = root / "payload"
+            (payload / "bin").mkdir(parents=True)
+            (payload / "lib").mkdir()
+
+            def executable(path: Path, version: str) -> None:
+                path.write_text(f"#!/bin/sh\nprintf 'quotabot {version}\\n'\n")
+                path.chmod(0o755)
+
+            def archive(tag: str, name: str, desktop: bool, version: str) -> None:
+                destination = assets / tag / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                source = payload / "quotabot" if desktop else payload / "bin/quotabot"
+                executable(source, version)
+                with tarfile.open(destination, "w:gz") as bundle:
+                    for entry in (
+                        [source] if desktop else [payload / "bin", payload / "lib"]
+                    ):
+                        bundle.add(entry, arcname=entry.name)
+                digest = hashlib.sha256(destination.read_bytes()).hexdigest()
+                destination.with_name(name + ".sha256").write_text(
+                    f"{digest}  {name}\n"
+                )
+
+            cli_asset = "quotabot-linux-x64.tar.gz"
+            desktop_asset = "quotabot-linux-x64-desktop.tar.gz"
+            archive("latest", cli_asset, False, "0.11.15")
+            archive("latest", desktop_asset, True, "0.11.16")
+            archive("v0.11.15", desktop_asset, True, "0.11.15")
+            managed = home / ".local/share/quotabot-desktop/quotabot"
+            managed.parent.mkdir(parents=True)
+            executable(managed, "0.11.14")
+            curl = commands / "curl"
+            curl.write_text(
+                f"#!{sys.executable}\n"
+                "import os, shutil, sys\n"
+                "from pathlib import Path\n"
+                "url = next(arg for arg in sys.argv[1:] if arg.startswith('https://'))\n"
+                "relative = url.split('/releases/', 1)[1]\n"
+                "tag, name = (('latest', relative.split('/')[-1]) if relative.startswith('latest/') "
+                "else (relative.split('/')[1], relative.split('/')[-1]))\n"
+                "with open(os.environ['FIXTURE_URLS'], 'a') as log: log.write(url + '\\n')\n"
+                "shutil.copyfile(Path(os.environ['FIXTURE_ASSETS']) / tag / name, "
+                "sys.argv[sys.argv.index('-o') + 1])\n"
+            )
+            curl.chmod(0o755)
+            uname = commands / "uname"
+            uname.write_text(
+                '#!/bin/sh\nif [ "$1" = -m ]; then echo x86_64; else echo Linux; fi\n'
+            )
+            uname.chmod(0o755)
+            log = root / "urls.txt"
+            environment = os.environ.copy()
+            environment.pop("QUOTABOT_VERSION", None)
+            environment.update(
+                HOME=str(home),
+                PATH=os.pathsep.join(
+                    [str(commands), str(home / ".local/bin"), environment["PATH"]]
+                ),
+                FIXTURE_ASSETS=str(assets),
+                FIXTURE_URLS=str(log),
+            )
+            result = subprocess.run(
+                [bash, str(ROOT / "install.sh")],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            installed = []
+            for path in (home / ".local/bin/quotabot", managed):
+                installed.append(
+                    subprocess.check_output([str(path), "--version"], text=True).strip()
+                )
+            self.assertEqual(installed, ["quotabot 0.11.15", "quotabot 0.11.15"])
+            desktop_urls = [
+                url for url in log.read_text().splitlines() if "-desktop.tar.gz" in url
+            ]
+            self.assertEqual(
+                desktop_urls,
+                [
+                    f"https://github.com/blisspixel/quotabot/releases/download/v0.11.15/{desktop_asset}",
+                    f"https://github.com/blisspixel/quotabot/releases/download/v0.11.15/{desktop_asset}.sha256",
+                ],
+            )
+
+    @unittest.skipIf(os.name == "nt", "POSIX managed-process lifecycle")
+    def test_posix_updater_stops_the_exact_padded_pid_and_spaced_path(self) -> None:
+        script = (ROOT / "install.sh").read_text(encoding="utf-8")
+        stop = (
+            "stop_managed_executable() {"
+            + script.split("stop_managed_executable() {", 1)[1].split(
+                "\ndownload_verified_release_asset() {", 1
+            )[0]
+        )
+        sleep = shutil.which("sleep")
+        bash = shutil.which("bash")
+        self.assertIsNotNone(sleep)
+        self.assertIsNotNone(bash)
+        assert sleep is not None
+        assert bash is not None
+        with tempfile.TemporaryDirectory(prefix="quotabot lifecycle ") as directory:
+            target = Path(directory) / "quotabot"
+            other = Path(directory) / "quotabot-old"
+            # copy2 reapplies source file flags. macOS refuses that for sleep.
+            shutil.copyfile(sleep, target)
+            shutil.copyfile(sleep, other)
+            target.chmod(0o755)
+            other.chmod(0o755)
+            for operating_system in ("Linux", "Darwin"):
+                with self.subTest(operating_system=operating_system):
+                    managed = subprocess.Popen([str(target), "60"])
+                    unrelated = subprocess.Popen([str(other), "60"])
+                    try:
+                        result = subprocess.run(
+                            [
+                                bash,
+                                "-c",
+                                stop
+                                + "\n"
+                                + 'target="$1"\n'
+                                + 'test_os="$2"\n'
+                                + 'managed_pid="$3"\n'
+                                + 'other="$4"\n'
+                                + 'other_pid="$5"\n'
+                                + "uname() { printf '%s\\n' \"$test_os\"; }\n"
+                                + "ps() {\n"
+                                + "  printf '%s\\n' \\\n"
+                                + '    "        ${managed_pid} ${target} 60" \\\n'
+                                + '    "   not-a-pid ${target} 60" \\\n'
+                                + '    "        ${other_pid} ${other} 60"\n'
+                                + "}\n"
+                                + 'stop_managed_executable "$target"\n'
+                                + "printf '%s\\n' \"$managed_desktop_was_running\"\n",
+                                "lifecycle",
+                                str(target),
+                                operating_system,
+                                str(managed.pid),
+                                str(other),
+                                str(unrelated.pid),
+                            ],
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                            timeout=10,
+                        )
+                        self.assertEqual(result.stdout.strip(), "1")
+                        self.assertEqual(managed.wait(timeout=5), -15)
+                        self.assertIsNone(unrelated.poll())
+                    finally:
+                        for process in (managed, unrelated):
+                            if process.poll() is None:
+                                process.terminate()
+                            process.wait(timeout=5)
+
     def test_install_smoke_uses_the_demo_environment_contract(self) -> None:
         smoke = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
             encoding="utf-8"
@@ -534,6 +747,29 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertIn("-notin", reset)
         for retained in ("'bin'", "'lib'", "'cli-versions'", "'desktop'"):
             self.assertIn(retained, reset)
+
+    def test_release_installers_update_an_existing_managed_desktop(self) -> None:
+        windows = (ROOT / "install.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "install.sh").read_text(encoding="utf-8")
+
+        self.assertIn("desktop\\quotabot.exe", windows)
+        self.assertIn("quotabot-windows-x64-desktop.zip", windows)
+        self.assertIn("function Install-ManagedQuotabotDesktop", windows)
+        self.assertIn("function Restore-ManagedQuotabotDesktop", windows)
+        self.assertLess(
+            windows.index("Updating the managed desktop app from $version"),
+            windows.index("Install-QuotabotPayload -SourceRoot $extractPath"),
+        )
+        self.assertIn(
+            '"${HOME}/Applications/quotabot.app/Contents/MacOS/quotabot"', posix
+        )
+        self.assertIn('"${HOME}/.local/share/quotabot-desktop/quotabot"', posix)
+        self.assertIn("quotabot-darwin-${ARCH}-desktop.zip", posix)
+        self.assertIn("quotabot-linux-${ARCH}-desktop.tar.gz", posix)
+        self.assertLess(
+            posix.index("Updating the managed desktop app from ${VERSION}"),
+            posix.index('install_versioned_tree "$extract_dir" "$INSTALL_ROOT" cli'),
+        )
 
     def test_windows_release_installer_uses_one_unique_temp_workspace(self) -> None:
         script = (ROOT / "install.ps1").read_text(encoding="utf-8")

@@ -471,6 +471,43 @@ try {
     throw 'The desktop install left transaction files after rollback.'
   }
 
+  Import-InstallFunction `
+    -Path (Join-Path $repositoryRoot 'install.ps1') `
+    -Name 'Install-ManagedQuotabotDesktop'
+  Import-InstallFunction `
+    -Path (Join-Path $repositoryRoot 'install.ps1') `
+    -Name 'Restore-ManagedQuotabotDesktop'
+  $managedSource = Join-Path $testRoot 'managed-desktop-source'
+  $managedInstall = Join-Path $testRoot 'managed-desktop-install'
+  New-Item -ItemType Directory -Force -Path $managedSource, (Join-Path $managedInstall 'desktop') | Out-Null
+  Set-Content -LiteralPath (Join-Path $managedSource 'quotabot.exe') -Value 'managed-new' -NoNewline
+  Set-Content -LiteralPath (Join-Path $managedSource 'plugin.dll') -Value 'managed-plugin' -NoNewline
+  Set-Content -LiteralPath (Join-Path $managedInstall 'desktop\quotabot.exe') -Value 'managed-old' -NoNewline
+  $managedBackup = Install-ManagedQuotabotDesktop -SourceRoot $managedSource -InstallRoot $managedInstall
+  Assert-Content -Path (Join-Path $managedInstall 'desktop\quotabot.exe') -Expected 'managed-new'
+  Assert-Content -Path (Join-Path $managedInstall 'desktop\plugin.dll') -Expected 'managed-plugin'
+  if (-not $managedBackup -or -not (Test-Path -LiteralPath (Join-Path $managedBackup 'quotabot.exe'))) {
+    throw 'Managed desktop activation did not retain the previous payload.'
+  }
+  Restore-ManagedQuotabotDesktop -InstallRoot $managedInstall -BackupPath $managedBackup
+  Assert-Content -Path (Join-Path $managedInstall 'desktop\quotabot.exe') -Expected 'managed-old'
+  $incompleteManagedSource = Join-Path $testRoot 'managed-desktop-incomplete'
+  New-Item -ItemType Directory -Force -Path $incompleteManagedSource | Out-Null
+  Set-Content -LiteralPath (Join-Path $incompleteManagedSource 'readme.txt') -Value 'no exe' -NoNewline
+  $managedRejected = $false
+  try {
+    Install-ManagedQuotabotDesktop -SourceRoot $incompleteManagedSource -InstallRoot $managedInstall
+  } catch {
+    $managedRejected = $true
+    if ($_.Exception.Message -notmatch 'left intact or restored') {
+      throw
+    }
+  }
+  if (-not $managedRejected) {
+    throw 'An incomplete managed desktop payload was activated.'
+  }
+  Assert-Content -Path (Join-Path $managedInstall 'desktop\quotabot.exe') -Expected 'managed-old'
+
   # Full source setup must stage both payloads before changing either stable
   # target. An incomplete desktop build therefore leaves the installed CLI and
   # desktop on the same prior version.

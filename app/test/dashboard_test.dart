@@ -2271,13 +2271,73 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('update instructions stay usable in a small desktop window', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(480, 520);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    const latest = QuotabotRelease(
+      tag: 'v1.0.0',
+      version: '1.0.0',
+      url: quotabotReleasesUrl,
+      prerelease: false,
+    );
+    final opened = <String>[];
+    await tester.pumpWidget(
+      QuotaBotApp.test(
+        prefs: const Prefs(),
+        testHome: Dashboard.test(
+          prefs: const Prefs(setupDone: true, enableNotifications: false),
+          updateChecker: () async => const QuotabotUpdateStatus(
+            currentVersion: quotabotAppVersion,
+            stable: latest,
+            latest: latest,
+          ),
+          cliUpdater: () async => const QuotabotCliInstallResult(
+            ok: true,
+            message: 'Installed CLI 1.0.0.',
+          ),
+          releaseOpener: (url) async => opened.add(url),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await selectSettingsCategory(tester, SettingsCategory.updates);
+    final check = find.byKey(const ValueKey('settings-check-updates'));
+    await tester.ensureVisible(check);
+    await tester.tap(check);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Update available'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    final install = find.widgetWithText(FilledButton, 'Install latest update');
+    expect(install.hitTestable(), findsOneWidget);
+    await tester.tap(install.hitTestable());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Update installed'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    final releases = find.widgetWithText(TextButton, 'Open releases');
+    expect(releases.hitTestable(), findsOneWidget);
+    await tester.tap(releases);
+    await tester.pumpAndSettle();
+    expect(opened, [quotabotReleasesUrl]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('settings can install the latest CLI update', (tester) async {
     await _useDesktopSurface(tester);
     var installs = 0;
+    final opened = <String>[];
     await tester.pumpWidget(
       _wrap(
         Dashboard.test(
           prefs: const Prefs(),
+          releaseOpener: (url) async => opened.add(url),
           cliUpdater: () async {
             installs++;
             return const QuotabotCliInstallResult(
@@ -2300,6 +2360,13 @@ void main() {
     expect(installs, 1);
     expect(find.text('Update installed'), findsOneWidget);
     expect(find.textContaining('Installed CLI 0.12.0.'), findsOneWidget);
+    expect(
+      find.textContaining('A hand-extracted versioned copy'),
+      findsOneWidget,
+    );
+    await tester.tap(find.widgetWithText(TextButton, 'Open releases'));
+    await tester.pumpAndSettle();
+    expect(opened, [quotabotReleasesUrl]);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

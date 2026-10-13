@@ -61,10 +61,13 @@ other concrete-model policies retain their existing ordering.
   for RAM, utilization, disk, and the Models list.
 - **Updates:** Settings shows the installed build. "Check for updates" is a
   user-invoked GitHub read that shows the latest release candidate and stable
-  release separately. "Install latest update" runs the checksum-verified CLI
-  updater (`quotabot update`). That command does not replace the open tray
-  window; restart the desktop app after a matching desktop install. GitHub
-  is contacted only when you use one of those actions, never on launch.
+  release separately. "Install latest update" runs the checksum-verified
+  updater (`quotabot update`). It replaces the CLI, and the managed tray app
+  when one is already installed. A running tray closes during that swap and
+  opens again afterward. A hand-extracted portable copy stays where it is;
+  open the release, download the desktop archive for your OS, extract it into
+  a new folder, quit the old copy, and launch the new one.
+  GitHub is contacted only when you use one of those actions, never on launch.
 - **Setup/help:** shows the current setup state for supported providers,
   including key-based providers hidden from the main quota view until they are
   configured. A provider that supports quotabot's own login (Grok, Antigravity)
@@ -730,8 +733,9 @@ selection uses GitHub's dedicated Latest endpoint; preview selection uses small
 bounded release pages. `quotabot update` then invokes the installer carried
 inside the current verified archive, downloads one exact published tag and
 checksum sidecar, activates it transactionally, and verifies the new stable
-executable's version. Stable builds follow stable releases; release candidates
-follow previews. Use
+executable's version. An already installed managed desktop app is downloaded
+and activated for that same tag. A machine without that app stays CLI-only.
+Stable builds follow stable releases; release candidates follow previews. Use
 `--preview` or `--stable` to change channel, or `--target=TAG` to select one
 exact published tag. A newer exact target installs without `--force`; add
 `--force` only to reinstall the current target or roll back. `--json` emits
