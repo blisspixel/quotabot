@@ -19,6 +19,7 @@ import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/refresh_timer.dart';
 import 'package:quotabot_collector/top.dart';
+import 'package:quotabot_collector/updater.dart' hide QuotabotRelease;
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
 import 'package:screen_retriever/screen_retriever.dart';
@@ -656,6 +657,11 @@ class Dashboard extends StatefulWidget {
   final ReleaseOpener? releaseOpener;
   @visibleForTesting
   final CliUpdater? cliUpdater;
+  @visibleForTesting
+  final Future<String?> Function()? cliVersionReader;
+  @visibleForTesting
+  final PortableDesktopSkew Function(QuotabotVersion cliVersion)?
+  portableDesktopSkewFinder;
   final RouteLeaseStore leaseStore;
 
   const Dashboard({super.key, required this.prefs, this.startupStorageWarning})
@@ -679,6 +685,8 @@ class Dashboard extends StatefulWidget {
       updateChecker = null,
       releaseOpener = null,
       cliUpdater = null,
+      cliVersionReader = null,
+      portableDesktopSkewFinder = null,
       leaseStore = const FileRouteLeaseStore();
 
   /// Builds a deterministic dashboard without desktop plugin or preference
@@ -707,6 +715,8 @@ class Dashboard extends StatefulWidget {
     this.updateChecker,
     this.releaseOpener,
     this.cliUpdater,
+    this.cliVersionReader,
+    this.portableDesktopSkewFinder,
     this.leaseStore = const NoopRouteLeaseStore(),
     this.startupStorageWarning,
   }) : _hostIntegration = false,
@@ -3486,6 +3496,34 @@ class _DashboardState extends State<Dashboard>
   Future<QuotabotCliInstallResult> _runCliUpdate() =>
       (widget.cliUpdater ?? installQuotabotCliUpdate)();
 
+  List<String> _portableDesktopNoticeLines(String referenceVersion) {
+    final parsed = QuotabotVersion.tryParse(referenceVersion);
+    if (parsed == null) return const [];
+    final finder = widget.portableDesktopSkewFinder;
+    final PortableDesktopSkew skew;
+    if (finder != null) {
+      skew = finder(parsed);
+    } else if (!widget._hostIntegration) {
+      return const [];
+    } else {
+      skew = findPortableDesktopVersionSkew(
+        cliVersion: parsed,
+        operatingSystem: Platform.operatingSystem,
+        architecture: currentPortableDesktopArchitecture(),
+        home: Platform.environment['HOME'],
+        localAppData: Platform.environment['LOCALAPPDATA'],
+      );
+    }
+    return skew.lines;
+  }
+
+  String _withDesktopSkew(String message, String? referenceVersion) {
+    if (referenceVersion == null) return message;
+    final extra = _portableDesktopNoticeLines(referenceVersion);
+    if (extra.isEmpty) return message;
+    return '$message\n\n${extra.join('\n\n')}';
+  }
+
   Future<void> _showInstallResult(
     BuildContext launchContext,
     QuotabotCliInstallResult result,
@@ -3499,13 +3537,16 @@ class _DashboardState extends State<Dashboard>
           constraints: const BoxConstraints(maxWidth: 420),
           child: Text(
             result.ok
-                ? '${result.message} A managed tray app installed with '
-                      'quotabot is updated to the same release. This window '
-                      'closes during that swap and opens again afterward. '
-                      'A hand-extracted versioned copy stays on its current '
-                      'build. Open releases, download the desktop archive for '
-                      'your OS, extract it into a new folder, quit the old '
-                      'copy, and launch the new one.'
+                ? _withDesktopSkew(
+                    '${result.message} A managed tray app installed with '
+                    'quotabot is updated to the same release. This window '
+                    'closes during that swap and opens again afterward. '
+                    'A hand-extracted versioned copy stays on its current '
+                    'build. Open releases, download the desktop archive for '
+                    'your OS, extract it into a new folder, quit the old '
+                    'copy, and launch the new one.',
+                    result.cliVersion,
+                  )
                 : result.message,
           ),
         ),
@@ -3541,6 +3582,12 @@ class _DashboardState extends State<Dashboard>
   ) async {
     try {
       final status = await (widget.updateChecker ?? checkQuotabotUpdates)();
+      final readCliVersion = widget.cliVersionReader;
+      final cliVersion = readCliVersion != null
+          ? await readCliVersion()
+          : widget._hostIntegration
+          ? await readInstalledQuotabotCliVersion()
+          : null;
       if (!mounted || !launchContext.mounted || !shouldPresent()) return;
       await showDialog<void>(
         context: launchContext,
@@ -3593,17 +3640,20 @@ class _DashboardState extends State<Dashboard>
                     Text('Latest stable: ${status.stable!.version}'),
                   const SizedBox(height: 12),
                   Text(
-                    status.updateAvailable
-                        ? 'Install latest update runs the checksum-verified '
-                              'updater. It replaces the CLI and, when this is '
-                              'the managed install, this tray app. The window '
-                              'closes during the swap and opens again afterward. '
-                              'For a hand-extracted versioned copy, open the '
-                              'release, download the desktop archive for your '
-                              'OS, extract it into a new folder, quit the old '
-                              'copy, and launch the new one.'
-                        : 'Open the release to review signing status, '
-                              'checksums, assets, and update instructions.',
+                    _withDesktopSkew(
+                      status.updateAvailable
+                          ? 'Install latest update runs the checksum-verified '
+                                'updater. It replaces the CLI and, when this is '
+                                'the managed install, this tray app. The window '
+                                'closes during the swap and opens again afterward. '
+                                'For a hand-extracted versioned copy, open the '
+                                'release, download the desktop archive for your '
+                                'OS, extract it into a new folder, quit the old '
+                                'copy, and launch the new one.'
+                          : 'Open the release to review signing status, '
+                                'checksums, assets, and update instructions.',
+                      cliVersion,
+                    ),
                   ),
                   if (status.updateAvailable && Platform.isMacOS) ...[
                     const SizedBox(height: 8),

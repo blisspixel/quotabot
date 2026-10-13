@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-const String quotabotAppVersion = '0.11.15';
-const String quotabotAppBuild = '0.11.15+70';
+const String quotabotAppVersion = '0.11.16';
+const String quotabotAppBuild = '0.11.16+71';
 const String quotabotReleasesUrl =
     'https://github.com/blisspixel/quotabot/releases';
 const String quotabotReleasesApi =
@@ -410,8 +410,13 @@ Future<QuotabotUpdateStatus> checkQuotabotUpdates({
 class QuotabotCliInstallResult {
   final bool ok;
   final String message;
+  final String? cliVersion;
 
-  const QuotabotCliInstallResult({required this.ok, required this.message});
+  const QuotabotCliInstallResult({
+    required this.ok,
+    required this.message,
+    this.cliVersion,
+  });
 }
 
 typedef CliProcessRunner =
@@ -469,6 +474,7 @@ Future<QuotabotCliInstallResult> installQuotabotCliUpdate({
       return QuotabotCliInstallResult(
         ok: true,
         message: parsed ?? 'CLI update finished.',
+        cliVersion: _cliUpdateVersion(result.stdout),
       );
     }
     return QuotabotCliInstallResult(
@@ -488,6 +494,47 @@ Future<QuotabotCliInstallResult> installQuotabotCliUpdate({
   }
 }
 
+/// Reads the installed CLI identity without checking releases or changing files.
+Future<String?> readInstalledQuotabotCliVersion({
+  String? executable,
+  CliProcessRunner? runner,
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final cli = executable ?? defaultQuotabotCliPath();
+  if (cli == null || cli.trim().isEmpty) return null;
+  final run =
+      runner ?? (exe, args) => _runTimedProcess(exe, args, timeout: timeout);
+  try {
+    final result = await run(cli, const ['--version']);
+    if (result.exitCode != 0 || result.stdout is! String) return null;
+    final raw = (result.stdout as String).trim();
+    if (!raw.startsWith('quotabot ')) return null;
+    final version = raw.substring('quotabot '.length);
+    return _parseVersion(version) == null ? null : version;
+  } on TimeoutException {
+    return null;
+  } on ProcessException {
+    return null;
+  }
+}
+
+String? _cliUpdateVersion(Object? output) {
+  if (output is! String) return null;
+  try {
+    final decoded = jsonDecode(output);
+    if (decoded is! Map || decoded['schema'] != 'quotabot.update.v1') {
+      return null;
+    }
+    final version =
+        decoded[decoded['installed'] == true
+            ? 'target_version'
+            : 'current_version'];
+    return version is String && _parseVersion(version) != null ? version : null;
+  } on FormatException {
+    return null;
+  }
+}
+
 Future<ProcessResult> _runTimedProcess(
   String executable,
   List<String> arguments, {
@@ -498,9 +545,19 @@ Future<ProcessResult> _runTimedProcess(
   final stderrBytes = <int>[];
   final stdoutSub = process.stdout.listen(stdoutBytes.addAll);
   final stderrSub = process.stderr.listen(stderrBytes.addAll);
+  // Register completion before any await: a short --version process can close
+  // both pipes before exitCode completes. One deadline owns exit and draining.
+  final stdoutDone = stdoutSub.asFuture<void>();
+  final stderrDone = stderrSub.asFuture<void>();
   try {
-    final code = await process.exitCode.timeout(timeout);
-    await Future.wait([stdoutSub.asFuture<void>(), stderrSub.asFuture<void>()]);
+    var code = -1;
+    await Future.wait<void>([
+      process.exitCode.then<void>((value) {
+        code = value;
+      }),
+      stdoutDone,
+      stderrDone,
+    ]).timeout(timeout);
     return ProcessResult(
       process.pid,
       code,

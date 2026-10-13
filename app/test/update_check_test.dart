@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -164,7 +165,140 @@ void main() {
     );
     expect(result.ok, isTrue);
     expect(result.message, 'Installed CLI 0.12.0.');
+    expect(result.cliVersion, '0.12.0');
   });
+
+  test(
+    'CLI version uses current identity on a no-op and rejects malformed data',
+    () async {
+      for (final row in <(String, String?)>[
+        (
+          '{"schema":"quotabot.update.v1","installed":false,"current_version":"0.12.0","target_version":"0.13.0"}',
+          '0.12.0',
+        ),
+        (
+          '{"schema":"quotabot.update.v1","installed":true,"target_version":"invalid"}',
+          null,
+        ),
+        ('{"schema":"other","installed":true,"target_version":"0.12.0"}', null),
+        ('not JSON', null),
+      ]) {
+        final result = await installQuotabotCliUpdate(
+          executable: 'quotabot',
+          runner: (_, _) async => ProcessResult(1, 0, row.$1, ''),
+        );
+        expect(result.cliVersion, row.$2);
+      }
+    },
+  );
+
+  test(
+    'installed CLI identity read requires successful exact version output',
+    () async {
+      for (final row in <(int, String, String?)>[
+        (0, 'quotabot 0.12.0\n', '0.12.0'),
+        (0, 'quotabot 0.12.0-rc.1', '0.12.0-rc.1'),
+        (1, 'quotabot 0.12.0', null),
+        (0, 'another app 0.12.0', null),
+        (0, 'quotabot invalid', null),
+      ]) {
+        final version = await readInstalledQuotabotCliVersion(
+          executable: 'quotabot',
+          runner: (exe, args) async {
+            expect(args, ['--version']);
+            return ProcessResult(1, row.$1, row.$2, '');
+          },
+        );
+        expect(version, row.$3);
+      }
+      expect(await readInstalledQuotabotCliVersion(executable: ''), isNull);
+      expect(
+        await readInstalledQuotabotCliVersion(
+          executable: 'quotabot',
+          runner: (_, _) async => throw TimeoutException('test deadline'),
+        ),
+        isNull,
+      );
+      expect(
+        await readInstalledQuotabotCliVersion(
+          executable: 'quotabot',
+          runner: (_, _) async => throw const ProcessException('quotabot', []),
+        ),
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'CLI identity drains a fast real subprocess',
+    () async {
+      final root = Directory.systemTemp.createTempSync(
+        'quotabot_cli_identity_',
+      );
+      try {
+        final executable = File('${root.path}/quotabot')
+          ..writeAsStringSync(
+            '#!/bin/sh\nprintf "quotabot 0.12.0\\n"\nprintf "fixture diagnostic\\n" >&2\n',
+          );
+        expect(
+          (await Process.run('chmod', ['700', executable.path])).exitCode,
+          0,
+        );
+        for (var attempt = 0; attempt < 3; attempt++) {
+          expect(
+            await readInstalledQuotabotCliVersion(
+              executable: executable.path,
+              timeout: const Duration(seconds: 1),
+            ).timeout(const Duration(seconds: 3)),
+            '0.12.0',
+          );
+        }
+      } finally {
+        root.deleteSync(recursive: true);
+      }
+    },
+    skip: Platform.isWindows ? 'Uses a real POSIX shell fixture' : false,
+  );
+
+  test(
+    'CLI deadline includes output handles retained after process exit',
+    () async {
+      final root = Directory.systemTemp.createTempSync(
+        'quotabot_cli_stream_deadline_',
+      );
+      final pidFile = File('${root.path}/quotabot.child');
+      try {
+        final executable = File('${root.path}/quotabot')
+          ..writeAsStringSync(
+            '#!/bin/sh\nsleep 30 &\necho \$! > "\$0.child"\nprintf "quotabot 0.12.0\\n"\n',
+          );
+        expect(
+          (await Process.run('chmod', ['700', executable.path])).exitCode,
+          0,
+        );
+        final timer = Stopwatch()..start();
+        expect(
+          await readInstalledQuotabotCliVersion(
+            executable: executable.path,
+            timeout: const Duration(milliseconds: 100),
+          ).timeout(const Duration(seconds: 3)),
+          isNull,
+        );
+        expect(timer.elapsed, lessThan(const Duration(seconds: 2)));
+        expect(pidFile.existsSync(), isTrue);
+      } finally {
+        // This fixture owns the child that deliberately retained both pipes.
+        if (pidFile.existsSync()) {
+          Process.killPid(
+            int.parse(pidFile.readAsStringSync().trim()),
+            ProcessSignal.sigkill,
+          );
+        }
+        root.deleteSync(recursive: true);
+      }
+    },
+    skip: Platform.isWindows ? 'Uses a real POSIX shell fixture' : false,
+  );
 
   test('CLI installer fails closed when the updater is missing', () async {
     final result = await installQuotabotCliUpdate(executable: '');

@@ -47,6 +47,22 @@ MockClient releasesClient(List<Object?> releases) =>
     });
 
 void main() {
+  test('desktop archive advice only names shipped architectures', () {
+    for (final row in [
+      ('linux', 'x64', 'quotabot-linux-x64-desktop.tar.gz'),
+      ('macos', 'arm64', 'quotabot-darwin-arm64-desktop.zip'),
+      ('windows', 'x64', 'quotabot-windows-x64-desktop.zip'),
+      ('linux', 'arm64', ''),
+      ('macos', 'x64', ''),
+      ('windows', 'arm64', ''),
+    ]) {
+      expect(
+        portableDesktopAssetName(operatingSystem: row.$1, architecture: row.$2),
+        row.$3,
+      );
+    }
+  });
+
   group('QuotabotVersion', () {
     test('parses and orders stable and release-candidate versions', () {
       final rc9 = QuotabotVersion.tryParse('v0.10.0-rc.9')!;
@@ -411,5 +427,234 @@ void main() {
       '${temp.path}${Platform.pathSeparator}.local'
       '${Platform.pathSeparator}bin${Platform.pathSeparator}quotabot',
     );
+  });
+
+  group('portable desktop version skew', () {
+    final separator = Platform.pathSeparator;
+
+    String joinPath(String parent, List<String> parts) {
+      var path = parent;
+      for (final part in parts) {
+        path = '$path$separator$part';
+      }
+      return path;
+    }
+
+    void writeBundle(String bundlePath, String version) {
+      final versionFile = File(
+        joinPath(bundlePath, ['data', 'flutter_assets', 'version.json']),
+      )..parent.createSync(recursive: true);
+      versionFile.writeAsStringSync(
+        '{"app_name":"quotabot","version":"$version",'
+        '"build_number":"68","package_name":"quotabot"}',
+      );
+      File(joinPath(bundlePath, ['quotabot'])).writeAsStringSync('bundle');
+    }
+
+    test('names a different hand-extracted bundle and does not change it', () {
+      final temp = Directory.systemTemp.createTempSync(
+        'quotabot_desktop_skew_',
+      );
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final bundle = joinPath(temp.path, [
+        '.local',
+        'share',
+        'quotabot-desktop',
+        'v0.11.13',
+      ]);
+      writeBundle(bundle, '0.11.13');
+      final versionFile = File(
+        joinPath(bundle, ['data', 'flutter_assets', 'version.json']),
+      );
+      final before = versionFile.readAsBytesSync();
+      final cli = QuotabotVersion.tryParse('0.11.15')!;
+
+      final skew = findPortableDesktopVersionSkew(
+        cliVersion: cli,
+        operatingSystem: 'linux',
+        architecture: 'x64',
+        home: temp.path,
+      );
+
+      expect(skew.lines, hasLength(1));
+      expect(skew.lines.single, contains('Hand-extracted desktop 0.11.13'));
+      expect(skew.lines.single, contains(bundle));
+      expect(skew.lines.single, contains('differs from CLI 0.11.15'));
+      expect(skew.lines.single, contains('was left in place'));
+      expect(skew.lines.single, contains('quotabot-linux-x64-desktop.tar.gz'));
+      expect(
+        skew.lines.single,
+        contains(
+          'https://github.com/blisspixel/quotabot/releases/tag/v0.11.15',
+        ),
+      );
+      expect(skew.lines.single, contains('verify the .sha256 sidecar'));
+      expect(versionFile.readAsBytesSync(), before);
+      expect(File(joinPath(bundle, ['quotabot'])).existsSync(), isTrue);
+      final json = skew.toJson();
+      final bundles = json['bundles']! as List<Object?>;
+      expect((bundles.single! as Map)['location'], 'hand_extracted');
+      expect((bundles.single! as Map)['version'], '0.11.13');
+    });
+
+    test('says nothing when the embedded version matches the CLI', () {
+      final temp = Directory.systemTemp.createTempSync(
+        'quotabot_desktop_skew_',
+      );
+      addTearDown(() => temp.deleteSync(recursive: true));
+      writeBundle(
+        joinPath(temp.path, [
+          '.local',
+          'share',
+          'quotabot-desktop',
+          'v0.11.15',
+        ]),
+        '0.11.15+70',
+      );
+
+      final skew = findPortableDesktopVersionSkew(
+        cliVersion: QuotabotVersion.tryParse('0.11.15')!,
+        operatingSystem: 'linux',
+        architecture: 'x64',
+        home: temp.path,
+      );
+
+      expect(skew.hasNotices, isFalse);
+      expect(skew.lines, isEmpty);
+    });
+
+    test('ignores an oversized or malformed version file', () {
+      final temp = Directory.systemTemp.createTempSync(
+        'quotabot_desktop_skew_',
+      );
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final oversized = joinPath(temp.path, [
+        '.local',
+        'share',
+        'quotabot-desktop',
+        'huge',
+      ]);
+      final malformed = joinPath(temp.path, [
+        '.local',
+        'share',
+        'quotabot-desktop',
+        'bad',
+      ]);
+      writeBundle(oversized, '0.11.13');
+      writeBundle(malformed, '0.11.13');
+      final pad = 'x' * 5000;
+      final hugeFile = File(
+        joinPath(oversized, ['data', 'flutter_assets', 'version.json']),
+      )..writeAsStringSync('{"version":"0.11.13","pad":"$pad"}');
+      File(
+        joinPath(malformed, ['data', 'flutter_assets', 'version.json']),
+      ).writeAsStringSync('{');
+
+      final skew = findPortableDesktopVersionSkew(
+        cliVersion: QuotabotVersion.tryParse('0.11.15')!,
+        operatingSystem: 'linux',
+        architecture: 'arm64',
+        home: temp.path,
+      );
+
+      expect(skew.hasNotices, isFalse);
+      expect(hugeFile.existsSync(), isTrue);
+    });
+
+    test('names a managed Windows bundle and a macOS plist fallback', () {
+      final temp = Directory.systemTemp.createTempSync(
+        'quotabot_desktop_skew_',
+      );
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final managed = joinPath(temp.path, ['quotabot', 'desktop']);
+      Directory(managed).createSync(recursive: true);
+      File(joinPath(managed, ['quotabot.exe'])).writeAsStringSync('exe');
+      writeBundle(managed, '0.11.13');
+      final macBundle = joinPath(temp.path, [
+        'Applications',
+        'quotabot-v0.11.12.app',
+      ]);
+      final plist = File(joinPath(macBundle, ['Contents', 'Info.plist']))
+        ..parent.createSync(recursive: true);
+      plist.writeAsStringSync(
+        '<plist><dict><key>CFBundleShortVersionString</key>'
+        '<string>0.11.12</string></dict></plist>',
+      );
+
+      final windows = findPortableDesktopVersionSkew(
+        cliVersion: QuotabotVersion.tryParse('0.11.15')!,
+        operatingSystem: 'windows',
+        architecture: 'x64',
+        localAppData: temp.path,
+      );
+      final macos = findPortableDesktopVersionSkew(
+        cliVersion: QuotabotVersion.tryParse('0.11.15')!,
+        operatingSystem: 'macos',
+        architecture: 'arm64',
+        home: temp.path,
+      );
+
+      expect(windows.lines.single, contains('Managed desktop 0.11.13'));
+      expect(
+        windows.lines.single,
+        contains('quotabot-windows-x64-desktop.zip'),
+      );
+      expect(windows.lines.single, contains('quotabot update --force'));
+      expect(macos.lines.single, contains('Hand-extracted desktop 0.11.12'));
+      expect(macos.lines.single, contains(macBundle));
+      expect(macos.lines.single, contains('quotabot-darwin-arm64-desktop.zip'));
+      expect(plist.readAsStringSync(), contains('0.11.12'));
+    });
+
+    test('caps notices and does not report a bundle past the scan limit', () {
+      final temp = Directory.systemTemp.createTempSync(
+        'quotabot_desktop_skew_',
+      );
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final root = joinPath(temp.path, ['quotabot-desktop']);
+      for (var index = 0; index < 9; index++) {
+        writeBundle(joinPath(root, ['b$index']), '0.11.13');
+      }
+      final crowded = Directory.systemTemp.createTempSync(
+        'quotabot_desktop_crowd_',
+      );
+      addTearDown(() => crowded.deleteSync(recursive: true));
+      final crowdRoot = joinPath(crowded.path, ['quotabot-desktop']);
+      for (var index = 0; index < portableDesktopScanLimit; index++) {
+        Directory(
+          joinPath(crowdRoot, ['a${index.toString().padLeft(2, '0')}']),
+        ).createSync(recursive: true);
+      }
+      writeBundle(joinPath(crowdRoot, ['z-bundle']), '0.11.13');
+
+      final shown = findPortableDesktopVersionSkew(
+        cliVersion: QuotabotVersion.tryParse('0.11.15')!,
+        operatingSystem: 'windows',
+        architecture: 'x64',
+        localAppData: temp.path,
+      );
+      final hidden = findPortableDesktopVersionSkew(
+        cliVersion: QuotabotVersion.tryParse('0.11.15')!,
+        operatingSystem: 'windows',
+        architecture: 'x64',
+        localAppData: crowded.path,
+      );
+
+      expect(shown.bundles, hasLength(portableDesktopNoticeLimit));
+      expect(shown.omittedCount, 1);
+      expect(shown.lines.last, contains('1 more desktop copy'));
+      expect(hidden.hasNotices, isFalse);
+      expect(
+        File(
+          joinPath(crowdRoot, [
+            'z-bundle',
+            'data',
+            'flutter_assets',
+            'version.json',
+          ]),
+        ).existsSync(),
+        isTrue,
+      );
+    });
   });
 }

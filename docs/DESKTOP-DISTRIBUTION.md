@@ -183,7 +183,11 @@ installed: `%LOCALAPPDATA%\quotabot\desktop` on Windows,
 sidecar as the CLI. A running managed app is closed for the swap and opened
 again afterward. A fresh CLI install does not add a desktop app.
 
-A hand-extracted versioned copy stays beside the previous version:
+A hand-extracted versioned copy stays beside the previous version.
+`quotabot update` and `quotabot doctor` name that copy when its embedded
+`version.json` or macOS short version differs from the CLI. The notice gives
+the installed version, the path, the archive name, and these steps. It does
+not replace the copy:
 
 1. Download the new tag into a new versioned directory.
 2. Verify its checksum and attestation.

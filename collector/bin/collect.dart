@@ -36,7 +36,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.11.15';
+const _version = '0.11.16';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -727,6 +727,32 @@ Future<void> _runMain(List<String> rawArgs) async {
   }
 }
 
+PortableDesktopSkew _portableDesktopSkew(QuotabotVersion cliVersion) =>
+    findPortableDesktopVersionSkew(
+      cliVersion: cliVersion,
+      operatingSystem: Platform.operatingSystem,
+      architecture: currentPortableDesktopArchitecture(),
+      home: Platform.environment['HOME'],
+      localAppData: Platform.environment['LOCALAPPDATA'],
+    );
+
+void _printPortableDesktopSkew(PortableDesktopSkew skew) {
+  for (final line in skew.lines) {
+    stdout.writeln(line);
+  }
+}
+
+Map<String, Object?> _updateJson(
+  QuotabotUpdateCheck check, {
+  required bool installed,
+  required bool forced,
+  required PortableDesktopSkew skew,
+}) {
+  final payload = check.toJson(installed: installed, forced: forced);
+  if (skew.hasNotices) payload['portable_desktop'] = skew.toJson();
+  return payload;
+}
+
 Future<void> _runUpdate(Set<String> flags, bool wantsJson) async {
   final parsedCurrent = QuotabotVersion.tryParse(_version);
   if (parsedCurrent == null) {
@@ -755,9 +781,12 @@ Future<void> _runUpdate(Set<String> flags, bool wantsJson) async {
     final comparison = check.target.version.compareTo(check.current);
     final shouldInstall = !checkOnly && (comparison > 0 || force);
     if (!shouldInstall) {
+      final skew = _portableDesktopSkew(check.current);
       if (wantsJson) {
         stdout.writeln(
-          _jsonPretty(check.toJson(forced: force)),
+          _jsonPretty(
+            _updateJson(check, installed: false, forced: force, skew: skew),
+          ),
         );
       } else if (comparison > 0) {
         final selection = check.channel == null
@@ -767,16 +796,19 @@ Future<void> _runUpdate(Set<String> flags, bool wantsJson) async {
           'Update available: ${check.current} -> ${check.target.version} '
           '($selection).',
         );
+        _printPortableDesktopSkew(skew);
       } else if (comparison < 0) {
         stdout.writeln(
           'Selected target ${check.target.version} is older than the installed '
           '${check.current}; add --force to install it.',
         );
+        _printPortableDesktopSkew(skew);
       } else {
         stdout.writeln(check.channel == null
             ? 'quotabot ${check.current} matches the selected exact target.'
             : 'quotabot ${check.current} is up to date on the '
                 '${check.channel!.name} channel.');
+        _printPortableDesktopSkew(skew);
       }
       return;
     }
@@ -816,9 +848,12 @@ Future<void> _runUpdate(Set<String> flags, bool wantsJson) async {
         'the installed executable did not report the selected version',
       );
     }
+    final skew = _portableDesktopSkew(check.target.version);
     if (wantsJson) {
       stdout.writeln(
-        _jsonPretty(check.toJson(installed: true, forced: force)),
+        _jsonPretty(
+          _updateJson(check, installed: true, forced: force, skew: skew),
+        ),
       );
     } else {
       stdout.writeln('Updated successfully to ${check.target.version}.');
@@ -2752,6 +2787,10 @@ void _printUpdateHelp() {
     '  verifies its SHA-256 sidecar, activates one complete generation, and '
     'checks the installed version.',
   );
+  stdout.writeln(
+    '  A hand-extracted desktop bundle on a different version is named and '
+    'left in place. Doctor prints the same notice.',
+  );
 }
 
 void _printSuggestHelp() {
@@ -4076,6 +4115,17 @@ void _printDoctor(
     print(
       '  (Aider/Cline etc. often use underlying provider quotas already tracked above.)',
     );
+  }
+
+  final desktopCli = QuotabotVersion.tryParse(_version);
+  if (desktopCli != null) {
+    final skew = _portableDesktopSkew(desktopCli);
+    if (skew.hasNotices) {
+      print('\n${style.cyan('Desktop:')}');
+      for (final line in skew.lines) {
+        print('  $line');
+      }
+    }
   }
 
   print('\n${style.cyan('Diagnostics:')}');

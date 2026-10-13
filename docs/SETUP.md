@@ -174,10 +174,10 @@ release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` or
 `vMAJOR.MINOR.PATCH-rc.N` selects one exact tag for a reproducible rollback.
 
 The current stable release is
-[v0.11.14](https://github.com/blisspixel/quotabot/releases/tag/v0.11.14). Its
-[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38253692696) enforces the exact immutable 14-asset contract.
-Its [three-OS Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38327594436) covers exact-tag installation, upgrade
-from 0.11.13, persistent state, source setup, stable-channel resolution, canonical
+[v0.11.15](https://github.com/blisspixel/quotabot/releases/tag/v0.11.15). Its
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38414072512) enforces the exact immutable 14-asset contract.
+Its [three-OS Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38429260783) covers exact-tag installation, upgrade
+from 0.11.14, persistent state, source setup, stable-channel resolution, canonical
 unversioned acquisition, desktop installation on all three OSes, Windows/Linux
 startup, and macOS bundle checks.
 Every patch release follows the same published-artifact path.
@@ -428,7 +428,7 @@ Updater-capable releases from 0.10.0-rc.16 through 0.10.1 can report that GitHub
 release discovery exceeded its response bound after the repository's historical
 release metadata grows. That affects channel discovery, not exact-tag download
 verification. An affected install can rerun the unpinned one-line installer or
-select the exact stable `v0.11.14` tag once. Version 0.10.2
+select the exact stable `v0.11.15` tag once. Version 0.10.2
 and later use GitHub's dedicated Latest endpoint for stable discovery and retain
 smaller bounded pages for preview discovery.
 
