@@ -22,11 +22,16 @@ class InstallerSecurityTests(unittest.TestCase):
         bash = shutil.which("bash")
         self.assertIsNotNone(sleep)
         self.assertIsNotNone(bash)
+        assert sleep is not None
+        assert bash is not None
         with tempfile.TemporaryDirectory(prefix="quotabot lifecycle ") as directory:
             target = Path(directory) / "quotabot"
             other = Path(directory) / "quotabot-old"
-            shutil.copy2(sleep, target)
-            shutil.copy2(sleep, other)
+            # copy2 reapplies source file flags. macOS refuses that for sleep.
+            shutil.copyfile(sleep, target)
+            shutil.copyfile(sleep, other)
+            target.chmod(0o755)
+            other.chmod(0o755)
             for operating_system in ("Linux", "Darwin"):
                 with self.subTest(operating_system=operating_system):
                     managed = subprocess.Popen([str(target), "60"])
@@ -36,15 +41,28 @@ class InstallerSecurityTests(unittest.TestCase):
                             [
                                 bash,
                                 "-c",
-                                stop + "\n"
-                                'test_os="$2"\n'
-                                "uname() { printf '%s\\n' \"$test_os\"; }\n"
-                                "ps() { command ps \"$@\" | sed 's/^/        /'; }\n"
-                                'stop_managed_executable "$1"\n'
-                                "printf '%s\\n' \"$managed_desktop_was_running\"\n",
+                                stop
+                                + "\n"
+                                + 'target="$1"\n'
+                                + 'test_os="$2"\n'
+                                + 'managed_pid="$3"\n'
+                                + 'other="$4"\n'
+                                + 'other_pid="$5"\n'
+                                + "uname() { printf '%s\\n' \"$test_os\"; }\n"
+                                + "ps() {\n"
+                                + "  printf '%s\\n' \\\n"
+                                + '    "        ${managed_pid} ${target} 60" \\\n'
+                                + '    "   not-a-pid ${target} 60" \\\n'
+                                + '    "        ${other_pid} ${other} 60"\n'
+                                + "}\n"
+                                + 'stop_managed_executable "$target"\n'
+                                + "printf '%s\\n' \"$managed_desktop_was_running\"\n",
                                 "lifecycle",
                                 str(target),
                                 operating_system,
+                                str(managed.pid),
+                                str(other),
+                                str(unrelated.pid),
                             ],
                             capture_output=True,
                             text=True,
