@@ -16,9 +16,25 @@ import 'package:quotabot/update_check.dart';
 import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
+import 'package:quotabot_collector/updater.dart' hide QuotabotRelease;
 import 'package:quotabot_collector/webhook.dart';
 
 import 'support/settings_navigation.dart';
+
+PortableDesktopSkew _skewAt(QuotabotVersion version) => PortableDesktopSkew(
+  referenceVersion: version,
+  omittedCount: 0,
+  bundles: [
+    PortableDesktopBundle(
+      location: PortableDesktopLocation.handExtracted,
+      version: QuotabotVersion.tryParse('0.11.13')!,
+      path: r'C:\portable\quotabot-desktop\v0.11.13',
+      asset: 'quotabot-windows-x64-desktop.zip',
+      releasesUrl:
+          'https://github.com/blisspixel/quotabot/releases/tag/${version.tag}',
+    ),
+  ],
+);
 
 Widget _wrap(
   Widget child, {
@@ -2364,9 +2380,50 @@ void main() {
       find.textContaining('A hand-extracted versioned copy'),
       findsOneWidget,
     );
+    expect(find.textContaining('differs from CLI'), findsNothing);
     await tester.tap(find.widgetWithText(TextButton, 'Open releases'));
     await tester.pumpAndSettle();
     expect(opened, [quotabotReleasesUrl]);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('settings names a different hand-extracted desktop version', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    const bundlePath = r'C:\portable\quotabot-desktop\v0.11.13';
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(),
+          portableDesktopSkewFinder: _skewAt,
+          cliUpdater: () async => const QuotabotCliInstallResult(
+            ok: true,
+            message: 'Installed CLI 0.11.15.',
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await selectSettingsCategory(tester, SettingsCategory.updates);
+    final install = find.byKey(const ValueKey('settings-install-update'));
+    await tester.ensureVisible(install);
+    await tester.tap(install);
+    await tester.pump();
+    await tester.pump();
+    expect(
+      find.textContaining('Hand-extracted desktop 0.11.13'),
+      findsOneWidget,
+    );
+    expect(find.textContaining(bundlePath), findsOneWidget);
+    expect(
+      find.textContaining('quotabot-windows-x64-desktop.zip'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('was left in place'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

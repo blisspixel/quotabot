@@ -222,6 +222,13 @@ source-code data:
 - `installed`: true only after the packaged installer succeeds and the stable
   installed executable reports the exact selected version. A check-only result
   and a no-op result keep it false.
+- Optional `portable_desktop` when a scanned desktop bundle's embedded version
+  differs from the reference CLI version. It carries `reference_version`,
+  `omitted_count`, and up to eight `bundles`. Each bundle has `location`
+  (`hand_extracted` or `managed`), `version`, `path`, `releases_url`, and,
+  when the OS and architecture are known, `asset`. The scan reads one
+  directory level and does not replace the bundle. Absent means no difference
+  was found. Paths are local install locations, not quota or account data.
 
 A failed update emits only `schema`, `ok: false`, and a bounded plain `error`.
 Malformed arguments fail earlier with usage exit 64; GitHub discovery,

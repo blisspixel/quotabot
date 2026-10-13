@@ -488,6 +488,158 @@ download_verified_release_asset() {
   fi
 }
 
+# portable-desktop-skew: begin
+# Read a Flutter version.json without following a symlink or reading past 4 KiB.
+read_flutter_version_json() {
+  local file="$1"
+  local size="" content="" version=""
+  if [[ ! -f "$file" || -L "$file" ]]; then
+    return 0
+  fi
+  size="$(wc -c < "$file" 2>/dev/null | tr -d '[:space:]')" || return 0
+  if [[ ! "$size" =~ ^[0-9]+$ || "$size" -lt 1 || "$size" -gt 4096 ]]; then
+    return 0
+  fi
+  content="$(head -c 4096 "$file" 2>/dev/null || true)"
+  content="${content//$'\n'/}"
+  if [[ ! "$content" =~ \"version\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
+    return 0
+  fi
+  version="${BASH_REMATCH[1]%%+*}"
+  if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]]; then
+    return 0
+  fi
+  printf '%s\n' "$version"
+}
+
+read_desktop_bundle_version() {
+  local bundle="$1"
+  local platform="$2"
+  local version="" plist="" content=""
+  if [[ "$platform" == "darwin" ]]; then
+    version="$(read_flutter_version_json "$bundle/Contents/Frameworks/App.framework/Versions/A/Resources/flutter_assets/version.json" || true)"
+    if [[ -n "$version" ]]; then
+      printf '%s\n' "$version"
+      return 0
+    fi
+    version="$(read_flutter_version_json "$bundle/Contents/Frameworks/App.framework/Resources/flutter_assets/version.json" || true)"
+    if [[ -n "$version" ]]; then
+      printf '%s\n' "$version"
+      return 0
+    fi
+    plist="$bundle/Contents/Info.plist"
+    if [[ -f "$plist" && ! -L "$plist" ]]; then
+      content="$(head -c 65536 "$plist" 2>/dev/null || true)"
+      content="${content//$'\n'/}"
+      if [[ "$content" =~ \<key\>[[:space:]]*CFBundleShortVersionString[[:space:]]*\</key\>[[:space:]]*\<string\>([^<]+)\</string\> ]]; then
+        version="${BASH_REMATCH[1]%%+*}"
+        version="${version#"${version%%[![:space:]]*}"}"
+        version="${version%"${version##*[![:space:]]}"}"
+        if [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]]; then
+          printf '%s\n' "$version"
+        fi
+      fi
+    fi
+    return 0
+  fi
+  read_flutter_version_json "$bundle/data/flutter_assets/version.json" || true
+}
+
+# Name a desktop bundle on a different version. This only reads one directory
+# level and does not replace, stop, or delete the copy.
+report_hand_extracted_desktop_skew() {
+  local cli_version="$1"
+  local root="" asset="" releases="" child="" name="" version=""
+  local examined=0 shown=0 matched=0 omitted=0 nullglob_was=0
+  if [[ ! "$cli_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]]; then
+    return 0
+  fi
+  if [[ ! "${REPO:-}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    return 0
+  fi
+  case "${OS:-}" in
+    linux)
+      root="${HOME}/.local/share/quotabot-desktop"
+      asset="quotabot-linux-${ARCH}-desktop.tar.gz"
+      ;;
+    darwin)
+      root="${HOME}/Applications"
+      asset="quotabot-darwin-${ARCH}-desktop.zip"
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+  releases="https://github.com/${REPO}/releases/tag/v${cli_version}"
+  if [[ "$OS" == "linux" && -x "${root}/quotabot" ]]; then
+    version="$(read_desktop_bundle_version "$root" linux || true)"
+    if [[ -n "$version" && "$version" != "$cli_version" ]]; then
+      matched=$((matched + 1))
+      if [[ "$shown" -lt 8 ]]; then
+        shown=$((shown + 1))
+        printf '%s\n' "Managed desktop ${version} at ${root} differs from CLI ${cli_version}. Run \"quotabot update --force\" to replace that managed install. Download ${asset} from ${releases}, verify the .sha256 sidecar, and replace only that managed copy."
+      fi
+    fi
+  fi
+  if [[ "$OS" == "darwin" && -x "${HOME}/Applications/quotabot.app/Contents/MacOS/quotabot" ]]; then
+    version="$(read_desktop_bundle_version "${HOME}/Applications/quotabot.app" darwin || true)"
+    if [[ -n "$version" && "$version" != "$cli_version" ]]; then
+      matched=$((matched + 1))
+      if [[ "$shown" -lt 8 ]]; then
+        shown=$((shown + 1))
+        printf '%s\n' "Managed desktop ${version} at ${HOME}/Applications/quotabot.app differs from CLI ${cli_version}. Run \"quotabot update --force\" to replace that managed install. Download ${asset} from ${releases}, verify the .sha256 sidecar, and replace only that managed copy."
+      fi
+    fi
+  fi
+  if [[ -d "$root" && ! -L "$root" ]]; then
+    if shopt -q nullglob; then
+      nullglob_was=1
+    else
+      shopt -s nullglob
+    fi
+    for child in "$root"/*; do
+      if [[ "$examined" -ge 32 ]]; then
+        break
+      fi
+      examined=$((examined + 1))
+      if [[ ! -d "$child" || -L "$child" ]]; then
+        continue
+      fi
+      name="$(basename -- "$child")"
+      if [[ ! "$name" =~ ^[A-Za-z0-9._-]{1,128}$ ]]; then
+        continue
+      fi
+      if [[ "$OS" == "darwin" && ! "$name" =~ ^quotabot-.+\.app$ ]]; then
+        continue
+      fi
+      if [[ "$OS" == "linux" && ( "$name" == "data" || "$name" == "lib" ) ]]; then
+        continue
+      fi
+      version="$(read_desktop_bundle_version "$child" "$OS" || true)"
+      if [[ -z "$version" || "$version" == "$cli_version" ]]; then
+        continue
+      fi
+      matched=$((matched + 1))
+      if [[ "$shown" -ge 8 ]]; then
+        continue
+      fi
+      shown=$((shown + 1))
+      printf '%s\n' "Hand-extracted desktop ${version} at ${child} differs from CLI ${cli_version} and was left in place. Download ${asset} from ${releases}, verify the .sha256 sidecar, extract it into a new directory, quit the old copy, and launch the new executable."
+    done
+    if [[ "$nullglob_was" -eq 0 ]]; then
+      shopt -u nullglob
+    fi
+  fi
+  omitted=$((matched - shown))
+  if [[ "$omitted" -eq 1 ]]; then
+    printf '%s\n' "1 more desktop copy differs from CLI ${cli_version} and was left in place."
+  elif [[ "$omitted" -gt 1 ]]; then
+    printf '%s\n' "${omitted} more desktop copies differ from CLI ${cli_version} and were left in place."
+  fi
+  return 0
+}
+# portable-desktop-skew: end
+
 # A managed desktop install follows the same tag as the CLI. A missing managed
 # app stays absent, and a hand-extracted versioned copy is left where it is.
 managed_desktop=""
@@ -625,6 +777,8 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     echo "Added $INSTALL_DIR to PATH in $profile (open a new terminal)."
   fi
 fi
+
+report_hand_extracted_desktop_skew "${reported_version#quotabot }" || true
 
 echo ""
 echo "quotabot installed to $INSTALL_ROOT"

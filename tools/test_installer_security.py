@@ -1198,6 +1198,121 @@ foreach ($release in @('0.11.15', '0.11.15-rc.1')) {
             completed.stdout + completed.stderr,
         )
 
+    def test_hand_extracted_desktop_skew_is_named_and_not_replaced(self) -> None:
+        begin = "# portable-desktop-skew: begin"
+        end = "# portable-desktop-skew: end"
+        posix = (ROOT / "install.sh").read_text(encoding="utf-8")
+        windows = (ROOT / "install.ps1").read_text(encoding="utf-8")
+        self.assertIn(begin, posix)
+        self.assertIn(end, posix)
+        self.assertIn(begin, windows)
+        self.assertIn(end, windows)
+        self.assertIn("was left in place", posix)
+        self.assertIn("was left in place", windows)
+        self.assertNotIn('rm -rf -- "$child"', posix)
+        self.assertNotIn("Remove-Item -LiteralPath $child", windows)
+
+        version_body = '{"version":"0.11.13","build_number":"68"}\n'
+        if os.name == "nt":
+            shell_text = windows
+            runner = shutil.which("pwsh")
+            if runner is None:
+                self.skipTest("PowerShell is unavailable")
+        else:
+            shell_text = posix
+            runner = shutil.which("bash")
+            if runner is None:
+                self.skipTest("bash is unavailable")
+        marker = shell_text.index(begin)
+        start = shell_text.index("\n", marker) + 1
+        functions = shell_text[start : shell_text.index(end, start)]
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            if os.name == "nt":
+                bundle = root / "quotabot-desktop" / "v0.11.13"
+                asset = "quotabot-windows-x64-desktop.zip"
+            else:
+                bundle = (
+                    root / ".local" / "share" / "quotabot-desktop" / "v0.11.13"
+                )
+                asset = "quotabot-linux-x64-desktop.tar.gz"
+            version_file = bundle / "data" / "flutter_assets" / "version.json"
+            version_file.parent.mkdir(parents=True)
+            version_file.write_text(version_body, encoding="utf-8")
+            (bundle / "quotabot").write_text("bundle\n", encoding="utf-8")
+            before = version_file.read_bytes()
+
+            def invoke(cli_version: str) -> subprocess.CompletedProcess[str]:
+                if os.name == "nt":
+                    script = (
+                        "function Write-Host { param($Object) Write-Output $Object }\n"
+                        + functions
+                        + "\nReport-HandExtractedDesktopSkew "
+                        + "-CliVersion $env:QUOTABOT_SKEW_VERSION "
+                        + "-Repository 'blisspixel/quotabot' "
+                        + "-LocalAppData $env:QUOTABOT_SKEW_ROOT\n"
+                    )
+                    environment = os.environ.copy()
+                    environment["QUOTABOT_SKEW_VERSION"] = cli_version
+                    environment["QUOTABOT_SKEW_ROOT"] = str(root)
+                    return subprocess.run(
+                        [
+                            runner,
+                            "-NoProfile",
+                            "-NonInteractive",
+                            "-Command",
+                            script,
+                        ],
+                        cwd=ROOT,
+                        env=environment,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        check=False,
+                    )
+                script = (
+                    "set -euo pipefail\n"
+                    'source "$1"\n'
+                    "OS=linux\nARCH=x64\nREPO=blisspixel/quotabot\n"
+                    'report_hand_extracted_desktop_skew "$2"\n'
+                )
+                function_path = root / "skew.sh"
+                function_path.write_text(functions, encoding="utf-8", newline="\n")
+                environment = os.environ.copy()
+                environment["HOME"] = str(root)
+                return subprocess.run(
+                    [runner, "-c", script, "bash", str(function_path), cli_version],
+                    cwd=ROOT,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
+
+            assert runner is not None
+            different = invoke("0.11.15")
+            self.assertEqual(
+                different.returncode,
+                0,
+                different.stdout + different.stderr,
+            )
+            self.assertIn("Hand-extracted desktop 0.11.13", different.stdout)
+            self.assertIn(str(bundle), different.stdout)
+            self.assertIn(asset, different.stdout)
+            self.assertIn(
+                "https://github.com/blisspixel/quotabot/releases/tag/v0.11.15",
+                different.stdout,
+            )
+            self.assertIn("verify the .sha256 sidecar", different.stdout)
+            self.assertIn("was left in place", different.stdout)
+            same = invoke("0.11.13")
+            self.assertEqual(same.returncode, 0, same.stdout + same.stderr)
+            self.assertNotIn("Hand-extracted desktop", same.stdout)
+            self.assertEqual(version_file.read_bytes(), before)
+            self.assertTrue((bundle / "quotabot").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

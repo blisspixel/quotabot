@@ -64,9 +64,11 @@ other concrete-model policies retain their existing ordering.
   release separately. "Install latest update" runs the checksum-verified
   updater (`quotabot update`). It replaces the CLI, and the managed tray app
   when one is already installed. A running tray closes during that swap and
-  opens again afterward. A hand-extracted portable copy stays where it is;
-  open the release, download the desktop archive for your OS, extract it into
-  a new folder, quit the old copy, and launch the new one.
+  opens again afterward. A hand-extracted portable copy stays where it is.
+  When its embedded version differs from the CLI, the update dialog names that
+  version and path. Open the release, download the desktop archive for your OS,
+  verify the `.sha256` sidecar, extract it into a new folder, quit the old
+  copy, and launch the new one.
   GitHub is contacted only when you use one of those actions, never on launch.
 - **Setup/help:** shows the current setup state for supported providers,
   including key-based providers hidden from the main quota view until they are
@@ -735,6 +737,10 @@ inside the current verified archive, downloads one exact published tag and
 checksum sidecar, activates it transactionally, and verifies the new stable
 executable's version. An already installed managed desktop app is downloaded
 and activated for that same tag. A machine without that app stays CLI-only.
+A hand-extracted desktop bundle on a different version is named with its path,
+archive, and checksum steps, and is left in place. `quotabot doctor` prints
+the same notice. `--json` adds `portable_desktop` only when a difference is
+present.
 Stable builds follow stable releases; release candidates follow previews. Use
 `--preview` or `--stable` to change channel, or `--target=TAG` to select one
 exact published tag. A newer exact target installs without `--force`; add

@@ -156,6 +156,87 @@ function Restore-ManagedQuotabotDesktop {
     Move-Item -LiteralPath $BackupPath -Destination $destination
 }
 
+# portable-desktop-skew: begin
+function Read-QuotabotFlutterVersion {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.LinkType) { return $null }
+    if ($item.Length -lt 1 -or $item.Length -gt 4096) { return $null }
+    $bytes = [System.IO.File]::ReadAllBytes($item.FullName)
+    if ($bytes.Length -gt 4096) { return $null }
+    $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+    $parsed = $text | ConvertFrom-Json
+    $version = [string]$parsed.version
+    if ([string]::IsNullOrWhiteSpace($version)) { return $null }
+    if ($version -match '\+') { $version = ($version -split '\+', 2)[0] }
+    if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$') {
+        return $null
+    }
+    return $version
+}
+
+function Report-HandExtractedDesktopSkew {
+    param(
+        [Parameter(Mandatory)][string]$CliVersion,
+        [Parameter(Mandatory)][string]$Repository,
+        [string]$LocalAppData
+    )
+    if ($CliVersion -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$') { return }
+    if ([string]::IsNullOrWhiteSpace($LocalAppData)) { return }
+    if ($Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { return }
+    $asset = 'quotabot-windows-x64-desktop.zip'
+    $releases = "https://github.com/$Repository/releases/tag/v$CliVersion"
+    $shown = 0
+    $matched = 0
+    $managedRoot = Join-Path $LocalAppData 'quotabot\desktop'
+    $managedExe = Join-Path $managedRoot 'quotabot.exe'
+    if (Test-Path -LiteralPath $managedExe -PathType Leaf) {
+        $managedVersion = $null
+        try {
+            $managedVersion = Read-QuotabotFlutterVersion -Path (Join-Path $managedRoot 'data\flutter_assets\version.json')
+        } catch {
+            $managedVersion = $null
+        }
+        if ($managedVersion -and $managedVersion -ne $CliVersion) {
+            $matched++
+            if ($shown -lt 8) {
+                $shown++
+                Write-Host "Managed desktop $managedVersion at $managedRoot differs from CLI $CliVersion. Run `"quotabot update --force`" to replace that managed install. Download $asset from $releases, verify the .sha256 sidecar, and replace only that managed copy."
+            }
+        }
+    }
+    $root = Join-Path $LocalAppData 'quotabot-desktop'
+    if (Test-Path -LiteralPath $root -PathType Container) {
+        $children = @(Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue | Sort-Object FullName)
+        $examined = 0
+        foreach ($child in $children) {
+            if ($examined -ge 32) { break }
+            $examined++
+            if ($child.LinkType -or -not $child.PSIsContainer) { continue }
+            if ($child.Name -notmatch '^[A-Za-z0-9._-]{1,128}$' -or $child.Name.StartsWith('.')) { continue }
+            $version = $null
+            try {
+                $version = Read-QuotabotFlutterVersion -Path (Join-Path $child.FullName 'data\flutter_assets\version.json')
+            } catch {
+                $version = $null
+            }
+            if (-not $version -or $version -eq $CliVersion) { continue }
+            $matched++
+            if ($shown -ge 8) { continue }
+            $shown++
+            Write-Host "Hand-extracted desktop $version at $($child.FullName) differs from CLI $CliVersion and was left in place. Download $asset from $releases, verify the .sha256 sidecar, extract it into a new directory, quit the old copy, and launch the new executable."
+        }
+    }
+    $omitted = $matched - $shown
+    if ($omitted -eq 1) {
+        Write-Host "1 more desktop copy differs from CLI $CliVersion and was left in place."
+    } elseif ($omitted -gt 1) {
+        Write-Host "$omitted more desktop copies differ from CLI $CliVersion and were left in place."
+    }
+}
+# portable-desktop-skew: end
+
 Write-Host "=== quotabot installer ==="
 
 function Install-QuotabotPayload {
@@ -461,6 +542,16 @@ try {
     if ($restartDesktop -and (Test-Path -LiteralPath $managedDesktopExe -PathType Leaf)) {
         Start-Process -FilePath $managedDesktopExe -WorkingDirectory (Split-Path -Parent $managedDesktopExe) | Out-Null
         Write-Host "Restarted the managed desktop app."
+    }
+    try {
+        if ($reportedVersion -like 'quotabot *') {
+            Report-HandExtractedDesktopSkew `
+                -CliVersion $reportedVersion.Substring(9) `
+                -Repository $repo `
+                -LocalAppData $env:LOCALAPPDATA
+        }
+    } catch {
+        Write-Warning "Could not compare a portable desktop bundle with the installed CLI."
     }
     Write-Host "Installed to $installRoot"
 } catch {

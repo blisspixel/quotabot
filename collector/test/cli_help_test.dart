@@ -97,6 +97,7 @@ void main() {
     );
     expect(output, contains('Release candidates follow the preview channel'));
     expect(output, contains('verifies its SHA-256 sidecar'));
+    expect(output, contains('left in place'));
     expect(output, contains('quotabot.update.v1'));
     expect(temp.listSync(), isEmpty);
   });
