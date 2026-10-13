@@ -658,6 +658,8 @@ class Dashboard extends StatefulWidget {
   @visibleForTesting
   final CliUpdater? cliUpdater;
   @visibleForTesting
+  final Future<String?> Function()? cliVersionReader;
+  @visibleForTesting
   final PortableDesktopSkew Function(QuotabotVersion cliVersion)?
   portableDesktopSkewFinder;
   final RouteLeaseStore leaseStore;
@@ -683,6 +685,7 @@ class Dashboard extends StatefulWidget {
       updateChecker = null,
       releaseOpener = null,
       cliUpdater = null,
+      cliVersionReader = null,
       portableDesktopSkewFinder = null,
       leaseStore = const FileRouteLeaseStore();
 
@@ -712,6 +715,7 @@ class Dashboard extends StatefulWidget {
     this.updateChecker,
     this.releaseOpener,
     this.cliUpdater,
+    this.cliVersionReader,
     this.portableDesktopSkewFinder,
     this.leaseStore = const NoopRouteLeaseStore(),
     this.startupStorageWarning,
@@ -3513,7 +3517,8 @@ class _DashboardState extends State<Dashboard>
     return skew.lines;
   }
 
-  String _withDesktopSkew(String message, String referenceVersion) {
+  String _withDesktopSkew(String message, String? referenceVersion) {
+    if (referenceVersion == null) return message;
     final extra = _portableDesktopNoticeLines(referenceVersion);
     if (extra.isEmpty) return message;
     return '$message\n\n${extra.join('\n\n')}';
@@ -3540,7 +3545,7 @@ class _DashboardState extends State<Dashboard>
                     'build. Open releases, download the desktop archive for '
                     'your OS, extract it into a new folder, quit the old '
                     'copy, and launch the new one.',
-                    quotabotAppVersion,
+                    result.cliVersion,
                   )
                 : result.message,
           ),
@@ -3577,6 +3582,12 @@ class _DashboardState extends State<Dashboard>
   ) async {
     try {
       final status = await (widget.updateChecker ?? checkQuotabotUpdates)();
+      final readCliVersion = widget.cliVersionReader;
+      final cliVersion = readCliVersion != null
+          ? await readCliVersion()
+          : widget._hostIntegration
+          ? await readInstalledQuotabotCliVersion()
+          : null;
       if (!mounted || !launchContext.mounted || !shouldPresent()) return;
       await showDialog<void>(
         context: launchContext,
@@ -3641,7 +3652,7 @@ class _DashboardState extends State<Dashboard>
                                 'copy, and launch the new one.'
                           : 'Open the release to review signing status, '
                                 'checksums, assets, and update instructions.',
-                      status.currentVersion,
+                      cliVersion,
                     ),
                   ),
                   if (status.updateAvailable && Platform.isMacOS) ...[

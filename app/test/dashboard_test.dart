@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' show SemanticsAction, Tristate;
 
 import 'package:flutter/material.dart';
@@ -2392,15 +2393,35 @@ void main() {
     tester,
   ) async {
     await _useDesktopSurface(tester);
+    const release = QuotabotRelease(
+      tag: 'v0.12.0',
+      version: '0.12.0',
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.12.0',
+      prerelease: false,
+    );
     const bundlePath = r'C:\portable\quotabot-desktop\v0.11.13';
     await tester.pumpWidget(
       _wrap(
         Dashboard.test(
           prefs: const Prefs(),
-          portableDesktopSkewFinder: _skewAt,
-          cliUpdater: () async => const QuotabotCliInstallResult(
-            ok: true,
-            message: 'Installed CLI 0.11.15.',
+          cliVersionReader: () async => '0.12.0',
+          updateChecker: () async => const QuotabotUpdateStatus(
+            currentVersion: quotabotAppVersion,
+            latest: release,
+            stable: release,
+          ),
+          portableDesktopSkewFinder: (version) {
+            expect(version.toString(), '0.12.0');
+            return _skewAt(version);
+          },
+          cliUpdater: () => installQuotabotCliUpdate(
+            executable: 'quotabot',
+            runner: (exe, args) async => ProcessResult(
+              1,
+              0,
+              '{"schema":"quotabot.update.v1","installed":true,"target_version":"0.12.0"}',
+              '',
+            ),
           ),
         ),
       ),
@@ -2409,6 +2430,14 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     await selectSettingsCategory(tester, SettingsCategory.updates);
+    final check = find.byKey(const ValueKey('settings-check-updates'));
+    await tester.ensureVisible(check);
+    await tester.tap(check);
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('differs from CLI 0.12.0'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Close'));
+    await tester.pumpAndSettle();
     final install = find.byKey(const ValueKey('settings-install-update'));
     await tester.ensureVisible(install);
     await tester.tap(install);

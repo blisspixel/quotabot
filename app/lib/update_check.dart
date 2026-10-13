@@ -410,8 +410,13 @@ Future<QuotabotUpdateStatus> checkQuotabotUpdates({
 class QuotabotCliInstallResult {
   final bool ok;
   final String message;
+  final String? cliVersion;
 
-  const QuotabotCliInstallResult({required this.ok, required this.message});
+  const QuotabotCliInstallResult({
+    required this.ok,
+    required this.message,
+    this.cliVersion,
+  });
 }
 
 typedef CliProcessRunner =
@@ -469,6 +474,7 @@ Future<QuotabotCliInstallResult> installQuotabotCliUpdate({
       return QuotabotCliInstallResult(
         ok: true,
         message: parsed ?? 'CLI update finished.',
+        cliVersion: _cliUpdateVersion(result.stdout),
       );
     }
     return QuotabotCliInstallResult(
@@ -485,6 +491,47 @@ Future<QuotabotCliInstallResult> installQuotabotCliUpdate({
       ok: false,
       message: 'The CLI updater could not be started.',
     );
+  }
+}
+
+/// Reads the installed CLI identity without checking releases or changing files.
+Future<String?> readInstalledQuotabotCliVersion({
+  String? executable,
+  CliProcessRunner? runner,
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final cli = executable ?? defaultQuotabotCliPath();
+  if (cli == null || cli.trim().isEmpty) return null;
+  final run =
+      runner ?? (exe, args) => _runTimedProcess(exe, args, timeout: timeout);
+  try {
+    final result = await run(cli, const ['--version']);
+    if (result.exitCode != 0 || result.stdout is! String) return null;
+    final raw = (result.stdout as String).trim();
+    if (!raw.startsWith('quotabot ')) return null;
+    final version = raw.substring('quotabot '.length);
+    return _parseVersion(version) == null ? null : version;
+  } on TimeoutException {
+    return null;
+  } on ProcessException {
+    return null;
+  }
+}
+
+String? _cliUpdateVersion(Object? output) {
+  if (output is! String) return null;
+  try {
+    final decoded = jsonDecode(output);
+    if (decoded is! Map || decoded['schema'] != 'quotabot.update.v1') {
+      return null;
+    }
+    final version =
+        decoded[decoded['installed'] == true
+            ? 'target_version'
+            : 'current_version'];
+    return version is String && _parseVersion(version) != null ? version : null;
+  } on FormatException {
+    return null;
   }
 }
 

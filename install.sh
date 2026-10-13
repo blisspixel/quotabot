@@ -560,11 +560,13 @@ report_hand_extracted_desktop_skew() {
   case "${OS:-}" in
     linux)
       root="${HOME}/.local/share/quotabot-desktop"
-      asset="quotabot-linux-${ARCH}-desktop.tar.gz"
+      asset="the desktop archive for this operating system"
+      if [[ "$ARCH" == "x64" ]]; then asset="quotabot-linux-x64-desktop.tar.gz"; fi
       ;;
     darwin)
       root="${HOME}/Applications"
-      asset="quotabot-darwin-${ARCH}-desktop.zip"
+      asset="the desktop archive for this operating system"
+      if [[ "$ARCH" == "arm64" ]]; then asset="quotabot-darwin-arm64-desktop.zip"; fi
       ;;
     *)
       return 0

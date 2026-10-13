@@ -47,6 +47,22 @@ MockClient releasesClient(List<Object?> releases) =>
     });
 
 void main() {
+  test('desktop archive advice only names shipped architectures', () {
+    for (final row in [
+      ('linux', 'x64', 'quotabot-linux-x64-desktop.tar.gz'),
+      ('macos', 'arm64', 'quotabot-darwin-arm64-desktop.zip'),
+      ('windows', 'x64', 'quotabot-windows-x64-desktop.zip'),
+      ('linux', 'arm64', ''),
+      ('macos', 'x64', ''),
+      ('windows', 'arm64', ''),
+    ]) {
+      expect(
+        portableDesktopAssetName(operatingSystem: row.$1, architecture: row.$2),
+        row.$3,
+      );
+    }
+  });
+
   group('QuotabotVersion', () {
     test('parses and orders stable and release-candidate versions', () {
       final rc9 = QuotabotVersion.tryParse('v0.10.0-rc.9')!;

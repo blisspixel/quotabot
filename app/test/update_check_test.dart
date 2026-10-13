@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -164,7 +165,69 @@ void main() {
     );
     expect(result.ok, isTrue);
     expect(result.message, 'Installed CLI 0.12.0.');
+    expect(result.cliVersion, '0.12.0');
   });
+
+  test(
+    'CLI version uses current identity on a no-op and rejects malformed data',
+    () async {
+      for (final row in <(String, String?)>[
+        (
+          '{"schema":"quotabot.update.v1","installed":false,"current_version":"0.12.0","target_version":"0.13.0"}',
+          '0.12.0',
+        ),
+        (
+          '{"schema":"quotabot.update.v1","installed":true,"target_version":"invalid"}',
+          null,
+        ),
+        ('{"schema":"other","installed":true,"target_version":"0.12.0"}', null),
+        ('not JSON', null),
+      ]) {
+        final result = await installQuotabotCliUpdate(
+          executable: 'quotabot',
+          runner: (_, _) async => ProcessResult(1, 0, row.$1, ''),
+        );
+        expect(result.cliVersion, row.$2);
+      }
+    },
+  );
+
+  test(
+    'installed CLI identity read requires successful exact version output',
+    () async {
+      for (final row in <(int, String, String?)>[
+        (0, 'quotabot 0.12.0\n', '0.12.0'),
+        (0, 'quotabot 0.12.0-rc.1', '0.12.0-rc.1'),
+        (1, 'quotabot 0.12.0', null),
+        (0, 'another app 0.12.0', null),
+        (0, 'quotabot invalid', null),
+      ]) {
+        final version = await readInstalledQuotabotCliVersion(
+          executable: 'quotabot',
+          runner: (exe, args) async {
+            expect(args, ['--version']);
+            return ProcessResult(1, row.$1, row.$2, '');
+          },
+        );
+        expect(version, row.$3);
+      }
+      expect(await readInstalledQuotabotCliVersion(executable: ''), isNull);
+      expect(
+        await readInstalledQuotabotCliVersion(
+          executable: 'quotabot',
+          runner: (_, _) async => throw TimeoutException('test deadline'),
+        ),
+        isNull,
+      );
+      expect(
+        await readInstalledQuotabotCliVersion(
+          executable: 'quotabot',
+          runner: (_, _) async => throw const ProcessException('quotabot', []),
+        ),
+        isNull,
+      );
+    },
+  );
 
   test('CLI installer fails closed when the updater is missing', () async {
     final result = await installQuotabotCliUpdate(executable: '');

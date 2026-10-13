@@ -580,12 +580,10 @@ String portableDesktopAssetName({
   required String operatingSystem,
   required String architecture,
 }) {
-  if (operatingSystem == 'linux' &&
-      (architecture == 'x64' || architecture == 'arm64')) {
+  if (operatingSystem == 'linux' && architecture == 'x64') {
     return 'quotabot-linux-$architecture-desktop.tar.gz';
   }
-  if (operatingSystem == 'macos' &&
-      (architecture == 'x64' || architecture == 'arm64')) {
+  if (operatingSystem == 'macos' && architecture == 'arm64') {
     return 'quotabot-darwin-$architecture-desktop.zip';
   }
   if (operatingSystem == 'windows' && architecture == 'x64') {
