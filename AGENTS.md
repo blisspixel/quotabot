@@ -61,12 +61,15 @@ verification, is [CLAUDE.md](CLAUDE.md).
 
 ## Project status
 
-The current verified stable release is 0.11.15. Callers should treat a snapshot
+The current verified stable release is 0.11.16. Callers should treat a snapshot
 with `drift_reason` as non-routable, keep measured percentages visible on
 admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
 explicit-spend evidence. Fresh quota publishes before advisory analytics.
 
+Version 0.11.16 names a hand-extracted desktop bundle whose embedded version
+differs from the CLI and leaves that copy in place. The desktop dialog uses the
+installed CLI version.
 Version 0.11.15 updates existing managed desktop installations with the CLI;
 fresh installs remain CLI-only and hand-extracted copies remain in place.
 Version 0.11.14 separates absent subscription quota from measured low quota
