@@ -466,12 +466,9 @@ stop_managed_executable() {
 download_verified_release_asset() {
   local asset="$1"
   local destination_dir="$2"
+  local release_tag="$3"
   local asset_url expected actual
-  if [[ "$VERSION" == latest ]]; then
-    asset_url="https://github.com/${REPO}/releases/latest/download/${asset}"
-  else
-    asset_url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
-  fi
+  asset_url="https://github.com/${REPO}/releases/download/${release_tag}/${asset}"
   mkdir -p "$destination_dir"
   curl -fsSL "$asset_url" -o "$destination_dir/$asset"
   curl -fsSL "${asset_url}.sha256" -o "$destination_dir/$asset.sha256"
@@ -517,7 +514,8 @@ desktop_work=""
 if [[ -n "$managed_desktop" ]]; then
   echo "Updating the managed desktop app from ${VERSION}"
   desktop_work="$(mktemp -d)"
-  download_verified_release_asset "$desktop_asset" "$desktop_work"
+  download_verified_release_asset \
+    "$desktop_asset" "$desktop_work" "v${reported_version#quotabot }"
   mkdir -p "$desktop_work/expanded"
   if [[ "$desktop_kind" == macos-app ]]; then
     ditto -x -k "$desktop_work/$desktop_asset" "$desktop_work/expanded"

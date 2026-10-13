@@ -419,11 +419,7 @@ try {
         $desktopDownload = Join-Path $workPath $desktopAsset
         $desktopChecksum = Join-Path $workPath "$desktopAsset.sha256"
         $desktopExtract = Join-Path $workPath 'desktop-expanded'
-        $desktopUrl = if ($version -eq 'latest') {
-            "https://github.com/$repo/releases/latest/download/$desktopAsset"
-        } else {
-            "https://github.com/$repo/releases/download/$version/$desktopAsset"
-        }
+        $desktopUrl = "https://github.com/$repo/releases/download/v$($reportedVersion.Substring(9))/$desktopAsset"
         Write-Host "Updating the managed desktop app from $version"
         Invoke-WebRequest -Uri $desktopUrl -OutFile $desktopDownload -UseBasicParsing
         Invoke-WebRequest -Uri "$desktopUrl.sha256" -OutFile $desktopChecksum -UseBasicParsing
