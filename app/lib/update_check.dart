@@ -545,9 +545,19 @@ Future<ProcessResult> _runTimedProcess(
   final stderrBytes = <int>[];
   final stdoutSub = process.stdout.listen(stdoutBytes.addAll);
   final stderrSub = process.stderr.listen(stderrBytes.addAll);
+  // Register completion before any await: a short --version process can close
+  // both pipes before exitCode completes. One deadline owns exit and draining.
+  final stdoutDone = stdoutSub.asFuture<void>();
+  final stderrDone = stderrSub.asFuture<void>();
   try {
-    final code = await process.exitCode.timeout(timeout);
-    await Future.wait([stdoutSub.asFuture<void>(), stderrSub.asFuture<void>()]);
+    var code = -1;
+    await Future.wait<void>([
+      process.exitCode.then<void>((value) {
+        code = value;
+      }),
+      stdoutDone,
+      stderrDone,
+    ]).timeout(timeout);
     return ProcessResult(
       process.pid,
       code,
