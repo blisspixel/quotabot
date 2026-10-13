@@ -3500,7 +3500,11 @@ class _DashboardState extends State<Dashboard>
             result.ok
                 ? '${result.message} A managed tray app installed with '
                       'quotabot is updated to the same release. This window '
-                      'closes during that swap and opens again afterward.'
+                      'closes during that swap and opens again afterward. '
+                      'A hand-extracted versioned copy stays on its current '
+                      'build. Open releases, download the desktop archive for '
+                      'your OS, extract it into a new folder, quit the old '
+                      'copy, and launch the new one.'
                 : result.message,
           ),
         ),
@@ -3509,14 +3513,13 @@ class _DashboardState extends State<Dashboard>
             onPressed: () => Navigator.of(resultContext).pop(),
             child: const Text('Close'),
           ),
-          if (!result.ok)
-            TextButton(
-              onPressed: () {
-                Navigator.of(resultContext).pop();
-                unawaited(_openRelease(quotabotReleasesUrl));
-              },
-              child: const Text('Open releases'),
-            ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(resultContext).pop();
+              unawaited(_openRelease(quotabotReleasesUrl));
+            },
+            child: const Text('Open releases'),
+          ),
         ],
       ),
     );
@@ -3592,7 +3595,11 @@ class _DashboardState extends State<Dashboard>
                         ? 'Install latest update runs the checksum-verified '
                               'updater. It replaces the CLI and, when this is '
                               'the managed install, this tray app. The window '
-                              'closes during the swap and opens again afterward.'
+                              'closes during the swap and opens again afterward. '
+                              'For a hand-extracted versioned copy, open the '
+                              'release, download the desktop archive for your '
+                              'OS, extract it into a new folder, quit the old '
+                              'copy, and launch the new one.'
                         : 'Open the release to review signing status, '
                               'checksums, assets, and update instructions.',
                   ),

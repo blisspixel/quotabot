@@ -447,7 +447,9 @@ stop_managed_executable() {
     ps_args=(-eo pid=,args=)
   fi
   while IFS= read -r line; do
-    pid="${line%% *}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    pid="${line%%[[:space:]]*}"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
     args="${line#"$pid"}"
     args="${args#"${args%%[![:space:]]*}"}"
     case "$args" in

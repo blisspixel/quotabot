@@ -180,7 +180,9 @@ actions. Check shows the latest candidate and latest stable separately.
 Install runs the checksum-verified updater. It replaces the CLI, and the
 managed tray app when one is already installed. A running tray closes during
 that swap and opens again afterward. A hand-extracted portable copy stays
-where it is. Stable builds recommend stable updates without
+where it is. For that copy, open the release, download the desktop archive for
+your OS, extract it into a new folder, quit the old copy, and launch the new one.
+Stable builds recommend stable updates without
 hiding newer previews; release candidates follow the preview channel. The app
 never checks automatically or prompts on launch.
 Verification, launch, update, rollback, and uninstall belong in [Desktop

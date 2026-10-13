@@ -1,14 +1,65 @@
 import os
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class InstallerSecurityTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "POSIX managed-process lifecycle")
+    def test_posix_updater_stops_the_exact_padded_pid_and_spaced_path(self) -> None:
+        script = (ROOT / "install.sh").read_text(encoding="utf-8")
+        stop = (
+            "stop_managed_executable() {"
+            + script.split("stop_managed_executable() {", 1)[1].split(
+                "\ndownload_verified_release_asset() {", 1
+            )[0]
+        )
+        sleep = shutil.which("sleep")
+        bash = shutil.which("bash")
+        self.assertIsNotNone(sleep)
+        self.assertIsNotNone(bash)
+        with tempfile.TemporaryDirectory(prefix="quotabot lifecycle ") as directory:
+            target = Path(directory) / "quotabot"
+            other = Path(directory) / "quotabot-old"
+            shutil.copy2(sleep, target)
+            shutil.copy2(sleep, other)
+            for operating_system in ("Linux", "Darwin"):
+                with self.subTest(operating_system=operating_system):
+                    managed = subprocess.Popen([str(target), "60"])
+                    unrelated = subprocess.Popen([str(other), "60"])
+                    try:
+                        result = subprocess.run(
+                            [
+                                bash,
+                                "-c",
+                                stop + "\n"
+                                'test_os="$2"\n'
+                                "uname() { printf '%s\\n' \"$test_os\"; }\n"
+                                "ps() { command ps \"$@\" | sed 's/^/        /'; }\n"
+                                'stop_managed_executable "$1"\n'
+                                "printf '%s\\n' \"$managed_desktop_was_running\"\n",
+                                "lifecycle",
+                                str(target),
+                                operating_system,
+                            ],
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                            timeout=10,
+                        )
+                        self.assertEqual(result.stdout.strip(), "1")
+                        self.assertEqual(managed.wait(timeout=5), -15)
+                        self.assertIsNone(unrelated.poll())
+                    finally:
+                        for process in (managed, unrelated):
+                            if process.poll() is None:
+                                process.terminate()
+                            process.wait(timeout=5)
+
     def test_install_smoke_uses_the_demo_environment_contract(self) -> None:
         smoke = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
             encoding="utf-8"

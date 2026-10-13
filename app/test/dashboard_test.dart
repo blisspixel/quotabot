@@ -2274,10 +2274,12 @@ void main() {
   testWidgets('settings can install the latest CLI update', (tester) async {
     await _useDesktopSurface(tester);
     var installs = 0;
+    final opened = <String>[];
     await tester.pumpWidget(
       _wrap(
         Dashboard.test(
           prefs: const Prefs(),
+          releaseOpener: (url) async => opened.add(url),
           cliUpdater: () async {
             installs++;
             return const QuotabotCliInstallResult(
@@ -2300,6 +2302,13 @@ void main() {
     expect(installs, 1);
     expect(find.text('Update installed'), findsOneWidget);
     expect(find.textContaining('Installed CLI 0.12.0.'), findsOneWidget);
+    expect(
+      find.textContaining('A hand-extracted versioned copy'),
+      findsOneWidget,
+    );
+    await tester.tap(find.widgetWithText(TextButton, 'Open releases'));
+    await tester.pumpAndSettle();
+    expect(opened, [quotabotReleasesUrl]);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

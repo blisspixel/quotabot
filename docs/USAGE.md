@@ -64,7 +64,9 @@ other concrete-model policies retain their existing ordering.
   release separately. "Install latest update" runs the checksum-verified
   updater (`quotabot update`). It replaces the CLI, and the managed tray app
   when one is already installed. A running tray closes during that swap and
-  opens again afterward. A hand-extracted portable copy stays where it is.
+  opens again afterward. A hand-extracted portable copy stays where it is;
+  open the release, download the desktop archive for your OS, extract it into
+  a new folder, quit the old copy, and launch the new one.
   GitHub is contacted only when you use one of those actions, never on launch.
 - **Setup/help:** shows the current setup state for supported providers,
   including key-based providers hidden from the main quota view until they are
