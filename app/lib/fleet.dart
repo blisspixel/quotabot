@@ -7,9 +7,7 @@ import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/models.dart';
-import 'package:quotabot_collector/palette.dart';
 
-import 'headroom_colors.dart';
 import 'profile_ui.dart'
     show
         distinctProviderAccountCounts,
@@ -18,14 +16,26 @@ import 'profile_ui.dart'
 import 'theme_spec.dart';
 import 'typography.dart';
 
-/// Health color on the shared green-to-red scale (input is remaining free %).
-Color fleetColor(num freePct) => headroomColor(freePct);
+/// Health color from the loaded theme (input is remaining free %).
+Color fleetColor(num freePct, {AppChromeTheme? chrome}) {
+  final theme = chrome ?? AppChromeTheme.forSpec(Brightness.dark, appThemeDark);
+  return theme.headroom(freePct);
+}
 
 /// Health color for text on the current Analytics card surface.
-Color fleetTextColor(num freePct, {required bool dark}) => headroomColor(
-  freePct,
-  palette: dark ? kDefaultPalette : paletteFromSpec('light'),
-);
+Color fleetTextColor(
+  num freePct, {
+  required bool dark,
+  AppChromeTheme? chrome,
+}) {
+  final theme =
+      chrome ??
+      AppChromeTheme.forSpec(
+        dark ? Brightness.dark : Brightness.light,
+        dark ? appThemeDark : appThemeLight,
+      );
+  return theme.headroom(freePct);
+}
 
 /// The time window the dashboard is showing.
 enum FleetRange {
@@ -86,14 +96,11 @@ class _FleetScreenState extends State<FleetScreen> {
   final ScrollController _scrollController = ScrollController();
 
   bool get dark => widget.dark;
-  Color get _blueText =>
-      dark ? const Color(0xFF58A6FF) : const Color(0xFF285AC8);
-  Color get _greenText =>
-      dark ? const Color(0xFF3FB950) : const Color(0xFF238636);
-  Color get _amberText =>
-      dark ? const Color(0xFFD29922) : const Color(0xFF9A6700);
-  Color get _orangeText =>
-      dark ? const Color(0xFFDB6D28) : const Color(0xFFB45014);
+  AppChromeTheme get _chrome => AppChromeTheme.of(context);
+  Color get _blueText => _chrome.info;
+  Color get _greenText => _chrome.success;
+  Color get _amberText => _chrome.warning;
+  Color get _orangeText => _chrome.caution;
 
   @override
   void dispose() {
@@ -239,6 +246,7 @@ class _FleetScreenState extends State<FleetScreen> {
     int now,
     ({Color panel, Color fg, Color muted, Color line}) c,
   ) {
+    final chrome = _chrome;
     final textScaler = MediaQuery.textScalerOf(context);
     if (nodes.isEmpty) {
       return Column(
@@ -261,7 +269,7 @@ class _FleetScreenState extends State<FleetScreen> {
               child: _chip(
                 '${pool.round()}%',
                 'pool free',
-                fleetTextColor(pool, dark: dark),
+                fleetTextColor(pool, dark: dark, chrome: chrome),
                 c,
               ),
             ),
@@ -270,7 +278,7 @@ class _FleetScreenState extends State<FleetScreen> {
               child: _chip(
                 freest.label,
                 'most headroom (${freest.free.round()}%)',
-                fleetTextColor(freest.free, dark: dark),
+                fleetTextColor(freest.free, dark: dark, chrome: chrome),
                 c,
               ),
             ),
@@ -295,7 +303,14 @@ class _FleetScreenState extends State<FleetScreen> {
                     padding: 9,
                   ),
               child: CustomPaint(
-                painter: _BarsPainter(nodes, now, dark, c.fg, textScaler),
+                painter: _BarsPainter(
+                  nodes,
+                  now,
+                  dark,
+                  c.fg,
+                  textScaler,
+                  chrome,
+                ),
               ),
             ),
           ),
@@ -320,6 +335,7 @@ class _FleetScreenState extends State<FleetScreen> {
                         c.fg,
                         c.muted,
                         textScaler,
+                        chrome,
                       ),
                     ),
             ),
@@ -558,7 +574,7 @@ class _FleetScreenState extends State<FleetScreen> {
         ? summary
         : '$summary Inventory inspection was also incomplete, so this list '
               'may omit another local incident.';
-    const amber = Color(0xFFD29922);
+    final amber = _chrome.warning;
     return Semantics(
       container: true,
       liveRegion: true,
@@ -616,6 +632,7 @@ class _FleetScreenState extends State<FleetScreen> {
     required bool hasStorageConflict,
     required bool hasUnverifiedStorage,
   }) {
+    final chrome = _chrome;
     final textScaler = MediaQuery.textScalerOf(context);
     final tz = DateTime.now().timeZoneOffset;
     final days = _range.days!;
@@ -714,7 +731,14 @@ class _FleetScreenState extends State<FleetScreen> {
                     padding: 10,
                   ),
               child: CustomPaint(
-                painter: _DistPainter(stats, dark, c.fg, c.muted, textScaler),
+                painter: _DistPainter(
+                  stats,
+                  dark,
+                  c.fg,
+                  c.muted,
+                  textScaler,
+                  chrome,
+                ),
               ),
             ),
           ),
@@ -757,6 +781,7 @@ class _FleetScreenState extends State<FleetScreen> {
                   c.muted,
                   math.min(days, kRetentionDays),
                   textScaler,
+                  chrome,
                 ),
               ),
             ),
@@ -784,6 +809,7 @@ class _FleetScreenState extends State<FleetScreen> {
                             dark,
                             c.muted,
                             textScaler,
+                            chrome,
                           ),
                         ),
                 ),
@@ -1186,7 +1212,11 @@ class _FleetScreenState extends State<FleetScreen> {
       ),
       const SizedBox(width: 6),
       for (final remaining in const [0, 25, 50, 100])
-        Container(width: 16, height: 8, color: fleetColor(remaining)),
+        Container(
+          width: 16,
+          height: 8,
+          color: fleetColor(remaining, chrome: _chrome),
+        ),
       const SizedBox(width: 6),
       Text(
         'free',
@@ -1278,11 +1308,19 @@ class _BarsPainter extends CustomPainter {
   final bool dark;
   final Color fg;
   final TextScaler textScaler;
-  _BarsPainter(this.nodes, this.now, this.dark, this.fg, this.textScaler);
+  final AppChromeTheme chrome;
+  _BarsPainter(
+    this.nodes,
+    this.now,
+    this.dark,
+    this.fg,
+    this.textScaler,
+    this.chrome,
+  );
 
   @override
   void paint(Canvas canvas, Size size) {
-    final track = dark ? const Color(0xFF22262E) : const Color(0xFFEDEEF1);
+    final track = chrome.gaugeTrack;
     final rowH = size.height / nodes.length;
     final desiredLabelW = math.max(
       70.0,
@@ -1320,7 +1358,7 @@ class _BarsPainter extends CustomPainter {
             Rect.fromLTWH(barL, cy - bh / 2, w, bh),
             const Radius.circular(3),
           ),
-          Paint()..color = fleetColor(n.free),
+          Paint()..color = fleetColor(n.free, chrome: chrome),
         );
       }
       final reset = _reset(n.resetsAt, now);
@@ -1383,7 +1421,7 @@ class _BarsPainter extends CustomPainter {
               style: TextStyle(
                 fontFamily: AppType.fontFamily,
                 fontSize: AppType.label,
-                color: dark ? const Color(0xFF8A91A0) : const Color(0xFF69707E),
+                color: chrome.muted,
               ),
             ),
         ],
@@ -1403,7 +1441,8 @@ class _BarsPainter extends CustomPainter {
       old.now != now ||
       old.dark != dark ||
       old.fg != fg ||
-      old.textScaler != textScaler;
+      old.textScaler != textScaler ||
+      old.chrome.scaffold != chrome.scaffold;
 }
 
 /// Donut of consumption share: how spend concentrates across providers.
@@ -1413,18 +1452,15 @@ class _DonutPainter extends CustomPainter {
   final Color fg;
   final Color muted;
   final TextScaler textScaler;
-  _DonutPainter(this.nodes, this.dark, this.fg, this.muted, this.textScaler);
-
-  static const _palette = [
-    Color(0xFF58A6FF),
-    Color(0xFFBC8CFF),
-    Color(0xFF3FB950),
-    Color(0xFFD29922),
-    Color(0xFFDB6D28),
-    Color(0xFFF85149),
-    Color(0xFF39C5CF),
-    Color(0xFFE685B5),
-  ];
+  final AppChromeTheme chrome;
+  _DonutPainter(
+    this.nodes,
+    this.dark,
+    this.fg,
+    this.muted,
+    this.textScaler,
+    this.chrome,
+  );
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1446,15 +1482,11 @@ class _DonutPainter extends CustomPainter {
         start,
         sweep - 0.02,
         true,
-        Paint()..color = _palette[i % _palette.length],
+        Paint()..color = chrome.chart[i % chrome.chart.length],
       );
       start += sweep;
     }
-    canvas.drawCircle(
-      center,
-      inner,
-      Paint()..color = dark ? const Color(0xFF14171D) : Colors.white,
-    );
+    canvas.drawCircle(center, inner, Paint()..color = chrome.card);
 
     final lx = center.dx + outer + 14;
     final lineHeight = math.max(18.0, textScaler.scale(AppType.caption) + 4);
@@ -1465,7 +1497,7 @@ class _DonutPainter extends CustomPainter {
           Rect.fromLTWH(lx, ly + 2, 9, 9),
           const Radius.circular(2),
         ),
-        Paint()..color = _palette[i % _palette.length],
+        Paint()..color = chrome.chart[i % chrome.chart.length],
       );
       final pct = (spenders[i].used / total * 100).round();
       final tp = TextPainter(
@@ -1506,7 +1538,8 @@ class _DonutPainter extends CustomPainter {
       old.dark != dark ||
       old.fg != fg ||
       old.muted != muted ||
-      old.textScaler != textScaler;
+      old.textScaler != textScaler ||
+      old.chrome.card != chrome.card;
 }
 
 /// Floating distribution bars: the p10..p90 free range with a p50 tick.
@@ -1516,11 +1549,19 @@ class _DistPainter extends CustomPainter {
   final Color fg;
   final Color muted;
   final TextScaler textScaler;
-  _DistPainter(this.nodes, this.dark, this.fg, this.muted, this.textScaler);
+  final AppChromeTheme chrome;
+  _DistPainter(
+    this.nodes,
+    this.dark,
+    this.fg,
+    this.muted,
+    this.textScaler,
+    this.chrome,
+  );
 
   @override
   void paint(Canvas canvas, Size size) {
-    final track = dark ? const Color(0xFF22262E) : const Color(0xFFEDEEF1);
+    final track = chrome.gaugeTrack;
     final rowH = size.height / nodes.length;
     final labelW = math.min(
       size.width * 0.45,
@@ -1549,7 +1590,11 @@ class _DistPainter extends CustomPainter {
           Rect.fromLTRB(x(p10), cy - bh / 2, x(p90), cy + bh / 2),
           const Radius.circular(3),
         ),
-        Paint()..color = fleetColor((p10 + p90) / 2).withValues(alpha: 0.55),
+        Paint()
+          ..color = fleetColor(
+            (p10 + p90) / 2,
+            chrome: chrome,
+          ).withValues(alpha: 0.55),
       );
       if (p50 != null) {
         canvas.drawRect(
@@ -1596,6 +1641,7 @@ class _CalendarPainter extends CustomPainter {
   final Color muted;
   final int maxDays;
   final TextScaler textScaler;
+  final AppChromeTheme chrome;
 
   _CalendarPainter(
     this.nodes,
@@ -1604,6 +1650,7 @@ class _CalendarPainter extends CustomPainter {
     this.muted,
     this.maxDays,
     this.textScaler,
+    this.chrome,
   );
 
   @override
@@ -1643,10 +1690,15 @@ class _CalendarPainter extends CustomPainter {
   }
 
   Color _dayColor(ContributionDay day) {
-    if (day.spent) return fleetColor(0);
-    if (day.mixed) return fleetColor(math.min(day.meanFreePercent, 25));
+    if (day.spent) return fleetColor(0, chrome: chrome);
+    if (day.mixed) {
+      return fleetColor(math.min(day.meanFreePercent, 25), chrome: chrome);
+    }
     final alpha = day.intensity <= 1 ? (dark ? 0.55 : 0.65) : 0.9;
-    return fleetColor(day.meanFreePercent).withValues(alpha: alpha);
+    return fleetColor(
+      day.meanFreePercent,
+      chrome: chrome,
+    ).withValues(alpha: alpha);
   }
 
   void _label(Canvas canvas, String s, double cy, double width) {
@@ -1684,7 +1736,14 @@ class _HeatmapPainter extends CustomPainter {
   final bool dark;
   final Color muted;
   final TextScaler textScaler;
-  _HeatmapPainter(this.grid, this.dark, this.muted, this.textScaler);
+  final AppChromeTheme chrome;
+  _HeatmapPainter(
+    this.grid,
+    this.dark,
+    this.muted,
+    this.textScaler,
+    this.chrome,
+  );
 
   static const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -1699,7 +1758,7 @@ class _HeatmapPainter extends CustomPainter {
     final gw = size.width - labelW;
     final gh = size.height - axisH;
     final cw = gw / cols, ch = gh / rows;
-    final empty = dark ? const Color(0xFF20242B) : const Color(0xFFEDEEF1);
+    final empty = chrome.gaugeTrack;
     for (var r = 0; r < rows; r++) {
       final tp = TextPainter(
         text: TextSpan(
@@ -1718,7 +1777,7 @@ class _HeatmapPainter extends CustomPainter {
         final v = grid[r][col];
         canvas.drawRect(
           Rect.fromLTWH(labelW + col * cw, r * ch, cw - 0.6, ch - 0.6),
-          Paint()..color = v == null ? empty : fleetColor(v),
+          Paint()..color = v == null ? empty : fleetColor(v, chrome: chrome),
         );
       }
     }

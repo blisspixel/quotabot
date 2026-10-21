@@ -28,6 +28,8 @@ class ProfileEditorDialog extends StatefulWidget {
   final String activeProfile;
   final ProviderSort currentSort;
   final Set<String> currentHidden;
+  final List<({String slug, String label})> extraThemes;
+  final String liveTheme;
 
   const ProfileEditorDialog({
     super.key,
@@ -36,6 +38,8 @@ class ProfileEditorDialog extends StatefulWidget {
     required this.activeProfile,
     required this.currentSort,
     required this.currentHidden,
+    this.extraThemes = const [],
+    this.liveTheme = appThemeDark,
   });
 
   @override
@@ -95,7 +99,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     _selection = profile.name;
     _name.text = profile.name;
     _policy = profile.routingPolicy.canonical;
-    _theme = normalizeAppTheme(profile.theme);
+    _theme = _themeForEditor(profile);
     _sort = profile.name == widget.activeProfile
         ? widget.currentSort
         : sortFromProfile(profile);
@@ -105,6 +109,25 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     _providers = _selectedProvidersFor(profile);
     _accounts = _selectedAccountsFor(profile);
     _preferenceOrder = List.of(profile.preferenceOrder);
+  }
+
+  String _themeForEditor(QuotaProfile profile) {
+    final raw = profile.theme?.trim();
+    if (raw != null && raw.isNotEmpty) return normalizeAppTheme(raw);
+    if (profile.name == defaultProfileName) {
+      return normalizeAppTheme(widget.liveTheme);
+    }
+    return appThemeSystem;
+  }
+
+  bool _themeListed(String slug) {
+    if (slug == appThemeSystem ||
+        slug == appThemeLight ||
+        slug == appThemeDark ||
+        slug == appThemeHacker) {
+      return true;
+    }
+    return widget.extraThemes.any((theme) => theme.slug == slug);
   }
 
   void _loadNew() {
@@ -285,17 +308,34 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                   labelText: 'Theme',
                   isDense: true,
                 ),
-                items: const [
-                  DropdownMenuItem(
+                items: [
+                  const DropdownMenuItem(
                     value: appThemeSystem,
                     child: Text('System'),
                   ),
-                  DropdownMenuItem(value: appThemeLight, child: Text('Light')),
-                  DropdownMenuItem(value: appThemeDark, child: Text('Dark')),
-                  DropdownMenuItem(
+                  const DropdownMenuItem(
+                    value: appThemeLight,
+                    child: Text('Light'),
+                  ),
+                  const DropdownMenuItem(
+                    value: appThemeDark,
+                    child: Text('Dark'),
+                  ),
+                  const DropdownMenuItem(
                     value: appThemeHacker,
                     child: Text('Hacker'),
                   ),
+                  for (final theme in widget.extraThemes)
+                    if (theme.slug != appThemeLight &&
+                        theme.slug != appThemeDark &&
+                        theme.slug != appThemeHacker &&
+                        theme.slug != appThemeGreenScreen)
+                      DropdownMenuItem(
+                        value: theme.slug,
+                        child: Text(theme.label),
+                      ),
+                  if (!_themeListed(_theme))
+                    DropdownMenuItem(value: _theme, child: Text(_theme)),
                 ],
                 onChanged: _selection == defaultProfileName
                     ? null

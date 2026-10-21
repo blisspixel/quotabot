@@ -550,9 +550,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Next: Codex'), findsOneWidget);
+    expect(find.textContaining('next  Codex'), findsOneWidget);
     final nextLine = tester.widget<Text>(
-      find.textContaining('Next: Codex').first,
+      find.textContaining('next  Codex').first,
     );
     expect(nextLine.style?.fontWeight, FontWeight.w600);
     final details = find.byTooltip('Explain recommendation');
@@ -623,7 +623,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Next: Ollama'), findsOneWidget);
+    expect(find.textContaining('next  Ollama'), findsOneWidget);
     await tester.tap(find.byTooltip('Explain recommendation'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Quota-stretch policy:'), findsOneWidget);
@@ -753,8 +753,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Next: Codex'), findsOneWidget);
-    expect(find.textContaining('Next: Antigravity'), findsNothing);
+    expect(find.textContaining('next  Codex'), findsOneWidget);
+    expect(find.textContaining('next  Antigravity'), findsNothing);
   });
 
   testWidgets('desktop routing honors active cross-process leases', (
@@ -787,7 +787,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Next: Codex'), findsOneWidget);
+    expect(find.textContaining('next  Codex'), findsOneWidget);
   });
 
   testWidgets('dashboard exposes a bounded webhook delivery failure', (
@@ -1456,13 +1456,14 @@ void main() {
 
     final decision = find.byKey(const ValueKey('compact-route-decision'));
     final decisionSemantics = find.bySemanticsLabel(
-      RegExp(r'Next: Antigravity.*Open decision details'),
+      RegExp(r'next  Antigravity.*Open decision details'),
     );
     final decisionSemanticsNode = find.semantics.byLabel(
-      RegExp(r'Next: Antigravity.*Open decision details'),
+      RegExp(r'next  Antigravity.*Open decision details'),
     );
     expect(decision, findsOneWidget);
-    expect(find.text('Next'), findsOneWidget);
+    expect(find.textContaining('next  Antigravity'), findsOneWidget);
+    expect(find.text('80'), findsWidgets);
     expect(decisionSemantics, findsOneWidget);
     expect(
       tester
@@ -1523,11 +1524,14 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Next Claude (personal@example.com)'), findsOneWidget);
+    expect(
+      find.textContaining('next  Claude (personal@example.com)'),
+      findsOneWidget,
+    );
     expect(
       find.bySemanticsLabel(
         RegExp(
-          r'Next: Claude \(personal@example\.com\).*Open decision details',
+          r'next  Claude \(personal@example\.com\).*Open decision details',
         ),
       ),
       findsOneWidget,
@@ -1535,7 +1539,17 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('compact-route-decision')));
     await tester.pumpAndSettle();
     expect(
-      find.textContaining('Next: Claude (personal@example.com)'),
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.textContaining('next  Claude (personal@example.com)'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('compact-route-decision')),
+        matching: find.textContaining('next  Claude (personal@example.com)'),
+      ),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
@@ -1570,7 +1584,8 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Next'), findsOneWidget);
+    expect(find.textContaining('next  Antigravity'), findsOneWidget);
+    expect(find.text('80'), findsWidgets);
     for (final tooltip in ['Expand', 'Close']) {
       final rect = tester.getRect(find.byTooltip(tooltip));
       expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
@@ -1612,7 +1627,10 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('No route'), findsOneWidget);
+    expect(
+      find.textContaining('next  your usual model (no quota read yet)'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -1650,9 +1668,14 @@ void main() {
 
     final decision = find.byKey(const ValueKey('compact-route-decision'));
     expect(decision, findsOneWidget);
-    expect(find.text('No route'), findsOneWidget);
     expect(
-      find.bySemanticsLabel(RegExp(r'No quota data.*Open decision details')),
+      find.textContaining('next  your usual model (no quota read yet)'),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel(
+        RegExp(r'next  your usual model.*Open decision details'),
+      ),
       findsOneWidget,
     );
 
@@ -1748,7 +1771,9 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.bySemanticsLabel(RegExp(r'No quota data.*Open decision details')),
+      find.bySemanticsLabel(
+        RegExp(r'next  your usual model.*Open decision details'),
+      ),
       findsOneWidget,
     );
     expect(
@@ -1808,7 +1833,9 @@ void main() {
     await tester.pump();
 
     expect(
-      find.bySemanticsLabel(RegExp(r'No quota data.*Open decision details')),
+      find.bySemanticsLabel(
+        RegExp(r'next  your usual model.*Open decision details'),
+      ),
       findsOneWidget,
     );
     expect(
@@ -1987,7 +2014,7 @@ void main() {
     await tester.tap(find.byTooltip('Collapse'));
     await tester.pump();
     expect(find.byTooltip('Expand'), findsOneWidget);
-    expect(find.text('Next Antigravity'), findsOneWidget);
+    expect(find.textContaining('next  Antigravity'), findsWidgets);
     expect(find.byType(ProviderTile), findsNothing);
 
     await tester.tap(find.byTooltip('Expand'));
@@ -2113,7 +2140,7 @@ void main() {
     expect(Theme.of(appContext).brightness, Brightness.dark);
     expect(
       Theme.of(appContext).extension<AppChromeTheme>()?.accent,
-      const Color(0xFF39FF14),
+      const Color(0xFF8FD19E),
     );
   });
 
@@ -2851,7 +2878,7 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.textContaining('Next: Claude'), findsOneWidget);
+    expect(find.textContaining('next  Claude'), findsOneWidget);
     expect(find.textContaining('80% included'), findsOneWidget);
     expect(find.textContaining('80% free'), findsWidgets);
 
@@ -3643,7 +3670,6 @@ void main() {
             bindingResetsAt: now + 7200,
             muted: Colors.grey,
             fg: Colors.white,
-            dark: true,
           ),
         ),
       );

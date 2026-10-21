@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/local_model_details.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
+import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
 
@@ -1005,7 +1006,7 @@ void main() {
     expect(banner, findsOneWidget);
     // Rendered in the actionable green, not the muted detail color, so a spent
     // card's way out stands out.
-    expect(tester.widget<Text>(banner).style?.color, const Color(0xFF3FB950));
+    expect(tester.widget<Text>(banner).style?.color, const Color(0xFF1A7F37));
     expect(tester.takeException(), isNull);
   });
 
@@ -1079,12 +1080,23 @@ void main() {
           '5h usage fell 60% to 10% with no reset',
           DateTime.now().millisecondsSinceEpoch ~/ 1000,
         );
+        final darkSurface = surface.$1 == 'dark';
+        final chrome = AppChromeTheme.forSpec(
+          darkSurface ? Brightness.dark : Brightness.light,
+          darkSurface ? appThemeDark : appThemeLight,
+        );
         await tester.pumpWidget(
-          _wrap(
-            ProviderTile(
-              quota: drifted,
-              cardColor: surface.$2,
-              insights: _ins(burn: 20),
+          MaterialApp(
+            theme: ThemeData(
+              brightness: darkSurface ? Brightness.dark : Brightness.light,
+              extensions: [chrome],
+            ),
+            home: Scaffold(
+              body: ProviderTile(
+                quota: drifted,
+                cardColor: surface.$2,
+                insights: _ins(burn: 20),
+              ),
             ),
           ),
         );

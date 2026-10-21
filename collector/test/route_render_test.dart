@@ -155,4 +155,116 @@ void main() {
     expect(line, isNot(contains('100% free')));
     expect(line, isNot(contains('spent')));
   });
+
+  test('the shared route line names the provider, headroom, and reason tail',
+      () {
+    final glance = humanRouteGlance(
+      RouteSuggestion(
+        recommended: _candidate(provider: 'antigravity', headroom: 79),
+        ranked: const [],
+        reason: 'Use antigravity - best risk-adjusted runway (79% free).',
+        decisionCode: RouteDecisionCode.bestRunway,
+        usingLocalFallback: false,
+        fallback: const RouteFallback(
+          kind: RouteFallbackKind.passthrough,
+          reason: 'use the requested provider',
+        ),
+        asOf: 1000,
+        riskZ: 0,
+      ),
+      1000,
+    );
+    expect(glance.signature, startsWith('next  Antigravity  79% free'));
+    expect(glance.reasonTail, 'best risk-adjusted runway (79% free).');
+    expect(glance.lines.join('\n'), isNot(contains('passthrough')));
+    expect(glance.lines.join('\n'), isNot(contains('Evidence:')));
+  });
+
+  test('an empty fleet names the usual model instead of an internal fallback',
+      () {
+    final glance = humanRouteGlance(
+      const RouteSuggestion(
+        recommended: null,
+        ranked: [],
+        reason: 'No quota read yet.',
+        decisionCode: RouteDecisionCode.noData,
+        usingLocalFallback: false,
+        fallback: RouteFallback(
+          kind: RouteFallbackKind.passthrough,
+          reason: 'use the requested provider',
+        ),
+        asOf: 1000,
+        riskZ: 0,
+      ),
+      1000,
+    );
+    expect(
+      glance.signature,
+      'next  your usual model (no quota read yet; quotabot login claude)',
+    );
+    expect(glance.lines, hasLength(1));
+  });
+
+  test('cached evidence names the provider instead of a login prompt', () {
+    final glance = humanRouteGlance(
+      RouteSuggestion(
+        recommended: null,
+        ranked: [
+          _candidate(
+            provider: 'grok',
+            headroom: 48,
+            stale: true,
+            available: false,
+          ),
+        ],
+        reason:
+            'Only cached quota evidence is present; grok last-known headroom was 48%. Reconnect before routing from that number.',
+        decisionCode: RouteDecisionCode.staleEvidence,
+        usingLocalFallback: false,
+        fallback: const RouteFallback(
+          kind: RouteFallbackKind.passthrough,
+          reason: 'use the requested provider',
+        ),
+        asOf: 1000,
+        riskZ: 0,
+      ),
+      1000,
+    );
+    expect(glance.signature, 'next  Grok  cached');
+    expect(
+        glance.reasonTail, contains('Only cached quota evidence is present'));
+    expect(glance.lines.join('\n'), isNot(contains('quotabot login')));
+    expect(glance.lines.join('\n'), isNot(contains('48% last known')));
+  });
+
+  test('provider drift names the provider and stays off the login prompt', () {
+    final glance = humanRouteGlance(
+      RouteSuggestion(
+        recommended: null,
+        ranked: [
+          _candidate(
+            provider: 'claude',
+            headroom: 37,
+            stale: true,
+            available: false,
+            driftReason: '5h usage fell 63% to 10% with no reset',
+          ),
+        ],
+        reason:
+            'Provider drift rejected the only quota evidence; claude is not routable because last-trusted headroom is 37%. Run quotabot verify and compare the provider view.',
+        decisionCode: RouteDecisionCode.providerDrift,
+        usingLocalFallback: false,
+        fallback: const RouteFallback(
+          kind: RouteFallbackKind.passthrough,
+          reason: 'use the requested provider',
+        ),
+        asOf: 1000,
+        riskZ: 0,
+      ),
+      1000,
+    );
+    expect(glance.signature, 'next  Claude  not routable');
+    expect(glance.lines.join('\n'), contains('quotabot verify'));
+    expect(glance.lines.join('\n'), isNot(contains('quotabot login')));
+  });
 }

@@ -2,7 +2,8 @@
 name = "quotabot-litellm-integration"
 version = "0.0.0"
 description = "LiteLLM routing integration and policy tests for quotabot"
-requires-python = ">=3.10,<3.14"
+# Cap is litellm 1.106.1's own Requires-Python, checked 2026-10-20, and 3.15 waits on that upstream cap.
+requires-python = ">=3.11,<3.15"
 
 # Runtime dependency pins and hashes remain in requirements.in and
 # requirements.txt so this example can be installed without packaging it.

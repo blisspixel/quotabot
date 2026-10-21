@@ -4,6 +4,30 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.17 - 2026-10-20
+
+- Human doctor, suggest, and top share one route line. A stale or drifted
+  read names that provider. The usual-model login line is only for a fleet
+  with no quota read. JSON reason and explanation are unchanged.
+- Doctor progress clears with an erase-line sequence and wraps to the terminal
+  width. `--verbose` keeps per-provider lines. Provenance drops a bracket
+  token only when the status column already shows that word.
+- `top` follows the terminal palette unless `--theme` or `--truecolor` is set.
+  Retired novelty themes are gone. Community palettes no longer use magenta,
+  pink, or purple stops.
+- Model suggestions name the first excluded model, provider, and gate when a
+  filter matches nothing. The Antigravity catalog adds gemini-4-argon, dated
+  2026-10-20.
+- Suggest and models help list the task values the parser accepts.
+- Desktop colours come from theme files. First run opens in Dark. Light and
+  System still switch live. A recommended route uses the same compact line as
+  the CLI. A missing or stale read keeps the existing desktop fallback text.
+  `quotabot theme` installs a user theme from a shallow git clone with hooks
+  disabled, copying only regular toml files.
+- CI and the local gate default to Python 3.14. Python 3.11 through 3.14 are
+  tested for LiteLLM. Python 3.15 stays blocked by litellm's own
+  Requires-Python. Node engines accept 24 and newer.
+
 ## 0.11.16 - 2026-10-13
 
 Portable desktop version guidance.

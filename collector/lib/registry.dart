@@ -572,27 +572,34 @@ ModelRequirements taskProfile(String? task) {
 
 /// Whether [e] satisfies [r]. A capability the model does not declare fails a
 /// requirement for it: we never assume an unstated capability.
-bool meetsRequirements(ModelEntry e, ModelRequirements r) {
+bool meetsRequirements(ModelEntry e, ModelRequirements r) =>
+    requirementGate(e, r) == null;
+
+/// The first requirement [e] fails, or null when it satisfies [r].
+///
+/// Order matches the historical [meetsRequirements] checks: budget, context,
+/// tools, vision, reasoning, then tier floor and ceiling.
+String? requirementGate(ModelEntry e, ModelRequirements r) {
   final m = e.model;
-  if (!meetsBudgetPolicy(e, r.budgetPolicy)) return false;
+  if (!meetsBudgetPolicy(e, r.budgetPolicy)) return 'budget';
   // Without load evidence, an advertised maximum may hide a smaller running
   // configuration. Inventory still qualifies fallback without a context floor.
   if (r.minContextTokens != null &&
       ((e.local && !m.loadedStateKnown) ||
           m.contextTokens == null ||
           m.contextTokens! < r.minContextTokens!)) {
-    return false;
+    return 'context';
   }
-  if (r.requireTools && m.tools != true) return false;
-  if (r.requireVision && m.vision != true) return false;
-  if (r.requireReasoning && m.reasoning == null) return false;
+  if (r.requireTools && m.tools != true) return 'tools';
+  if (r.requireVision && m.vision != true) return 'vision';
+  if (r.requireReasoning && m.reasoning == null) return 'reasoning';
   if (r.tierFloor != null && _tierRank(m.tier) < _tierRank(r.tierFloor)) {
-    return false;
+    return 'tier';
   }
   if (r.tierCeiling != null && _tierRank(m.tier) > _tierRank(r.tierCeiling)) {
-    return false;
+    return 'tier';
   }
-  return true;
+  return null;
 }
 
 bool meetsBudgetPolicy(ModelEntry e, ModelBudgetPolicy policy) {
@@ -1270,6 +1277,22 @@ String? _localHardwareFitReason(LocalModelHardwareFit? fit) {
       '(${formatCompactBytes(estimate!)} estimated against $capacity $pool)';
 }
 
+/// One model a requirement filter rejected. [local] stays off the JSON wire.
+class ModelExclusion {
+  final String model;
+  final String provider;
+  final String gate;
+  final bool local;
+
+  const ModelExclusion(this.model, this.provider, this.gate, this.local);
+
+  Map<String, dynamic> toJson() => {
+        'model': model,
+        'provider': provider,
+        'gate': gate,
+      };
+}
+
 /// A concrete-model recommendation for a task profile.
 class ModelSuggestion {
   /// The recommended model, or null when none with budget meets the profile.
@@ -1297,6 +1320,11 @@ class ModelSuggestion {
   /// Evidence used when the recommendation preferred expiring included quota.
   final ExpiringQuotaSignal? expiringQuotaUsed;
 
+  /// Requirement failures when [ranked] is empty because every generation model
+  /// missed a filter. Empty for a successful pick, a drift refusal, or a fleet
+  /// with no generation models.
+  final List<ModelExclusion> excluded;
+
   const ModelSuggestion(
     this.recommended,
     this.ranked,
@@ -1306,6 +1334,7 @@ class ModelSuggestion {
     this.expiringQuotaThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
     this.expiringQuotaMaxHours = kDefaultExpiringQuotaMaxHours,
     this.expiringQuotaUsed,
+    this.excluded = const [],
   });
 
   Map<String, dynamic> toJson(int now) => {
@@ -1321,6 +1350,8 @@ class ModelSuggestion {
         if (expiringQuotaUsed != null)
           'expiring_quota': expiringQuotaUsed!.toJson(),
         'reason': reason,
+        if (excluded.isNotEmpty)
+          'excluded': excluded.take(20).map((e) => e.toJson()).toList(),
         'ranked': ranked.map((e) => e.toJson()).toList(),
       };
 }
@@ -1363,15 +1394,22 @@ ModelSuggestion suggestModel(
       break;
     }
   }
+  final exclusions =
+      ranked.isEmpty && !nonGenerationOnly && !requirements.isEmpty
+          ? _requirementExclusions(snapshot, now, catalog, requirements)
+          : const <ModelExclusion>[];
+  final drifted = snapshot.any((quota) => quota.driftReason != null);
   final reason = pick == null
       ? (ranked.isEmpty
           ? nonGenerationOnly
               ? 'The only models that match are ${embeddingOnly ? 'embedding models' : 'non-text deployments'}, which cannot '
                   'serve a generation request.'
-              : snapshot.any((quota) => quota.driftReason != null)
+              : drifted
                   ? 'Provider drift leaves no trusted model-budget evidence; run '
                       'quotabot verify before routing.'
-                  : 'No model meets the requirements; relax them or connect a provider.'
+                  : exclusions.isNotEmpty
+                      ? _exclusionReason(exclusions, requirements)
+                      : 'No model meets the requirements; relax them or connect a provider.'
           : ranked.every((entry) => entry.driftReason != null)
               ? 'Models match, but provider drift leaves only stale '
                   'last-trusted quota evidence; run quotabot verify before '
@@ -1403,5 +1441,61 @@ ModelSuggestion suggestModel(
     expiringQuotaUsed: pick == null
         ? null
         : _entryExpiringSignal(pick, expiringQuotaByProvider),
+    excluded: pick == null &&
+            ranked.isEmpty &&
+            !nonGenerationOnly &&
+            !drifted &&
+            exclusions.isNotEmpty
+        ? exclusions
+        : const [],
   );
+}
+
+List<ModelExclusion> _requirementExclusions(
+  List<ProviderQuota> snapshot,
+  int now,
+  Map<String, List<ModelInfo>> catalog,
+  ModelRequirements requirements,
+) {
+  final all = buildModelRegistry(snapshot, now, catalog: catalog);
+  final found = <ModelExclusion>[];
+  for (final entry in all) {
+    if (entry.model.embedding == true || entry.model.textGeneration == false) {
+      continue;
+    }
+    final gate = requirementGate(entry, requirements);
+    if (gate == null) continue;
+    found.add(ModelExclusion(
+      entry.model.id,
+      entry.provider,
+      gate,
+      entry.local,
+    ));
+  }
+  return found;
+}
+
+String _exclusionReason(
+  List<ModelExclusion> excluded,
+  ModelRequirements requirements,
+) {
+  final first = excluded.first;
+  final detail = switch (first.gate) {
+    'budget' =>
+      'it is outside the ${requirements.budgetPolicy.wireName} budget',
+    'context' => 'its context is below the requested floor',
+    'tools' => 'it does not declare tools',
+    'vision' => 'it does not declare vision',
+    'reasoning' => 'it does not declare reasoning',
+    'tier' => first.local && requirements.tierFloor != null
+        ? 'local models have no tier, so a tier floor such as --task=hard excludes them'
+        : requirements.tierFloor != null
+            ? 'its tier is below ${requirements.tierFloor}'
+            : 'its tier is above the requested ceiling',
+    _ => 'it failed the ${first.gate} requirement',
+  };
+  final more = excluded.length - 1;
+  final extra = more == 0 ? '' : ' $more more also failed.';
+  return '${first.model} on ${first.provider} was excluded: $detail.$extra '
+      'Try --task=simple or --budget=local --require-tools, or connect a provider.';
 }

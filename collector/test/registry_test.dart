@@ -1013,7 +1013,7 @@ void main() {
   });
 
   test('production catalog matches the dated supported provider lineups', () {
-    expect(kCatalogUpdated, '2026-09-30');
+    expect(kCatalogUpdated, '2026-10-20');
     expect(
       kModelCatalog[claudeProviderId]!.map((model) => model.id),
       [
@@ -1043,6 +1043,7 @@ void main() {
     expect(
       kModelCatalog[antigravityProviderId]!.map((model) => model.id),
       [
+        'gemini-4-argon',
         'gemini-3.8-flash',
         'gemini-3.7-flash',
         'gemini-3.6-flash',

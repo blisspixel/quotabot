@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:quotabot_collector/analysis.dart';
@@ -20,6 +21,7 @@ import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/refresh_timer.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/updater.dart' hide QuotabotRelease;
+import 'package:quotabot_collector/user_theme_store.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
 import 'package:screen_retriever/screen_retriever.dart';
@@ -37,7 +39,6 @@ import 'desktop_readiness.dart';
 import 'desktop_refresh_recovery.dart';
 import 'first_run.dart';
 import 'fleet.dart';
-import 'headroom_colors.dart';
 import 'local_model_details.dart';
 import 'logos.dart';
 import 'prefs.dart';
@@ -259,7 +260,6 @@ bool analyticsIncidentPartialForView(
   );
 }
 
-const Color _quotaGreen = Color(0xFF3FB950);
 const String _windowsAppUserModelId = 'io.quotabot.app';
 const String _windowsNotificationGuid = 'f3063433-3b97-5b9f-9448-2f70cbbf4ad1';
 
@@ -292,10 +292,9 @@ final GlobalKey _termShotKey = GlobalKey();
 /// MaterialApp builder. Driven by the TextSize preference.
 final ValueNotifier<double> textScale = ValueNotifier<double>(1.0);
 
-/// Driven by the active profile. The default profile follows the OS theme.
-final ValueNotifier<String> appThemeSpec = ValueNotifier<String>(
-  appThemeSystem,
-);
+/// Driven by the active profile. First run opens in Dark. A saved system or
+/// light choice still switches live.
+final ValueNotifier<String> appThemeSpec = ValueNotifier<String>(appThemeDark);
 
 @visibleForTesting
 String? preferenceLoadWarning(PrefsLoadResult result) =>
@@ -344,6 +343,7 @@ final SingleInstanceGuard _singleInstance =
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await loadBundledThemeAssets(rootBundle.loadString);
   await windowManager.ensureInitialized();
   final prefsResult = await Prefs.load();
   final prefs = prefsResult.prefs;
@@ -795,6 +795,7 @@ class _DashboardState extends State<Dashboard>
   bool _trayUnavailable = false;
   late String? _settingsStorageWarning = widget.startupStorageWarning;
   String? _profileStorageWarning;
+  String? _themeNotice;
   String? get _preferenceStorageWarning =>
       _profileStorageWarning ?? _settingsStorageWarning;
   final Set<String> _expanded = {}; // providers whose insights panel is open
@@ -922,8 +923,84 @@ class _DashboardState extends State<Dashboard>
     }
   }
 
+  bool _profileFileExists(String name) {
+    if (!widget._hostIntegration) return false;
+    try {
+      return profileFile(name).existsSync();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  QuotaProfile _withSavedTheme(QuotaProfile profile) {
+    if (profile.theme != null && profile.theme!.trim().isNotEmpty) {
+      return profile;
+    }
+    final spec = appThemeSpec.value;
+    if (spec == appThemeSystem) return profile;
+    return QuotaProfile(
+      name: profile.name,
+      providers: profile.providers,
+      accounts: profile.accounts,
+      hiddenProviders: profile.hiddenProviders,
+      routingPolicy: profile.routingPolicy,
+      preferenceOrder: profile.preferenceOrder,
+      theme: spec,
+      sort: profile.sort,
+    );
+  }
+
+  void _refreshUserThemes() {
+    if (!widget._hostIntegration) return;
+    try {
+      final store = UserThemeStore(quotabotDir('themes'));
+      final loads = store.readAll();
+      replaceUserThemes([
+        for (final load in loads)
+          if (load.result.theme != null) load.result.theme!,
+      ]);
+      final refusal = loads
+          .map((load) => load.result.refusal)
+          .whereType<String>()
+          .where((line) => line.trim().isNotEmpty)
+          .firstOrNull;
+      _themeNotice = refusal == null
+          ? null
+          : themeRefusalNotice(refusal, appThemeSpec.value);
+    } catch (_) {}
+  }
+
+  /// Profile load runs from [initState], while the app theme listener is still
+  /// building. A synchronous write there marks that listener dirty mid-frame.
+  void _assignAppThemeSpec(String resolved) {
+    if (appThemeSpec.value == resolved) return;
+    final phase = WidgetsBinding.instance.schedulerPhase;
+    final building =
+        phase == SchedulerPhase.persistentCallbacks ||
+        phase == SchedulerPhase.midFrameMicrotasks;
+    if (!building) {
+      appThemeSpec.value = resolved;
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || appThemeSpec.value == resolved) return;
+      appThemeSpec.value = resolved;
+    });
+  }
+
   void _applyProfileUiState(QuotaProfile profile) {
-    appThemeSpec.value = normalizeAppTheme(profile.theme);
+    final resolved = themeSpecForProfile(
+      profile.theme,
+      persisted: _profileFileExists(profile.name),
+    );
+    if (!themeSpecAvailable(resolved)) {
+      _themeNotice = themeRefusalNotice(
+        'Theme "$resolved" not loaded: theme is not installed.',
+        appThemeSpec.value,
+      );
+    } else {
+      _assignAppThemeSpec(resolved);
+    }
     if (profile.name == defaultProfileName) {
       _hidden = {..._defaultHidden};
       _sort = _defaultSort;
@@ -950,7 +1027,7 @@ class _DashboardState extends State<Dashboard>
       final prefsDiffers =
           union.length != prefsHidden.length || !union.containsAll(prefsHidden);
       if (profileDiffers || prefsDiffers) {
-        saveDurableHiddenTargets(union, base: stored);
+        saveDurableHiddenTargets(union, base: _withSavedTheme(stored));
       }
     } catch (_) {}
   }
@@ -964,7 +1041,7 @@ class _DashboardState extends State<Dashboard>
         try {
           final stored =
               loadProfile(defaultProfileName) ?? QuotaProfile.defaultProfile();
-          saveDurableHiddenTargets(_hidden, base: stored);
+          saveDurableHiddenTargets(_hidden, base: _withSavedTheme(stored));
         } catch (_) {}
       }
       return true;
@@ -1029,6 +1106,7 @@ class _DashboardState extends State<Dashboard>
     _profiles = _loadProfiles();
     _activeProfile = _profileByName(widget.prefs.activeProfile);
     _applyProfileUiState(_activeProfile);
+    _refreshUserThemes();
     _syncDurableHiddenFromHost();
     _windowPos = widget.prefs.windowX == null || widget.prefs.windowY == null
         ? null
@@ -1175,7 +1253,7 @@ class _DashboardState extends State<Dashboard>
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => Scaffold(
-          backgroundColor: const Color(0xFF0D1117),
+          backgroundColor: AppChromeTheme.of(context).scaffold,
           body: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: RepaintBoundary(
@@ -2230,7 +2308,7 @@ class _DashboardState extends State<Dashboard>
               child: Center(
                 child: QuotaLoadingIndicator(
                   size: 30,
-                  color: _quotaGreen,
+                  color: chrome.success,
                   trackColor: chrome.gaugeTrack,
                 ),
               ),
@@ -2578,6 +2656,7 @@ class _DashboardState extends State<Dashboard>
 
   List<String> get _compactStatusNotices => [
     ?_preferenceStorageWarning,
+    ?_themeNotice,
     if (_trayUnavailable) trayUnavailableMessage,
     ?_lastRefreshError,
     ?_analyticsAdviceNote,
@@ -2617,7 +2696,7 @@ class _DashboardState extends State<Dashboard>
         ? '${routedQuota.displayName} '
               '(${quotaAccountDisplayLabel(routedQuota.account)})'
         : routedQuota.displayName;
-    final tone = noRoute ? const Color(0xFFD29922) : chrome.accent;
+    final tone = noRoute ? chrome.warning : chrome.accent;
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
     const radius = BorderRadius.all(Radius.circular(6));
     void showExplanation() => _showRouteExplanation(suggestion, routeLine);
@@ -2664,11 +2743,7 @@ class _DashboardState extends State<Dashboard>
                   const SizedBox(width: 4),
                   Flexible(
                     child: Text(
-                      noRoute
-                          ? 'No route'
-                          : providerName == null
-                          ? 'Next'
-                          : 'Next $providerName',
+                      routeLine,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -2692,7 +2767,10 @@ class _DashboardState extends State<Dashboard>
   }
 
   Widget _compactChip(ProviderQuota q, int now, Color fg) {
-    final st = providerStatus(q, now);
+    final chrome = AppChromeTheme.of(context);
+    final st = providerStatus(q, now, chrome: chrome);
+    final headroom = providerHeadroom(q, now);
+    final percent = headroom == null ? null : '${headroom.round()}';
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -2708,6 +2786,18 @@ class _DashboardState extends State<Dashboard>
                   border: Border.all(color: st.color, width: 1.4),
                 ),
               ),
+        if (percent != null) ...[
+          const SizedBox(width: 4),
+          Text(
+            percent,
+            style: TextStyle(
+              fontSize: AppType.small,
+              fontWeight: FontWeight.w600,
+              color: fg,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -2746,7 +2836,7 @@ class _DashboardState extends State<Dashboard>
   Widget _header() {
     final chrome = AppChromeTheme.of(context);
     final muted = chrome.muted;
-    const warning = Color(0xFFD29922);
+    final warning = chrome.warning;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final suggestion = _routeSuggestion(now);
     final routeLine = desktopRouteSignalLine(
@@ -2780,7 +2870,7 @@ class _DashboardState extends State<Dashboard>
             child: AppGauge(
               size: 17,
               value: (pool ?? 0) / 100.0,
-              fillColor: pool == null ? track : _availColor(pool),
+              fillColor: pool == null ? track : _availColor(pool, chrome),
               trackColor: track,
             ),
           );
@@ -2926,6 +3016,7 @@ class _DashboardState extends State<Dashboard>
             ),
             if (_preferenceStorageWarning != null)
               _warningLine(_preferenceStorageWarning!, warning),
+            if (_themeNotice != null) _warningLine(_themeNotice!, warning),
             if (_trayUnavailable) _warningLine(trayUnavailableMessage, warning),
             if (_lastRefreshError != null)
               _warningLine(_lastRefreshError!, warning),
@@ -3839,6 +3930,7 @@ class _DashboardState extends State<Dashboard>
       );
       return;
     }
+    _refreshUserThemes();
     final result = await showDialog<ProfileEditorResult>(
       context: context,
       builder: (_) => ProfileEditorDialog(
@@ -3847,6 +3939,11 @@ class _DashboardState extends State<Dashboard>
         activeProfile: _activeProfile.name,
         currentSort: _sort,
         currentHidden: _hidden,
+        liveTheme: appThemeSpec.value,
+        extraThemes: [
+          for (final theme in installedUserThemes())
+            (slug: theme.slug, label: theme.name),
+        ],
       ),
     );
     if (!mounted || result == null) return;
@@ -4426,9 +4523,9 @@ class _DashboardState extends State<Dashboard>
     await showDialog<void>(
       context: context,
       builder: (ctx) {
-        final dark = Theme.of(ctx).brightness == Brightness.dark;
-        final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
-        final fg = dark ? Colors.white : const Color(0xFF111317);
+        final chrome = AppChromeTheme.of(ctx);
+        final muted = chrome.muted;
+        final fg = chrome.foreground;
         return StatefulBuilder(
           builder: (ctx, setDlg) {
             final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -4800,10 +4897,11 @@ class _DashboardState extends State<Dashboard>
     int now, {
     required Color errorColor,
   }) {
-    const green = Color(0xFF3FB950),
-        amber = Color(0xFFD29922),
-        grey = Color(0xFF8A91A0),
-        blue = Color(0xFF58A6FF);
+    final chrome = AppChromeTheme.of(context);
+    final green = chrome.success;
+    final amber = chrome.warning;
+    final grey = chrome.muted;
+    final blue = chrome.info;
     if (q.sourceClassViolation != null) {
       return ('invalid evidence', errorColor);
     }
@@ -5025,7 +5123,7 @@ class _WebhookDialogState extends State<_WebhookDialog> {
                   style: TextStyle(
                     fontSize: AppType.label,
                     color: widget.lastDeliveryFailed ?? false
-                        ? const Color(0xFFDB6D28)
+                        ? AppChromeTheme.of(context).caution
                         : null,
                   ),
                 ),
@@ -5034,11 +5132,11 @@ class _WebhookDialogState extends State<_WebhookDialog> {
             if (blocked)
               Semantics(
                 liveRegion: true,
-                child: const Text(
+                child: Text(
                   'This host is not loopback; enable the option above to use it.',
                   style: TextStyle(
                     fontSize: AppType.label,
-                    color: Color(0xFFDB6D28),
+                    color: AppChromeTheme.of(context).caution,
                   ),
                 ),
               ),
@@ -5236,7 +5334,6 @@ class ProviderTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
     final chrome = AppChromeTheme.of(context);
     final muted = chrome.muted;
     final fg = chrome.foreground;
@@ -5269,22 +5366,22 @@ class ProviderTile extends StatelessWidget {
     // room is the constraint the user faces after the short one resets - show it
     // instead of hiding it behind the "spent" line.
     final secondaryWin = blocked ? secondaryVisibleWindow(quota, now) : null;
-    final driftColor = _providerDriftForeground(cardColor);
+    final driftColor = chrome.error;
     final statusColor = quota.isLocal
         ? !localReachable
               ? muted
               : localLoaded
-              ? const Color(0xFF3FB950)
-              : const Color(0xFF58A6FF)
+              ? chrome.success
+              : chrome.info
         : quota.driftReason != null
         ? driftColor
         : quota.suspect != null
-        ? const Color(0xFFD29922)
+        ? chrome.warning
         : quota.requestAdmission.blocksRequests
         ? muted
         : binding == null
         ? muted
-        : _availColor(binding.remaining);
+        : _availColor(binding.remaining, chrome);
     final hasInsights = insights != null && insights!.samples > 0;
     // The tight default shows only the binding windows. Any card can expand to
     // reveal its provenance line, model-specific quota, and analytics, so the
@@ -5488,7 +5585,7 @@ class ProviderTile extends StatelessWidget {
                   ),
                 ),
               if (quota.suspect != null && quota.driftReason == null)
-                _providerSuspectRow(quota.suspect!, const Color(0xFFD29922)),
+                _providerSuspectRow(quota.suspect!, chrome.warning),
               if (requestAdmissionLabel(quota.requestAdmission)
                   case final admission?)
                 Padding(
@@ -5507,10 +5604,10 @@ class ProviderTile extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 3),
                   child: Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.refresh_rounded,
                         size: 13,
-                        color: Color(0xFF3FB950),
+                        color: chrome.success,
                       ),
                       const SizedBox(width: 6),
                       Expanded(
@@ -5518,10 +5615,10 @@ class ProviderTile extends StatelessWidget {
                           resetMessage,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: AppType.small,
                             fontWeight: FontWeight.w600,
-                            color: Color(0xFF3FB950),
+                            color: chrome.success,
                           ),
                         ),
                       ),
@@ -5547,7 +5644,7 @@ class ProviderTile extends StatelessWidget {
                       icon: const Icon(Icons.login_rounded, size: 14),
                       label: const Text('Connect'),
                       style: TextButton.styleFrom(
-                        foregroundColor: const Color(0xFF58A6FF),
+                        foregroundColor: chrome.info,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8,
                           vertical: 2,
@@ -5569,6 +5666,7 @@ class ProviderTile extends StatelessWidget {
                         quota,
                         muted,
                         fg,
+                        chrome,
                         ready: localReady,
                         loaded: localLoaded,
                         showDetail: showDetail,
@@ -5592,6 +5690,7 @@ class ProviderTile extends StatelessWidget {
                   binding,
                   now,
                   muted,
+                  chrome,
                   evidenceLabel: evidenceLabel,
                   requestsBlocked: quota.requestAdmission.blocksRequests,
                   largeText: MediaQuery.textScalerOf(context).scale(10) > 14,
@@ -5640,6 +5739,7 @@ class ProviderTile extends StatelessWidget {
                 _providerStaleFailureRow(
                   quota,
                   driftColor,
+                  chrome,
                   showingLastKnown: !spentResetStillAhead(quota, now),
                 ),
               if (showDetail &&
@@ -5690,7 +5790,8 @@ class ProviderTile extends StatelessWidget {
                   );
                 }),
               ],
-              if (showDetail && forecast != null) _forecastRow(forecast, muted),
+              if (showDetail && forecast != null)
+                _forecastRow(forecast, muted, chrome),
               if (showDetail && history.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
@@ -5717,7 +5818,6 @@ class ProviderTile extends StatelessWidget {
                   bindingResetsAt: binding?.resetsAt,
                   muted: muted,
                   fg: fg,
-                  dark: dark,
                 ),
             ],
           ),
@@ -5937,7 +6037,8 @@ class ProviderTile extends StatelessWidget {
 
   Widget _providerStaleFailureRow(
     ProviderQuota quota,
-    Color color, {
+    Color color,
+    AppChromeTheme chrome, {
     bool showingLastKnown = true,
   }) {
     final retryLabel = providerRetrySummary(
@@ -5947,7 +6048,7 @@ class ProviderTile extends StatelessWidget {
     final retrying = retryLabel != null;
     // Temporary provider pushback stays amber and self-recovering, while the
     // label preserves whether the evidence is throttling or service degradation.
-    const throttleColor = Color(0xFFD29922);
+    final throttleColor = chrome.warning;
     final rowColor = retrying ? throttleColor : color;
     final detail = retrying
         ? 'Automatic recovery: $retryLabel. Diagnostic: ${quota.error}'
@@ -5993,23 +6094,13 @@ class ProviderTile extends StatelessWidget {
     );
   }
 
-  /// Warning foregrounds chosen for the actual tile surface rather than the
-  /// ambient theme, because previews and tests may render a tile on a surface
-  /// from the opposite brightness. Both official app surfaces exceed WCAG's
-  /// 4.5:1 normal-text contrast threshold with their selected color.
-  Color _providerDriftForeground(Color background) {
-    return background.computeLuminance() > 0.5
-        ? const Color(0xFFB42318)
-        : const Color(0xFFFF7B72);
-  }
-
   /// Glance-layer forward-looking note on the binding window, phrased in plain
   /// language from the shared [WindowForecast]. A strand risk is stated as words
   /// (the probability lives a layer down, in the analytics screen), a quieter
   /// drain as an estimated runway. Colored by urgency.
-  Widget _forecastRow(WindowForecast f, Color muted) {
-    const red = Color(0xFFF85149);
-    const orange = Color(0xFFDB6D28);
+  Widget _forecastRow(WindowForecast f, Color muted, AppChromeTheme chrome) {
+    final red = chrome.error;
+    final orange = chrome.caution;
     final (String text, Color color, IconData icon) = switch (f.kind) {
       ForecastKind.strand => (
         f.severity >= 2
@@ -6062,12 +6153,13 @@ class ProviderTile extends StatelessWidget {
   Widget _blockedRow(
     WinView v,
     int now,
-    Color muted, {
+    Color muted,
+    AppChromeTheme chrome, {
     String? evidenceLabel,
     bool requestsBlocked = false,
     required bool largeText,
   }) {
-    const red = Color(0xFFF85149);
+    final red = chrome.error;
     // Cached spend with the reset still ahead uses the same present-tense
     // line as a live spend. The day and time (or a near countdown) is the
     // second fact. Last-known and a failed refresh are not stacked on it.
@@ -6244,7 +6336,8 @@ class ProviderTile extends StatelessWidget {
   Widget _localRow(
     ProviderQuota quota,
     Color muted,
-    Color fg, {
+    Color fg,
+    AppChromeTheme chrome, {
     required bool ready,
     required bool loaded,
     required bool showDetail,
@@ -6261,7 +6354,7 @@ class ProviderTile extends StatelessWidget {
             Icon(
               loaded ? Icons.bolt_rounded : Icons.dns_rounded,
               size: 13,
-              color: loaded ? const Color(0xFF3FB950) : muted,
+              color: loaded ? chrome.success : muted,
             ),
             const SizedBox(width: 6),
             Expanded(
@@ -6399,8 +6492,9 @@ int providerTileQuotaRowCount(ProviderQuota quota, int now) {
   return providerRows + desktopScopedModelQuotas(quota, now: now).length;
 }
 
-Color _availColor(num remaining) {
-  return headroomColor(remaining);
+Color _availColor(num remaining, [AppChromeTheme? chrome]) {
+  final theme = chrome ?? AppChromeTheme.forSpec(Brightness.dark, appThemeDark);
+  return theme.headroom(remaining);
 }
 
 /// One rolling window rendered as: [label] [availability bar] [reset / %].
@@ -6435,7 +6529,10 @@ class QuotaMeter extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Color.lerp(color, Colors.white, 0.22)!, color],
+                    colors: [
+                      AppChromeTheme.of(context).meterLift(color),
+                      color,
+                    ],
                   ),
                 ),
               ),
@@ -6472,11 +6569,11 @@ class WindowBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final remaining = view.remaining;
+    final chrome = AppChromeTheme.of(context);
     final color = requestsBlocked || evidenceLabel == 'last trusted'
         ? muted
-        : _availColor(remaining);
+        : _availColor(remaining, chrome);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final chrome = AppChromeTheme.of(context);
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
     final showsReset =
         evidenceLabel == null && !view.rolledOver && view.resetsAt != null;
@@ -6536,7 +6633,7 @@ class WindowBar extends StatelessWidget {
             : evidenceLabel != null
             ? color
             : view.rolledOver
-            ? const Color(0xFF3FB950)
+            ? chrome.success
             : fg,
       ),
     );
@@ -6616,7 +6713,6 @@ class InsightsPanel extends StatelessWidget {
   final int? bindingResetsAt;
   final Color muted;
   final Color fg;
-  final bool dark;
   const InsightsPanel({
     super.key,
     required this.insights,
@@ -6626,7 +6722,6 @@ class InsightsPanel extends StatelessWidget {
     this.bindingResetsAt,
     required this.muted,
     required this.fg,
-    required this.dark,
   });
 
   @override
@@ -6636,7 +6731,8 @@ class InsightsPanel extends StatelessWidget {
         .map((q) => providerHeadroom(q, now))
         .whereType<double>()
         .toList();
-    final lineColor = _availColor(insights.mean ?? 0);
+    final chrome = AppChromeTheme.of(context);
+    final lineColor = chrome.headroom(insights.mean ?? 0);
 
     // Plain-language headline: the usual free range (the p10..p90 band) rather
     // than raw percentiles. e.g. "usually 70-90% free".
@@ -6691,11 +6787,7 @@ class InsightsPanel extends StatelessWidget {
                 height: 26,
                 width: double.infinity,
                 child: CustomPaint(
-                  painter: _SparklinePainter(
-                    series,
-                    lineColor,
-                    dark ? const Color(0xFF2A2E36) : const Color(0xFFE9EBEF),
-                  ),
+                  painter: _SparklinePainter(series, lineColor, chrome.border),
                 ),
               ),
             ),
@@ -6713,8 +6805,8 @@ class InsightsPanel extends StatelessWidget {
                             : Icons.trending_up_rounded,
                         size: 13,
                         color: insights.trendPerDay! < 0
-                            ? const Color(0xFFDB6D28)
-                            : const Color(0xFF3FB950),
+                            ? chrome.caution
+                            : chrome.success,
                       ),
                     ),
                   Expanded(
@@ -6752,7 +6844,7 @@ class InsightsPanel extends StatelessWidget {
               child: SizedBox(
                 height: 30,
                 width: double.infinity,
-                child: CustomPaint(painter: _HeatmapPainter(heatmap!, dark)),
+                child: CustomPaint(painter: _HeatmapPainter(heatmap!, chrome)),
               ),
             ),
           ],
@@ -6765,7 +6857,7 @@ class InsightsPanel extends StatelessWidget {
                   fontSize: AppType.label,
                   fontWeight: FontWeight.w500,
                   color: pace.hoursEarlyExhaust != null
-                      ? const Color(0xFFDB6D28)
+                      ? chrome.caution
                       : muted,
                 ),
               ),
@@ -6857,19 +6949,19 @@ int _filledCells(List<List<double?>> grid) {
 /// same green-to-red scale as the bars; empty cells are a faint track.
 class _HeatmapPainter extends CustomPainter {
   final List<List<double?>> grid; // [7][24] mean headroom, null = no data
-  final bool dark;
-  _HeatmapPainter(this.grid, this.dark);
+  final AppChromeTheme chrome;
+  _HeatmapPainter(this.grid, this.chrome);
 
   @override
   void paint(Canvas canvas, Size size) {
     const cols = 24, rows = 7;
     final cw = size.width / cols, ch = size.height / rows;
-    final empty = dark ? const Color(0xFF24282F) : const Color(0xFFEDEEF1);
+    final empty = chrome.gaugeTrack;
     final gap = cw > 5 ? 1.0 : 0.5;
     for (var r = 0; r < rows; r++) {
       for (var c = 0; c < cols; c++) {
         final v = grid[r][c];
-        final paint = Paint()..color = v == null ? empty : _availColor(v);
+        final paint = Paint()..color = v == null ? empty : chrome.headroom(v);
         canvas.drawRect(
           Rect.fromLTWH(c * cw, r * ch, cw - gap, ch - gap),
           paint,
@@ -7045,10 +7137,10 @@ class _FocusableCompactStatusIconState
                   color: _focused ? chrome.accent : Colors.transparent,
                 ),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.warning_amber_rounded,
                 size: 16,
-                color: Color(0xFFD29922),
+                color: chrome.warning,
               ),
             ),
           ),
@@ -7078,32 +7170,33 @@ class PStatus {
   const PStatus(this.color, this.hasData, this.blocked);
 }
 
-PStatus providerStatus(ProviderQuota q, int now) {
+PStatus providerStatus(ProviderQuota q, int now, {AppChromeTheme? chrome}) {
+  final theme = chrome ?? AppChromeTheme.forSpec(Brightness.dark, appThemeDark);
   // A running local runtime is available, so it reads green like a healthy
   // provider. The loaded vs ready nuance is shown in the card body, not the dot.
   if (q.isLocal) {
     return isLocalRuntimeAvailableAt(q, now)
-        ? const PStatus(Color(0xFF3FB950), true, false)
-        : const PStatus(Color(0xFF8A91A0), false, false);
+        ? PStatus(theme.success, true, false)
+        : PStatus(theme.muted, false, false);
   }
   final h = providerHeadroom(q, now);
   if (h == null) {
-    return const PStatus(Color(0xFF8A91A0), false, false);
+    return PStatus(theme.muted, false, false);
   }
   if (!isTrustedQuotaEvidenceAt(q, now)) {
     if (q.suspect != null && q.driftReason == null) {
-      return const PStatus(Color(0xFFD29922), true, false);
+      return PStatus(theme.warning, true, false);
     }
     if (q.driftReason != null) {
-      return const PStatus(Color(0xFF8A91A0), true, false);
+      return PStatus(theme.muted, true, false);
     }
     // Last-known remaining still paints the headroom scale. A 6% weekly
     // pool is red even when the live read is deferred.
-    return PStatus(_availColor(h), true, h <= kSpentHeadroomFloor);
+    return PStatus(_availColor(h, theme), true, h <= kSpentHeadroomFloor);
   }
   if (q.requestAdmission.blocksRequests) {
     // Keep measured windows visible. An access denial is not a spent balance.
-    return const PStatus(Color(0xFF8A91A0), true, false);
+    return PStatus(theme.muted, true, false);
   }
-  return PStatus(_availColor(h), true, h <= kSpentHeadroomFloor);
+  return PStatus(_availColor(h, theme), true, h <= kSpentHeadroomFloor);
 }

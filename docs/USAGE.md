@@ -598,35 +598,41 @@ grey.
 
 A spent longer window collapses its
 provider to one line, the same binding-window rule the widget uses. Piped or on a dumb terminal it prints a single plain frame and
-exits, so `quotabot top | cat` still gives you a snapshot. On a truecolor
-terminal the bars use a smooth gradient; it degrades to 256/16/no color.
-Windows Terminal and common truecolor terminals are detected automatically;
-`--truecolor` forces it where detection cannot.
+exits, so `quotabot top | cat` still gives you a snapshot. With no `--theme`, bars use the terminal's own ANSI colors, including on a
+truecolor terminal. `--theme=<name>` and `--truecolor` opt into 24-bit
+gradients. `--truecolor` forces 24-bit where detection cannot.
 
-Pick a palette with `--theme=<name>` (or `QUOTABOT_THEME`). A dashboard meant to
-stay open all day should match the terminal around it, so the built-ins include
-the schemes people already theme with:
+`quotabot top` follows the terminal theme. `--theme=light` and `--theme=dark`
+do not change colors. Retired names (`green`, `matrix`, `synthwave`,
+`rainbow`) do not change colors either. The built-in 24-bit palettes are the
+schemes people already theme with, and none of them use a magenta, pink,
+purple, or neon accent:
 
 | Palette | Look |
 |---|---|
-| `default` | the shipped green-to-red headroom scale |
-| `green` | phosphor CRT |
-| `matrix` | monochrome phosphor, where the meter reads as glow intensity rather than hue |
-| `dark`, `light` | muted, for dark and light terminals |
-| `synthwave`, `rainbow` | high-saturation, full-spectrum |
+| `default` | the shipped green-to-red headroom scale, only with `--truecolor` |
 | `gruvbox`, `nord`, `dracula`, `catppuccin`, `tokyonight` | match a riced terminal |
 
 `quotabot top --help` lists whatever the build actually ships, which is the
 authoritative set. Roll your own in one line with
 `--theme=custom:HEALTHY-TIGHT-LOW-SPENT[-ACCENT]`, each a 6-digit hex color from
-most free to least, e.g. `--theme=custom:39ff14-00cc5a-009946-005a32`.
+most free to least, e.g. `--theme=custom:3fb950-d29922-db6d28-f85149-58a6ff`.
 
-Palettes need 24-bit color. quotabot assumes a Windows console can do it, since
-any Windows build that renders these escape sequences at all also supports
-truecolor even though `cmd.exe` advertises neither `COLORTERM` nor `TERM`. On a
-terminal that genuinely cannot, the standard headroom colors are used and every
-palette looks the same, which is the signal that the gradient is unavailable
-rather than the theme being ignored.
+Palettes need 24-bit color. On a terminal that genuinely cannot, the standard
+headroom colors are used and every palette looks the same, which is the signal
+that the gradient is unavailable rather than the theme being ignored.
+
+## Desktop color themes
+
+The desktop app opens in Dark on a first run. An explicit System or Light
+choice stays. Built-in themes are Dark, Light, and Green Screen. A user theme
+is a small toml file in the platform themes directory. `quotabot theme list`
+shows the files that loaded. `quotabot theme install <git-url>` and
+`quotabot theme update <git-url>` shallow-clone that url with hooks disabled,
+copy only regular `*.toml` files, and refuse a file that is not strict
+`#rrggbb` or that fails the contrast check. The current theme stays when a
+file is refused. `quotabot theme remove <slug>` deletes that one user theme
+file and does not change a built-in theme.
 
 ## Named profiles
 
@@ -638,8 +644,8 @@ implicit `default` profile keeps the zero-config fleet unchanged.
 
 The desktop widget can create, edit, delete, and select the same profiles from
 its menu. A profile can choose providers, specific accounts where quotabot has
-account evidence, routing policy, and theme (`System`, `Light`, `Dark`, or the
-high-contrast `Hacker` theme). Profile selection changes the
+account evidence, routing policy, and theme (`System`, `Light`, `Dark`, or
+`Green Screen`). Profile selection changes the
 displayed providers, low-quota notifications, webhook alerts, and analytics
 view. Hiding providers and choosing sort order are scoped to the active
 non-default profile; the default profile keeps the app's legacy global
@@ -818,7 +824,7 @@ conservative runtime reserve to installed size. It never loads a model or runs a
 performance probe, never turns a reachable model unavailable, and may be
 conservative when a runtime can split a model across RAM and VRAM.
 
-Filter to what a task needs with a coarse `--task=simple|standard|hard` profile or
+Filter to what a task needs with a coarse `--task=simple|standard|hard|reasoning` profile (`complex` is accepted as an alias of `hard`) or
 explicit flags: `--min-context=200k`, `--require-tools`, `--require-vision`,
 `--require-reasoning`, `--tier-floor=standard`, `--tier-ceiling=standard`. quotabot
 never sees the task; you supply the requirements, and it returns the models that

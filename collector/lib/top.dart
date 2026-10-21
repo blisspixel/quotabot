@@ -18,7 +18,9 @@ import 'models.dart';
 import 'palette.dart';
 import 'profiles.dart';
 import 'provenance.dart';
+import 'provider_ids.dart';
 import 'registry.dart';
+import 'route_render.dart';
 import 'util.dart';
 
 /// Removes hidden provider/account rows before both routing and rendering.
@@ -1259,6 +1261,7 @@ List<String> renderTopFrame({
   required String clock,
   ColorDepth depth = ColorDepth.none,
   Palette palette = kDefaultPalette,
+  bool applyPalette = false,
   String updated = '',
   String sort = '',
   String? selected,
@@ -1268,7 +1271,10 @@ List<String> renderTopFrame({
   bool inspectModels = false,
 }) {
   final w = width < 1 ? 1 : width;
-  final s = AnsiStyle(color, depth: depth);
+  final paintDepth = !applyPalette && depth == ColorDepth.truecolor
+      ? ColorDepth.ansi256
+      : depth;
+  final s = AnsiStyle(color, depth: paintDepth);
   final p = palette;
   final lines = <String>[];
 
@@ -1453,39 +1459,53 @@ List<String> renderTopFrame({
 
   lines.add(_line([_Cell('─' * w, (s, t) => s.dim(t))], w, s));
   final r = suggestion.recommended;
-  // The route line already names the pick, so a reason that repeats it as
-  // "Use <provider> - " is trimmed to just the explanation, and a long reason
-  // yields at a word boundary instead of clipping at the frame edge.
+  // The route line names the pick in the shared glance. A long reason yields
+  // at a word boundary instead of clipping at the frame edge. The account tag
+  // drops as a whole token when the line cannot keep a reason fragment.
+  final glanceWidth = humanRouteGlance(suggestion, now);
   final routeAccountTag = r == null
       ? ''
       : _visibleRouteAccountTag(
           accountTag: _routeAccountTag(r, providerCounts),
           width: w,
-          fixedHeadWidth: '  route -> ${r.provider}   '.length,
+          fixedHeadWidth:
+              '  next  ${providerDisplayName(r.provider)}  ${glanceWidth.detail}  '
+                  .length,
           minReasonWidth: 8,
         );
+  final glance = humanRouteGlance(
+    suggestion,
+    now,
+    accountLabel: routeAccountTag,
+  );
   final routeHead = <_Cell>[
     const _Cell('  '),
-    _Cell('route ', (s, t) => s.dim(t)),
-    if (r == null)
-      _Cell('waiting', (s, t) => s.dim(t))
-    else ...[
-      _Cell('-> ', (s, t) => _accent(s, p, t)),
-      _Cell(r.provider, (s, t) => s.bold(t)),
-      _Cell(routeAccountTag, (s, t) => s.dim(t)),
-      if (r.isLocal) _Cell(' (local fallback)', (s, t) => s.dim(t)),
-    ],
-    const _Cell('   '),
+    _Cell('next  ', (s, t) => s.cyan(t)),
+    _Cell(glance.providerLabel, (s, t) => s.bold(t)),
+    if (routeAccountTag.isNotEmpty) _Cell(routeAccountTag, (s, t) => s.dim(t)),
+    if (glance.detail.isNotEmpty)
+      _Cell(
+        glance.providerLabel == 'your usual model'
+            ? ' (${glance.detail})'
+            : '  ${glance.detail}',
+        (s, t) => s.dim(t),
+      ),
+    const _Cell('  '),
   ];
-  var reason = suggestion.explanation;
-  if (r != null && reason.startsWith('Use ${r.provider} - ')) {
-    reason = reason.substring('Use ${r.provider} - '.length);
-  }
   final routeHeadWidth = routeHead.fold(0, (n, c) => n + c.text.length);
-  lines.add(_line([
-    ...routeHead,
-    _Cell(_fitReason(reason, w - routeHeadWidth), (s, t) => s.dim(t)),
-  ], w, s));
+  if (routeHeadWidth >= w) {
+    lines.add(_line([
+      _Cell(_fitReason('  ${glance.signature}', w), (s, t) => s.dim(t)),
+    ], w, s));
+  } else {
+    lines.add(_line([
+      ...routeHead,
+      _Cell(
+        _fitReason(glance.reasonTail, w - routeHeadWidth),
+        (s, t) => s.dim(t),
+      ),
+    ], w, s));
+  }
   lines.add(_line(
     _fitSegments([
       _Seg([

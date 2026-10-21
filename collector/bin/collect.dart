@@ -12,6 +12,7 @@ import 'package:quotabot_collector/auth/provider_disconnect.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/cache.dart';
+import 'package:quotabot_collector/cli_layout.dart';
 import 'package:quotabot_collector/collect_progress.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
@@ -28,6 +29,7 @@ import 'package:quotabot_collector/refresh_timer.dart';
 import 'package:quotabot_collector/route_render.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/updater.dart';
+import 'package:quotabot_collector/user_theme_store.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
 
@@ -36,7 +38,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.11.16';
+const _version = '0.11.17';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -51,6 +53,32 @@ const int _exitIoError = 74;
 late AnsiStyle style;
 List<ProviderQuota>? _simulatedSnapshot;
 bool _simulationNoticePending = false;
+bool _verboseProgress = false;
+
+/// Visible columns for human text. A pipe or a captured test stays unwrapped.
+int _humanCols() {
+  if (!stdout.hasTerminal) return 10000;
+  try {
+    final cols = stdout.terminalColumns;
+    return cols < 8 ? 8 : cols;
+  } catch (_) {
+    return 80;
+  }
+}
+
+void _helpLine(Object? line) {
+  final text = line?.toString() ?? '';
+  for (final part in wrapCliLine(text, _humanCols())) {
+    stdout.writeln(part);
+  }
+}
+
+void _humanLine(Object? line, {int hang = 0}) {
+  final text = line?.toString() ?? '';
+  for (final part in wrapCliLine(text, _humanCols(), hang: hang)) {
+    stdout.writeln(part);
+  }
+}
 
 bool get _usingSimulation => _simulatedSnapshot != null;
 
@@ -102,6 +130,15 @@ Future<List<ProviderQuota>> _read([
     pending: [for (final entry in kProviderAdapterRegistry) entry.displayName],
     elapsedSeconds: () => sw.elapsed.inSeconds,
     dim: style.dim,
+    verbose: _verboseProgress,
+    columns: () {
+      if (!stderr.hasTerminal) return 10000;
+      try {
+        return stderr.terminalColumns;
+      } catch (_) {
+        return 80;
+      }
+    },
   );
   progress.start();
   final timer = Timer.periodic(
@@ -356,6 +393,7 @@ Future<void> _runMain(List<String> rawArgs) async {
   }
   final wantsJson = flags.contains('--json');
   ProviderReadGate.forceFresh = flags.contains('--fresh');
+  _verboseProgress = flags.contains('--verbose');
   style = AnsiStyle(_useColor(flags));
 
   if (cmd == 'help' || flags.contains('--help') || flags.contains('-h')) {
@@ -463,6 +501,9 @@ Future<void> _runMain(List<String> rawArgs) async {
     case 'unhide':
     case 'hidden':
       _runHide(cmd, pos.skip(1).toList(), wantsJson);
+      return;
+    case 'theme':
+      await _runTheme(pos.skip(1).toList());
       return;
     case 'manual':
       await _runManual(pos.skip(1).toList(), flags, wantsJson);
@@ -988,6 +1029,7 @@ const _knownCommands = {
   'stats',
   'status',
   'suggest',
+  'theme',
   'top',
   'unhide',
   'update',
@@ -1375,7 +1417,10 @@ int? _parseContext(String? s) {
   final task = rawTask?.trim().toLowerCase();
   const taskChoices = {'simple', 'standard', 'hard', 'complex', 'reasoning'};
   if (task != null && !taskChoices.contains(task)) {
-    stderr.writeln('quotabot: unknown --task value "$rawTask"');
+    stderr.writeln(
+      'quotabot: unknown --task value "$rawTask" '
+      '(use simple, standard, hard, complex, or reasoning)',
+    );
     return (requirements: const ModelRequirements(), ok: false);
   }
   final rawContext = _stringOption(flags, 'min-context', null);
@@ -1720,6 +1765,7 @@ const _switchOptions = {
   '--stable',
   '--truecolor',
   '--tuned-burn',
+  '--verbose',
   '--use-expiring-quota',
   '--version',
   '--yes',
@@ -1784,7 +1830,7 @@ String? _commandOptionError(String command, Set<String> flags) {
   if (_usesQuotaRead(command)) {
     allowed.addAll(const {'profile', 'exclude'});
     if (command != 'explain') {
-      allowed.addAll(const {'mock-provider', 'state', 'fresh'});
+      allowed.addAll(const {'mock-provider', 'state', 'fresh', 'verbose'});
     }
   }
   switch (command) {
@@ -1909,6 +1955,15 @@ String? _positionalError(String command, List<String> positionals) {
     final maximum = action == 'set' || action == 'remove' ? 3 : 2;
     if (positionals.length <= maximum) return null;
     return 'unexpected argument "${positionals[maximum]}" for manual $action';
+  }
+  if (command == 'theme') {
+    final action = positionals.length < 2 ? 'list' : positionals[1];
+    final maximum = switch (action) {
+      'install' || 'update' || 'remove' => 3,
+      _ => 2,
+    };
+    if (positionals.length <= maximum) return null;
+    return 'unexpected argument "${positionals[maximum]}" for theme $action';
   }
   final maximum = switch (command) {
     'login' || 'logout' || 'check' || 'stats' || 'hide' || 'unhide' => 2,
@@ -2187,13 +2242,23 @@ Future<void> _runTop(
 ) async {
   final preferenceOrder = profile?.preferenceOrder ?? const <String>[];
   final color = _useColor(flags);
-  final depth = flags.contains('--truecolor')
+  final detected = flags.contains('--truecolor')
       ? ColorDepth.truecolor
       : detectColorDepth(Platform.environment,
           hasTerminal: stdout.hasTerminal, windowsHost: Platform.isWindows);
-  final palette = paletteFromSpec(
+  final choice = resolveTopPalette(
     _stringOption(flags, 'theme', Platform.environment['QUOTABOT_THEME']),
   );
+  final applyPalette = choice.applyTruecolor || flags.contains('--truecolor');
+  final depth = applyPalette
+      ? detected
+      : detected == ColorDepth.truecolor
+          ? ColorDepth.ansi256
+          : detected;
+  final palette = choice.palette;
+  if (choice.notice != null) {
+    stderr.writeln('quotabot: ${choice.notice}');
+  }
   // A fixed cadence only when --interval is given; otherwise adapt like the app.
   final fixedInterval = flags.any((f) => f.startsWith('--interval='))
       ? _intOption(flags, 'interval', 10).clamp(2, 3600)
@@ -2231,6 +2296,7 @@ Future<void> _runTop(
       color: false,
       clock: _clock(),
       palette: palette,
+      applyPalette: applyPalette,
       updated: _usingSimulation ? 'SIMULATION' : '',
       sort: sort == TopSort.defaultOrder ? '' : sort.label,
     );
@@ -2308,6 +2374,7 @@ Future<void> _runTop(
         clock: _clock(),
         depth: depth,
         palette: palette,
+        applyPalette: applyPalette,
         updated: _usingSimulation
             ? 'SIMULATION'
             : refreshFailure.isEmpty
@@ -2506,6 +2573,99 @@ Future<void> _runTop(
   stdout.write('\x1B[?25h\x1B[?1049l'); // show cursor + leave alternate screen
 }
 
+Future<void> _runTheme(List<String> args) async {
+  final action = args.isEmpty ? 'list' : args.first;
+  switch (action) {
+    case 'list':
+    case 'install':
+    case 'update':
+    case 'remove':
+      break;
+    default:
+      stderr.writeln(
+        'usage: quotabot theme list | install <git-url> | update <git-url> | remove <slug>',
+      );
+      exitCode = _exitUsage;
+      return;
+  }
+  if (action == 'list' && args.length > 1) {
+    stderr.writeln('usage: quotabot theme list');
+    exitCode = _exitUsage;
+    return;
+  }
+  if (action != 'list' && args.length != 2) {
+    stderr.writeln(
+      action == 'remove'
+          ? 'usage: quotabot theme remove <slug>'
+          : 'usage: quotabot theme $action <git-url>',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+  final store = UserThemeStore(UserThemeStore.platformThemesDirectory());
+  switch (action) {
+    case 'list':
+      final loads = store.readAll();
+      if (loads.isEmpty) {
+        stdout.writeln('No user themes.');
+        return;
+      }
+      for (final load in loads) {
+        final theme = load.result.theme;
+        if (theme != null) {
+          final note =
+              load.result.report.isEmpty ? '' : '  ${load.result.report}';
+          stdout.writeln('${theme.slug}  ${theme.name}$note');
+        } else if (load.result.refusal != null) {
+          stdout.writeln(load.result.refusal);
+        } else if (load.result.report.isNotEmpty) {
+          stdout.writeln(load.result.report);
+        }
+      }
+    case 'install':
+    case 'update':
+      final result = await store.installFromGit(args[1]);
+      if (!result.ok) {
+        stderr.writeln(result.message);
+        exitCode = 1;
+        return;
+      }
+      final verb = action == 'update' ? 'Updated' : 'Installed';
+      final message = result.message.replaceFirst('Installed', verb);
+      stdout.writeln(message);
+      if (result.report.isNotEmpty) stdout.writeln(result.report);
+    case 'remove':
+      final result = store.remove(args[1]);
+      if (!result.ok) {
+        stderr.writeln(result.message);
+        exitCode = result.message.contains('slug is invalid') ? _exitUsage : 1;
+        return;
+      }
+      stdout.writeln(result.message);
+  }
+}
+
+void _printThemeHelp() {
+  _helpLine('quotabot theme list');
+  _helpLine('quotabot theme install <git-url>');
+  _helpLine('quotabot theme update <git-url>');
+  _helpLine('quotabot theme remove <slug>');
+  _helpLine('');
+  _helpLine(
+    'Loads desktop color themes from the local themes directory. install and',
+  );
+  _helpLine(
+    'update shallow-clone a git url with hooks disabled and copy only regular',
+  );
+  _helpLine(
+    '*.toml files. A theme that is not strict #rrggbb or that fails the contrast',
+  );
+  _helpLine(
+    'check is refused. remove deletes one user theme file and does not touch',
+  );
+  _helpLine('built-in themes.');
+}
+
 void _printHelp([String? command]) {
   switch (command) {
     case 'mcp':
@@ -2520,274 +2680,280 @@ void _printHelp([String? command]) {
     case 'update':
       _printUpdateHelp();
       return;
+    case 'theme':
+      _printThemeHelp();
+      return;
   }
 
   String head(String s) => style.bold(s);
-  stdout.writeln(
+  _helpLine(
     '${style.bold('quotabot')} $_version  -  your AI subscription quota, in one place',
   );
-  stdout.writeln('');
-  stdout.writeln(head('USAGE'));
-  stdout.writeln('  quotabot <command> [options]');
-  stdout.writeln('');
-  stdout.writeln(head('SEE QUOTA'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('USAGE'));
+  _helpLine('  quotabot <command> [options]');
+  _helpLine('');
+  _helpLine(head('SEE QUOTA'));
+  _helpLine(
     '  status, doctor      every provider, its windows and resets (default)',
   );
-  stdout.writeln(
+  _helpLine(
     '  hide <provider>     keep a cancelled subscription off the default view',
   );
-  stdout.writeln(
+  _helpLine(
     '  unhide <provider>   show a previously hidden provider again',
   );
-  stdout.writeln(
+  _helpLine(
     '  hidden              list providers hidden by hide or top x',
   );
-  stdout.writeln(
+  _helpLine(
     '  top                 live dashboard (q quit, r refresh, s sort, j/k move, x hide, c copy, m models)',
   );
-  stdout.writeln(
+  _helpLine(
     '  watch               alert when a window goes red, naming where to route'
     ' (--webhook URL, --json, --once, --waste-threshold N)',
   );
-  stdout.writeln(
+  _helpLine(
     '  check <provider>    whether one provider is usable now; add --account for one returned account',
   );
-  stdout.writeln(
+  _helpLine(
     '  models              known model candidates, with budget + capabilities',
   );
-  stdout.writeln(
+  _helpLine(
     '  calibration         forecast reliability from recorded history',
   );
-  stdout.writeln(
+  _helpLine(
     '  manual              list, set, or remove self-reported quota entries',
   );
-  stdout.writeln(
+  _helpLine(
+    '  theme               list, install, update, or remove a desktop color theme',
+  );
+  _helpLine(
     '  stats [provider]    90-day analytics: distribution, best windows, pace',
   );
-  stdout.writeln(
+  _helpLine(
     '  report              weekly quota health export; Markdown anonymizes accounts',
   );
-  stdout.writeln(
+  _helpLine(
     '  verify              honesty checks over one read; add --require-live for adapter health',
   );
-  stdout.writeln(
+  _helpLine(
     '                      recover one provider-drift baseline with --recover-drift, --account, and --yes',
   );
-  stdout.writeln(
+  _helpLine(
     '                      inspect or recover one quarantined analytics tier with --recover-analytics, --account, and --tier',
   );
-  stdout.writeln(
+  _helpLine(
     '  explain             show local reads and network hosts in the runtime trust boundary',
   );
-  stdout.writeln('');
-  stdout.writeln(head('ROUTE'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('ROUTE'));
+  _helpLine(
     '  suggest             which subscription to use next (ranked); add a model'
     ' filter (e.g. --task) to get one recommended model',
   );
-  stdout.writeln('');
-  stdout.writeln(head('CONNECT'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('CONNECT'));
+  _helpLine(
     '  login <provider>    connect grok, antigravity, claude, or codex '
     '(adds a refreshable path; inspect with doctor)',
   );
-  stdout.writeln(
+  _helpLine(
     '  logout <provider>   disconnect a provider in quotabot without changing host credentials',
   );
-  stdout.writeln(
+  _helpLine(
     '  manual set NAME --used N --limit N --reset VALUE'
     '  add/update a local entry',
   );
-  stdout.writeln('');
-  stdout.writeln(head('OTHER'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('OTHER'));
+  _helpLine(
     '  mcp                 MCP server over stdio; --http enables authenticated loopback HTTP',
   );
-  stdout.writeln('  json                full snapshot as quotabot.v1 JSON');
-  stdout.writeln(
+  _helpLine('  json                full snapshot as quotabot.v1 JSON');
+  _helpLine(
     '  update              install the newest checksum-verified release',
   );
-  stdout.writeln('  help, version');
-  stdout.writeln('');
-  stdout.writeln(head('OPTIONS'));
-  stdout.writeln(
+  _helpLine('  help, version');
+  _helpLine('');
+  _helpLine(head('OPTIONS'));
+  _helpLine(
     '  --json              machine-readable output where supported '
     '(including suggest, models, report, verify, update)',
   );
-  stdout.writeln(
+  _helpLine(
     '  --include-accounts  report: include account labels in Markdown',
   );
-  stdout.writeln(
+  _helpLine(
     '  --account=VALUE     check: exact returned account; recovery: exact current account from unfiltered quotabot --json',
   );
-  stdout.writeln(
+  _helpLine(
     '                      if an incident account is unavailable, reconnect it and rerun doctor first',
   );
-  stdout.writeln(
+  _helpLine(
     '  --profile=NAME      use a local named profile view',
   );
-  stdout.writeln(
+  _helpLine(
     '  --mock-provider NAME --state NAME  deterministic test snapshot '
     '(${simulationStates.join(', ')})',
   );
-  stdout.writeln(
+  _helpLine(
     '  --color, --no-color force or disable color (also honors NO_COLOR)',
   );
-  stdout.writeln(
+  _helpLine(
     '  --interval=N        top: fixed seconds between refreshes (default: adaptive)',
   );
-  stdout.writeln(
+  _helpLine(
     '  --sort=NAME         top: initial order (${TopSort.values.map((m) => m.cliName).join(', ')}); '
     'the s key cycles it; also QUOTABOT_SORT',
   );
-  stdout.writeln(
+  _helpLine(
     '  --truecolor         top: force 24-bit gradient meters',
   );
-  stdout.writeln(
-    '  --theme=NAME        top: palette (${paletteNames.join(', ')}, '
-    'or custom:HEX-HEX-HEX-HEX); also QUOTABOT_THEME',
+  _helpLine(
+    '  --theme=NAME        top: 24-bit palette (${paletteNames.join(', ')}, '
+    'or custom:HEX-HEX-HEX-HEX). No theme follows the terminal. Also QUOTABOT_THEME',
   );
-  stdout.writeln(
+  _helpLine(
     '  --risk=Z            suggest: risk aversion (0 = mean, higher avoids '
     'uncertain caps)',
   );
-  stdout.writeln(
+  _helpLine(
     '  --tuned-burn        suggest: use a holdout-validated burn lookback '
     '(see quotabot calibration)',
   );
-  stdout.writeln(
+  _helpLine(
     '  --local-first       suggest: prefer local runtime before subscription quota',
   );
-  stdout.writeln(
+  _helpLine(
     '  --quota-stretch     suggest: keep 25% quota in reserve, then prefer local',
   );
-  stdout.writeln(
+  _helpLine(
     '  --stretch-threshold=N  quota-stretch reserve, 20..50 (default 25)',
   );
-  stdout.writeln(
+  _helpLine(
     '  --prefer=A,B        suggest: provider preference among viable options '
     '(never overrides availability)',
   );
-  stdout.writeln(
+  _helpLine(
     '  --provider-route    suggest: keep provider output while applying model filters',
   );
-  stdout.writeln(
+  _helpLine(
     '  --cost-penalty=A:N  suggest: explicit relative cost penalty for provider A',
   );
-  stdout.writeln(
+  _helpLine(
     '  --cost-weight=N     suggest: scale explicit cost penalties (default 1 when set)',
   );
-  stdout.writeln(
+  _helpLine(
     '  --tier-plan=A:N[:P] stats: explicit plan cap percent and optional price',
   );
-  stdout.writeln(
+  _helpLine(
     '  --current-price=N --tier-risk=P  stats: tier-fit price/risk inputs',
   );
-  stdout.writeln(
+  _helpLine(
     '  --exclude=A,B       quota reads: ignore these providers after profile filtering',
   );
-  stdout.writeln(
-    '  --task=LEVEL        models/suggest: simple|standard|hard (coarse needs)',
+  _helpLine(
+    '  --task=LEVEL        models/suggest: simple|standard|hard|reasoning',
   );
-  stdout.writeln(
+  _helpLine(
     '  --budget=POLICY     any|quota|local; models defaults any, model suggest quota',
   );
-  stdout.writeln(
+  _helpLine(
     '  --require-live      verify: fail unless every selected provider read is fresh',
   );
-  stdout.writeln(
+  _helpLine(
     '  --fresh             quota reads: bypass recent Claude sharing, retain backoff',
   );
-  stdout.writeln(
+  _helpLine(
     '  --recover-drift=P --account=A --yes  verify and replace one exact drift baseline',
   );
-  stdout.writeln(
+  _helpLine(
     '  --recover-analytics=P --account=A --tier=history|buckets  inspect one exact current-account quarantine; add --yes to archive first, then exact-merge provable history or restart the tier empty',
   );
-  stdout.writeln(
+  _helpLine(
     '  --use-expiring-quota suggest: prefer qualifying included quota projected to expire unused',
   );
-  stdout.writeln(
+  _helpLine(
     '  --min-context=N --require-tools/vision/reasoning --tier-floor/ceiling=T'
     '   models filters',
   );
-  stdout.writeln('');
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(
     style.dim(
         '  Quota and routing reads use metadata only and cost no usage tokens.'),
   );
-  stdout.writeln(
+  _helpLine(
     style.dim(
         '  Live reads may contact provider endpoints; state commands can write bounded local metadata.'),
   );
-  stdout.writeln(
+  _helpLine(
     style.dim('  Update contacts GitHub only when invoked.'),
   );
-  stdout.writeln(
+  _helpLine(
     style.dim(
         '  Local models (Ollama/LM Studio/Lemonade) appear once their server is'),
   );
-  stdout.writeln(
+  _helpLine(
     style.dim(
         '  running; LM Studio needs its local server started (lms server start).'),
   );
-  stdout.writeln(
+  _helpLine(
     style.dim('  Agents: see AGENTS.md. MCP server: quotabot mcp.'),
   );
 }
 
 void _printUpdateHelp() {
   String head(String value) => style.bold(value);
-  stdout.writeln(
+  _helpLine(
     '${style.bold('quotabot')} update  -  install a checksum-verified release',
   );
-  stdout.writeln('');
-  stdout.writeln(head('USAGE'));
-  stdout.writeln('  quotabot update [--check] [--stable|--preview]');
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('USAGE'));
+  _helpLine('  quotabot update [--check] [--stable|--preview]');
+  _helpLine(
     '  quotabot update [--check] --target=vMAJOR.MINOR.PATCH[-rc.N] [--force]',
   );
-  stdout.writeln('');
-  stdout.writeln(head('CHANNEL'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('CHANNEL'));
+  _helpLine(
     '  Stable builds follow stable releases. Release candidates follow the '
     'preview channel.',
   );
-  stdout.writeln(
+  _helpLine(
     '  --stable            select the newest published stable release',
   );
-  stdout.writeln(
+  _helpLine(
     '  --preview           include published release candidates',
   );
-  stdout.writeln(
+  _helpLine(
     '  --target=TAG        select one exact published release tag',
   );
-  stdout.writeln('');
-  stdout.writeln(head('CONTROL'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('CONTROL'));
+  _helpLine(
     '  --check             report availability without changing the install',
   );
-  stdout.writeln(
+  _helpLine(
     '  --force             reinstall the selected version or allow rollback',
   );
-  stdout.writeln(
+  _helpLine(
     '  --json              emit quotabot.update.v1 instead of human output',
   );
-  stdout.writeln('');
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(
     '  Release discovery reads public GitHub metadata only after this command '
     'is invoked.',
   );
-  stdout.writeln(
+  _helpLine(
     '  Installation uses the updater bundled inside the verified CLI archive, '
     'downloads an exact tag,',
   );
-  stdout.writeln(
+  _helpLine(
     '  verifies its SHA-256 sidecar, activates one complete generation, and '
     'checks the installed version.',
   );
-  stdout.writeln(
+  _helpLine(
     '  A hand-extracted desktop bundle on a different version is named and '
     'left in place. Doctor prints the same notice.',
   );
@@ -2795,172 +2961,172 @@ void _printUpdateHelp() {
 
 void _printSuggestHelp() {
   String head(String value) => style.bold(value);
-  stdout.writeln(
+  _helpLine(
     '${style.bold('quotabot')} suggest  -  choose a provider or concrete model',
   );
-  stdout.writeln('');
-  stdout.writeln(head('USAGE'));
-  stdout.writeln('  quotabot suggest [provider options]');
-  stdout.writeln('  quotabot suggest [model filters]');
-  stdout.writeln('  quotabot suggest --provider-route [model filters]');
-  stdout.writeln('');
-  stdout.writeln(head('ROUTING MODES'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('USAGE'));
+  _helpLine('  quotabot suggest [provider options]');
+  _helpLine('  quotabot suggest [model filters]');
+  _helpLine('  quotabot suggest --provider-route [model filters]');
+  _helpLine('');
+  _helpLine(head('ROUTING MODES'));
+  _helpLine(
     '  With no model filters: quotabot.suggest.v1 provider ranking.',
   );
-  stdout.writeln(
+  _helpLine(
     '  With any --task, --budget, --min-context, --require-*, or --tier-*',
   );
-  stdout.writeln(
+  _helpLine(
     '  filter: quotabot.suggest_model.v1 concrete-model ranking.',
   );
-  stdout.writeln(
+  _helpLine(
     '  Add --provider-route to apply model requirements while keeping the',
   );
-  stdout.writeln(
+  _helpLine(
     '  provider schema.',
   );
-  stdout.writeln('');
-  stdout.writeln(head('PROVIDER OPTIONS'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('PROVIDER OPTIONS'));
+  _helpLine(
     '  --local-first              prefer a reachable local runtime now',
   );
-  stdout.writeln(
+  _helpLine(
     '  --quota-stretch            keep 25% included quota, then prefer local',
   );
-  stdout.writeln(
+  _helpLine(
     '  --stretch-threshold=N      reserve from 20 through 50 percent',
   );
-  stdout.writeln(
+  _helpLine(
     '  --risk=Z --tuned-burn      adjust for uncertainty and validated burn',
   );
-  stdout.writeln(
+  _helpLine(
     '  --prefer=A,B               order already-viable providers',
   );
-  stdout.writeln(
+  _helpLine(
     '  --cost-penalty=A:N         caller-supplied relative provider penalty',
   );
-  stdout.writeln(
+  _helpLine(
     '  --cost-weight=N            scale penalties from 0 through 10',
   );
-  stdout.writeln('');
-  stdout.writeln(head('MODEL OPTIONS'));
-  stdout.writeln('  --task=simple|standard|hard');
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('MODEL OPTIONS'));
+  _helpLine('  --task=simple|standard|hard|reasoning');
+  _helpLine(
     '  --budget=any|quota|local   model suggestions default to quota',
   );
-  stdout.writeln(
+  _helpLine(
     '  --min-context=N --require-tools --require-vision --require-reasoning',
   );
-  stdout.writeln('  --tier-floor=T --tier-ceiling=T');
-  stdout.writeln(
+  _helpLine('  --tier-floor=T --tier-ceiling=T');
+  _helpLine(
     '  --use-expiring-quota       let qualifying expiring quota beat local',
   );
-  stdout.writeln('');
-  stdout.writeln(head('SHARED OPTIONS'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('SHARED OPTIONS'));
+  _helpLine(
     '  --json --profile=NAME --exclude=A,B --color --no-color',
   );
-  stdout.writeln(
+  _helpLine(
     '  --mock-provider=NAME --state=STATE   deterministic simulation',
   );
-  stdout.writeln('');
-  stdout.writeln(head('RULES'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('RULES'));
+  _helpLine(
     '  --local-first and --quota-stretch cannot be combined.',
   );
-  stdout.writeln(
+  _helpLine(
     '  Provider options apply only to provider suggestions; add',
   );
-  stdout.writeln(
+  _helpLine(
     '  --provider-route to combine them with model requirements.',
   );
-  stdout.writeln(
+  _helpLine(
     '  --use-expiring-quota applies only to concrete-model suggestions.',
   );
-  stdout.writeln(
+  _helpLine(
     '  Paid catalog entries require explicit --budget=any model selection.',
   );
-  stdout.writeln('');
-  stdout.writeln(head('READ BOUNDARY'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('READ BOUNDARY'));
+  _helpLine(
     '  Reads quota and model metadata and may refresh quotabot-owned grants,',
   );
-  stdout.writeln(
+  _helpLine(
     '  cache, and history. It makes no model call and reads no prompts or code.',
   );
-  stdout.writeln('');
-  stdout.writeln(head('EXAMPLES'));
-  stdout.writeln('  quotabot suggest');
-  stdout.writeln('  quotabot suggest --quota-stretch');
-  stdout.writeln('  quotabot suggest --task=hard');
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('EXAMPLES'));
+  _helpLine('  quotabot suggest');
+  _helpLine('  quotabot suggest --quota-stretch');
+  _helpLine('  quotabot suggest --task=hard');
+  _helpLine(
     '  quotabot suggest --provider-route --require-tools --budget=quota',
   );
-  stdout.writeln('');
-  stdout.writeln('Full command list: quotabot help. Details: docs/USAGE.md.');
+  _helpLine('');
+  _helpLine('Full command list: quotabot help. Details: docs/USAGE.md.');
 }
 
 void _printModelsHelp() {
   String head(String value) => style.bold(value);
-  stdout.writeln(
+  _helpLine(
     '${style.bold('quotabot')} models  -  inspect represented model candidates',
   );
-  stdout.writeln('');
-  stdout.writeln(head('USAGE'));
-  stdout.writeln('  quotabot models [model filters]');
-  stdout.writeln('');
-  stdout.writeln(head('OUTPUT'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('USAGE'));
+  _helpLine('  quotabot models [model filters]');
+  _helpLine('');
+  _helpLine(head('OUTPUT'));
+  _helpLine(
     '  Lists represented candidates as quotabot.models.v1, ordered by current',
   );
-  stdout.writeln(
+  _helpLine(
     '  routability with availability, budget gate, capabilities, and tier.',
   );
-  stdout.writeln('');
-  stdout.writeln(head('FILTERS'));
-  stdout.writeln('  --task=simple|standard|hard');
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('FILTERS'));
+  _helpLine('  --task=simple|standard|hard|reasoning');
+  _helpLine(
     '  --budget=any|quota|local   defaults to any for inspection',
   );
-  stdout.writeln(
+  _helpLine(
     '  --min-context=N --require-tools --require-vision --require-reasoning',
   );
-  stdout.writeln('  --tier-floor=T --tier-ceiling=T');
-  stdout.writeln('');
-  stdout.writeln(head('SHARED OPTIONS'));
-  stdout.writeln(
+  _helpLine('  --tier-floor=T --tier-ceiling=T');
+  _helpLine('');
+  _helpLine(head('SHARED OPTIONS'));
+  _helpLine(
     '  --json --profile=NAME --exclude=A,B --color --no-color',
   );
-  stdout.writeln(
+  _helpLine(
     '  --mock-provider=NAME --state=STATE   deterministic simulation',
   );
-  stdout.writeln('');
-  stdout.writeln(head('BUDGET RULES'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('BUDGET RULES'));
+  _helpLine(
     '  any may include credit-backed or paid catalog entries for inspection.',
   );
-  stdout.writeln(
+  _helpLine(
     '  quota admits measured included quota and local-runtime entries.',
   );
-  stdout.writeln(
+  _helpLine(
     '  local excludes cloud-offloaded models and reported upstream routing.',
   );
-  stdout.writeln('');
-  stdout.writeln(head('READ BOUNDARY'));
-  stdout.writeln(
+  _helpLine('');
+  _helpLine(head('READ BOUNDARY'));
+  _helpLine(
     '  Reads quota and model-list metadata and may refresh quotabot-owned',
   );
-  stdout.writeln(
+  _helpLine(
     '  grants, cache, and history. It never loads or invokes a model.',
   );
-  stdout.writeln('');
-  stdout.writeln(head('EXAMPLES'));
-  stdout.writeln('  quotabot models');
-  stdout.writeln('  quotabot models --budget=quota --require-tools');
-  stdout.writeln('  quotabot models --budget=local --min-context=32768');
-  stdout.writeln('');
-  stdout.writeln('Full command list: quotabot help. Details: docs/USAGE.md.');
+  _helpLine('');
+  _helpLine(head('EXAMPLES'));
+  _helpLine('  quotabot models');
+  _helpLine('  quotabot models --budget=quota --require-tools');
+  _helpLine('  quotabot models --budget=local --min-context=32768');
+  _helpLine('');
+  _helpLine('Full command list: quotabot help. Details: docs/USAGE.md.');
 }
 
 /// `quotabot watch`: poll quota on the adaptive cadence and emit a low-quota
@@ -3063,7 +3229,8 @@ Future<void> _runWatch(
     }
     for (final a in fired) {
       if (wantsJson) {
-        stdout.writeln(jsonEncode(a.toJson()));
+        // Alert JSON is one machine-readable line. Wrapping it breaks parsers.
+        print(jsonEncode(a.toJson()));
       } else {
         final tag = a.severity == AlertSeverity.red
             ? style.red('[red]')
@@ -3072,7 +3239,7 @@ Future<void> _runWatch(
             ? _quotaAlertFallback(suggestion.fallback, now)
             : '';
         final provenance = quotaAlertProvenance(a, data, now);
-        stdout.writeln('$tag ${a.message}$fallback $provenance');
+        _helpLine('$tag ${a.message}$fallback $provenance');
       }
       if (webhook != null) {
         final r = await postAlert(webhook, a.toJson(),
@@ -3094,7 +3261,7 @@ Future<void> _runWatch(
       final scope = wasteThreshold == null
           ? 'no window has crossed into red'
           : 'no window is red and no renewing quota is projected to go to waste';
-      stdout.writeln('quotabot watch: all clear - $scope.');
+      _helpLine('quotabot watch: all clear - $scope.');
     }
     client.close();
     return;
@@ -3329,7 +3496,7 @@ Future<void> _check(
         'no account "$account" for provider "$name" in the current view',
       );
     } else if (unavailableKnownProvider) {
-      stdout.writeln(
+      _helpLine(
         '${style.bold(targetAdapter.displayName)}: ${style.red('unavailable')} '
         '${style.dim('(adapter returned no current row)')}',
       );
@@ -3439,14 +3606,14 @@ Future<void> _check(
   final accountTag = account != null || matchedAccountCount > 1
       ? ' (${quotaAccountDisplayLabel(q.account)})'
       : '';
-  stdout.writeln(
+  _helpLine(
     '${style.bold('${q.displayName}$accountTag')}: '
     '$label$pct$rs$staleTag$sourceTag',
   );
   final admissionDetail = requestAdmissionDetail(q.requestAdmission);
-  if (admissionDetail != null) stdout.writeln('  $admissionDetail');
+  if (admissionDetail != null) _helpLine('  $admissionDetail');
   if (q.driftReason != null) {
-    stdout.writeln(
+    _helpLine(
       style.red(
         '  provider drift: ${q.driftReason}; '
         '${_providerDriftEvidenceSummary(q)}',
@@ -3456,7 +3623,7 @@ Future<void> _check(
     final evidence = q.hasWindows
         ? 'showing last-known quota'
         : 'no current quota is available';
-    stdout.writeln(
+    _helpLine(
       style.dim(
         '  live read failed: ${q.error}; $evidence',
       ),
@@ -3611,6 +3778,7 @@ String _stateStyled(String state) {
   final padded = _stateColumn(state);
   switch (state) {
     case 'live':
+    case 'live shared':
       return style.green(padded);
     case 'loaded':
     case 'ready':
@@ -3619,14 +3787,16 @@ String _stateStyled(String state) {
     case 'local':
       return style.cyan(padded);
     case 'cached':
+    case 'sign-in needed':
     case 'NEEDS REVIEW':
     case 'UNVERIFIED':
       return style.yellow(padded);
     case 'OUT OF QUOTA':
     case 'PROVIDER DRIFT':
     case 'ERROR':
+    case 'unavailable':
       return style.red(padded);
-    default: // no live data
+    default: // metadata, no live data
       return style.dim(padded);
   }
 }
@@ -3641,8 +3811,20 @@ String _doctorAccountSuffix(ProviderQuota q, Map<String, int> counts) =>
         ? ' (${quotaAccountDisplayLabel(q.account)})'
         : '';
 
-String _providerProvenance(ProviderQuota q, int now, String state) {
-  final parts = _providerProvenanceParts(q, now, state);
+String _providerProvenance(
+  ProviderQuota q,
+  int now,
+  String state, {
+  String? shownState,
+}) {
+  // Drop a bracket token only when the status column already shows that word.
+  // Verify remaps some read states before building the bracket, so the column
+  // label and the bracket's first token are not always the same string.
+  final shown = (shownState ?? state).toLowerCase();
+  final parts = _providerProvenanceParts(q, now, state)
+      .where((part) => part.toLowerCase() != shown)
+      .toList();
+  if (parts.isEmpty) return '';
   return style.dim('[${parts.join(', ')}]');
 }
 
@@ -3899,7 +4081,7 @@ void _printDoctor(
     for (final incident in analyticsIncidentInventory.incidents)
       if (!incident.exactAccountInSnapshot) incident,
   ];
-  print(
+  _humanLine(
     '${style.bold('quotabot')}  ${style.dim('your quota across providers, 0 usage tokens')}\n',
   );
   // Show an account label only where a provider appears under more than one
@@ -3913,7 +4095,7 @@ void _printDoctor(
   final nameWidth = results
       .map((q) =>
           '${q.displayName}${_doctorAccountSuffix(q, accountCounts)}'.length)
-      .fold(28, (w, len) => len > w ? len : w);
+      .fold(0, (w, len) => len > w ? len : w);
   final indent = ' '.padRight(nameWidth);
   for (final q in orderProvidersForHumanStatus(results)) {
     final state = doctorProviderState(q, now);
@@ -3932,12 +4114,16 @@ void _printDoctor(
     final namePart =
         '${q.displayName}${_doctorAccountSuffix(q, accountCounts)}';
     final provenance = _providerProvenance(q, now, state);
-    print(
-      '  ${namePart.padRight(nameWidth)} ${_stateStyled(state)} '
-      '$detail $provenance',
+    final trail = [
+      detail,
+      if (provenance.isNotEmpty) provenance,
+    ].where((part) => part.isNotEmpty).join(' ');
+    _humanLine(
+      '  ${namePart.padRight(nameWidth)} ${_stateStyled(state)} $trail',
+      hang: 2 + nameWidth,
     );
     if (q.provider == 'claude') {
-      print(
+      _humanLine(
         '  $indent ${_stateColumn('shared reads')} '
         '${ProviderReadGate.configuredMinimumLiveInterval.inSeconds}s window; '
         '--fresh requests new metadata, subject to provider backoff.',
@@ -3948,7 +4134,7 @@ void _printDoctor(
     // as one more dim note.
     final resetMessage = resetAvailableMessage(q);
     if (resetMessage != null) {
-      print('  $indent ${_stateColumn('')} ${style.green(resetMessage)}');
+      _humanLine('  $indent ${_stateColumn('')} ${style.green(resetMessage)}');
     }
     final details = q.isLocal
         ? [
@@ -3957,11 +4143,11 @@ void _printDoctor(
           ]
         : q.details;
     for (final d in details) {
-      print('  $indent ${_stateColumn('')} $d');
+      _humanLine('  $indent ${_stateColumn('')} $d');
     }
     final poolSplit = disagreementModelQuotas(q, now);
     if (poolSplit.isNotEmpty) {
-      print(
+      _humanLine(
         '  $indent ${_stateColumn('pools')} ${disagreementPoolSummary(poolSplit)}',
       );
     }
@@ -3976,20 +4162,20 @@ void _printDoctor(
         now,
         providerQuota: q,
       );
-      print('  $indent ${_stateColumn('models')} $summary');
+      _humanLine('  $indent ${_stateColumn('models')} $summary');
     }
     if (q.driftReason != null) {
       final detected = q.driftObservedAt == null
           ? ''
           : ' ${compactAge((now - q.driftObservedAt!).clamp(0, 1 << 31).toInt(), suffix: ' ago')}';
-      print(
+      _humanLine(
         '  $indent ${_stateColumn('')} '
         '${style.red('! provider drift$detected: ${q.driftReason}; '
             '${_providerDriftEvidenceSummary(q)}')}',
       );
     }
     if (q.suspect != null) {
-      print(
+      _humanLine(
         '  $indent ${_stateColumn('')} '
         '${style.yellow('! suspect: ${q.suspect}')}',
       );
@@ -4000,24 +4186,24 @@ void _printDoctor(
     // outage is one short note. A generic "read deferred" line is not added
     // on top of that.
     if (spentNote != null) {
-      print('  $indent ${_stateColumn('')} -> $spentNote');
+      _humanLine('  $indent ${_stateColumn('')} -> $spentNote');
     } else if (hint != null && !staleRefreshRepeatsSpentWindow(q, now)) {
-      print('  $indent ${_stateColumn('')} -> $hint');
+      _humanLine('  $indent ${_stateColumn('')} -> $hint');
     }
     final storageWarning =
         analyticsStorageWarningForQuota(q, storageNoticesByIdentity);
     if (storageWarning != null) {
-      print(
+      _humanLine(
         '  $indent ${_stateColumn('')} '
         '${style.yellow('! $storageWarning')} ',
       );
       final notice = storageNoticesByIdentity[quotaIdentityKeyFor(q)]!;
-      print(
+      _humanLine(
         '  $indent ${_stateColumn('')} ${style.dim('-> exact account: copy '
             'this provider row\'s account field from quotabot --json')}',
       );
       for (final tier in notice.tiers) {
-        print(
+        _humanLine(
           '  $indent ${_stateColumn('')} ${style.dim('-> inspect scoped reset: '
               'quotabot verify --recover-analytics=${q.provider} '
               '--account=EXACT_ACCOUNT --tier=$tier')}',
@@ -4028,14 +4214,14 @@ void _printDoctor(
 
   if (unavailableIncidents.isNotEmpty ||
       analyticsIncidentInventory.state == 'partial') {
-    print('\n${style.bold('Local analytics incidents')}');
+    _humanLine('\n${style.bold('Local analytics incidents')}');
     if (unavailableIncidents.isNotEmpty) {
-      print(
+      _humanLine(
         '  ${style.yellow(unavailableAnalyticsIncidentSummary(unavailableIncidents))}',
       );
     }
     if (analyticsIncidentInventory.state == 'partial') {
-      print(
+      _humanLine(
         '  ${style.yellow('Inventory incomplete - local marker inspection was '
             'bounded or could not verify every marker. An empty incident list '
             'does not prove that local analytics are clear. Current quota and '
@@ -4048,12 +4234,12 @@ void _printDoctor(
         (now - incident.recordedAt).clamp(0, 1 << 31).toInt(),
         suffix: ' ago',
       );
-      print(
+      _humanLine(
         '  $provider  ${incident.tiers.join(' + ')}  recorded $age  '
         '(exact account not in snapshot)',
       );
       for (final tier in incident.tiers) {
-        print(
+        _humanLine(
           '    -> after reconnecting: quotabot verify '
           '--recover-analytics=${incident.provider} '
           '--account=EXACT_ACCOUNT --tier=$tier',
@@ -4068,14 +4254,12 @@ void _printDoctor(
     now,
     preferenceOrder: preferenceOrder,
   );
-  final explanation = suggestion.decisionCode == RouteDecisionCode.noData
-      ? suggestion.explanation.replaceFirst(
-          'Run quotabot doctor for provider-specific recovery steps.',
-          'Use the provider recovery steps above, or start a local runtime.',
-        )
-      : suggestion.explanation;
-  print('\nSuggested: $explanation');
-  print('  (run "quotabot suggest" for the full ranked list)');
+  final glance = humanRouteGlance(suggestion, now);
+  stdout.writeln('');
+  for (final line in glance.lines) {
+    _humanLine(line);
+  }
+  _humanLine('  (run "quotabot suggest" for the full ranked list)');
 
   // Surface a precisely named agreement score once enough forecasts have
   // resolved. A thin history prints nothing rather than a percentage it cannot
@@ -4087,11 +4271,11 @@ void _printDoctor(
   }
   final calHeadline = calibrationAcross(calBuckets, now).headline;
   if (calHeadline != null) {
-    print(
+    _humanLine(
       '  ${style.dim('$calHeadline (run "quotabot calibration" for detail)')}',
     );
   }
-  print(
+  _humanLine(
     '\n${style.cyan('Live view:')} ${style.bold('quotabot top')}  '
     '${style.dim('a refreshing dashboard (q to quit). Also: quotabot models')}',
   );
@@ -4106,13 +4290,14 @@ void _printDoctor(
     hidden: hiddenTargets,
   );
   if (detected.isNotEmpty) {
-    print('\nDetected installed agentic dev coding tools (passive check):');
+    _humanLine(
+        '\nDetected installed agentic dev coding tools (passive check):');
     for (final t in detected.toList()..sort()) {
-      print(
+      _humanLine(
         '  $t (local data may be available opportunistically; see DATA_SOURCES)',
       );
     }
-    print(
+    _humanLine(
       '  (Aider/Cline etc. often use underlying provider quotas already tracked above.)',
     );
   }
@@ -4121,19 +4306,20 @@ void _printDoctor(
   if (desktopCli != null) {
     final skew = _portableDesktopSkew(desktopCli);
     if (skew.hasNotices) {
-      print('\n${style.cyan('Desktop:')}');
+      _humanLine('\n${style.cyan('Desktop:')}');
       for (final line in skew.lines) {
-        print('  $line');
+        _humanLine('  $line');
       }
     }
   }
 
-  print('\n${style.cyan('Diagnostics:')}');
-  print('  Cache directory: ${cacheDir().path}');
+  _humanLine('\n${style.cyan('Diagnostics:')}');
+  _humanLine('  Cache directory: ${cacheDir().path}');
   try {
     final ledger = File('${cacheDir().path}/leases.json');
     final sz = ledger.existsSync() ? ledger.lengthSync() : 0;
-    print('  Local ledger:    ${sz > 0 ? '$sz bytes' : 'empty or missing'}');
+    _humanLine(
+        '  Local ledger:    ${sz > 0 ? '$sz bytes' : 'empty or missing'}');
   } catch (_) {}
 }
 
@@ -4157,7 +4343,12 @@ void _runExplain(
     profile: profile,
     excludedProviders: excludedProviders,
   );
-  wantsJson ? print(_jsonPretty(report.toJson())) : _printExplain(report);
+  if (wantsJson) {
+    // The manifest is a JSON document. Line wrapping would split string values.
+    print(_jsonPretty(report.toJson()));
+  } else {
+    _printExplain(report);
+  }
 }
 
 void _printExplain(RuntimeAccessReport report) {
@@ -4632,6 +4823,7 @@ String _verificationProvenance(
     quota,
     now,
     _verificationProvenanceState(quota, verification.state),
+    shownState: _providerVerificationStateLabel(verification),
   );
 }
 
@@ -4857,7 +5049,9 @@ String _modelEntryProvenance(ModelEntry e, int decisionAsOf) {
     e.sourceClass.label,
   ];
   final spendClass = _modelSpendClass(e);
-  if (spendClass != null) parts.add(spendClass);
+  if (spendClass != null && spendClass != parts.first) {
+    parts.add(spendClass);
+  }
   final fit = e.hardwareFit?.status;
   if (e.local &&
       !e.model.hasLocalExecutionVeto &&
@@ -4939,30 +5133,27 @@ bool _modelHasAccountIdentity(ModelEntry e) =>
 /// Prints a routing recommendation: where to send the next request and why,
 /// with the ranked alternatives below it.
 void _printSuggest(RouteSuggestion s) {
-  print('quotabot suggest  (which subscription to use next, 0 usage tokens)\n');
+  _humanLine(
+      'quotabot suggest  (which subscription to use next, 0 usage tokens)\n');
   final r = s.recommended;
-  if (r == null) {
-    print('  no provider to route to right now');
-  } else {
-    final tag = r.isLocal ? style.dim(' (runtime-classified fallback)') : '';
-    final account = _routeAccountLabel(r);
-    final provenance = _routeCandidateProvenance(r, s.asOf);
-    print(
-      '  ${style.green('->')} ${style.bold(r.provider)}$account'
-      '${r.localModel?.modelId == null ? '' : ' ${r.localModel!.modelId}'}$tag '
-      '$provenance',
-    );
+  final glance = humanRouteGlance(
+    s,
+    s.asOf,
+    accountLabel: r == null ? '' : _routeAccountLabel(r),
+  );
+  for (final line in glance.lines) {
+    _humanLine('  $line');
   }
-  print('  ${s.explanation}\n');
+  stdout.writeln('');
 
   if (s.ranked.isEmpty) return;
-  print('  candidates (best first):');
+  _humanLine('  candidates (best first):');
   for (final c in s.ranked) {
     final provenance = _routeCandidateProvenance(c, s.asOf);
     if (c.isLocal) {
       // Runtime-classified entries have no tracked subscription window. Do not
       // imply that adapter reachability proves execution location or cost.
-      print(
+      _humanLine(
         '    ${c.provider.padRight(12)} ${style.cyan('runtime fallback')}  '
         '$provenance',
       );
@@ -4971,7 +5162,8 @@ void _printSuggest(RouteSuggestion s) {
     // Internal scores (confidence, strand probability, cost weighting) stay in
     // `suggest --json`; the glance shows only what a person acts on. See
     // routeCandidateGlanceLine and ROADMAP 0.9.
-    print(routeCandidateGlanceLine(c, style: style, provenance: provenance));
+    _humanLine(
+        routeCandidateGlanceLine(c, style: style, provenance: provenance));
   }
 }
 

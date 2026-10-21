@@ -3,9 +3,23 @@ import 'package:test/test.dart';
 
 void main() {
   test('built-in palettes resolve by name', () {
-    expect(paletteFromSpec('green').name, 'green');
-    expect(paletteFromSpec('SYNTHWAVE').name, 'synthwave'); // case-insensitive
-    expect(paletteNames, containsAll(['default', 'green', 'dark', 'light']));
+    expect(paletteFromSpec('NORD').name, 'nord');
+    expect(
+        paletteNames, containsAll(['default', 'gruvbox', 'nord', 'dracula']));
+    expect(paletteNames, isNot(contains('synthwave')));
+    expect(paletteNames, isNot(contains('green')));
+  });
+
+  test('retired theme names follow the terminal and say so', () {
+    final retired = resolveTopPalette('synthwave');
+    expect(retired.palette.name, 'default');
+    expect(retired.applyTruecolor, isFalse);
+    expect(retired.notice, contains('retired'));
+    final terminal = resolveTopPalette('dark');
+    expect(terminal.applyTruecolor, isFalse);
+    expect(terminal.notice, contains('terminal theme'));
+    expect(resolveTopPalette(null).applyTruecolor, isFalse);
+    expect(resolveTopPalette('nord').applyTruecolor, isTrue);
   });
 
   test('absent or unknown specs fall back to default', () {

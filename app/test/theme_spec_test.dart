@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/theme_spec.dart';
+import 'package:quotabot_collector/builtin_themes.dart';
+import 'package:quotabot_collector/user_theme.dart';
 
 void main() {
   test('system themes expose complete light and dark color roles', () {
@@ -77,6 +79,13 @@ void main() {
       muted: Colors.red,
       gaugeTrack: Colors.red,
       accent: Colors.red,
+      success: Colors.red,
+      warning: Colors.red,
+      caution: Colors.red,
+      error: Colors.red,
+      info: Colors.red,
+      selection: Colors.red,
+      chart: [Colors.red],
     );
     late AppChromeTheme installed;
     late AppChromeTheme fallback;
@@ -107,5 +116,48 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(fallback.scaffold, const Color(0xFF14161A));
+  });
+
+  test('built-in themes keep status text at 4.5:1 on the card', () {
+    for (final entry in builtinThemeSources.entries) {
+      final parsed = parseUserTheme(entry.value, fallbackSlug: entry.key);
+      expect(parsed.ok, isTrue, reason: parsed.refusal);
+      final theme = parsed.theme!;
+      for (final status in [
+        theme.success,
+        theme.warning,
+        theme.caution,
+        theme.error,
+        theme.info,
+      ]) {
+        expect(
+          contrastRatio(status, theme.surface),
+          greaterThanOrEqualTo(contrastBodyMin),
+          reason: '${theme.slug} ${status.hex} on surface',
+        );
+        expect(
+          contrastRatio(status, theme.bg),
+          greaterThanOrEqualTo(contrastBodyMin),
+          reason: '${theme.slug} ${status.hex} on bg',
+        );
+      }
+      for (final chart in theme.chart) {
+        expect(forbiddenChartColor(chart), isFalse, reason: chart.hex);
+        expect(
+          contrastRatio(chart, theme.surface),
+          greaterThanOrEqualTo(contrastChartMin),
+        );
+      }
+    }
+    expect(
+      builtinGreenScreenThemeSource.toUpperCase(),
+      isNot(contains('39FF14')),
+    );
+    expect(builtinGreenScreenThemeSource, contains('#82AB89'));
+    expect(normalizeAppTheme(null), appThemeDark);
+    expect(normalizeAppTheme('system'), appThemeSystem);
+    expect(storedAppTheme(appThemeSystem), appThemeSystem);
+    expect(themeSpecForProfile(null, persisted: true), appThemeSystem);
+    expect(themeSpecForProfile(null, persisted: false), appThemeDark);
   });
 }

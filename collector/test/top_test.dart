@@ -718,8 +718,8 @@ void main() {
       _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
       _q('codex', [QuotaWindow(label: '5h', usedPercent: 95)]),
     ]);
-    final footer = lines.firstWhere((l) => _plain(l).contains('route'));
-    expect(_plain(footer), contains('claude'));
+    final footer = lines.firstWhere((l) => _plain(l).contains('next'));
+    expect(_plain(footer), contains('Claude'));
     expect(lines.any((l) => _plain(l).contains('q quit')), isTrue);
   });
 
@@ -742,8 +742,24 @@ void main() {
       color: true,
       clock: '12:00:00',
       depth: ColorDepth.truecolor,
+      applyPalette: true,
     ).join();
     expect(out, contains('\x1B[38;2;')); // 24-bit foreground sequence
+  });
+
+  test('truecolor depth without a palette uses named ANSI colors', () {
+    final out = renderTopFrame(
+      providers: [
+        _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 60)]),
+      ],
+      suggestion: suggestRoute(const [], _now),
+      now: _now,
+      width: 80,
+      color: true,
+      clock: '12:00:00',
+      depth: ColorDepth.truecolor,
+    ).join();
+    expect(out, isNot(contains('\x1B[38;2;')));
   });
 
   test('a palette recolors the truecolor frame (accent shows)', () {
@@ -758,10 +774,11 @@ void main() {
       color: true,
       clock: '12:00:00',
       depth: ColorDepth.truecolor,
-      palette: paletteFromSpec('synthwave'),
+      palette: paletteFromSpec('nord'),
+      applyPalette: true,
     ).join();
-    // synthwave accent is purple 200;120;255, used for the wordmark.
-    expect(synth, contains('\x1B[38;2;200;120;255m'));
+    // nord accent is 136;192;208, used for the wordmark.
+    expect(synth, contains('\x1B[38;2;136;192;208m'));
     final def = renderTopFrame(
       providers: providers,
       suggestion: suggestRoute(providers, _now),
@@ -1264,8 +1281,8 @@ void main() {
     final lines = _frame([
       _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
     ], width: 100);
-    final route = _plain(lines.firstWhere((l) => _plain(l).contains('route')));
-    expect(route, contains('-> claude'));
+    final route = _plain(lines.firstWhere((l) => _plain(l).contains('next')));
+    expect(route, contains('Claude'));
     expect(route, isNot(contains('Use claude')));
   });
 
@@ -1275,7 +1292,7 @@ void main() {
       _q('codex', [QuotaWindow(label: '5h', usedPercent: 99)]),
     ];
     final lines = _frame(providers, width: 56);
-    final route = _plain(lines.firstWhere((l) => _plain(l).contains('route')));
+    final route = _plain(lines.firstWhere((l) => _plain(l).contains('next')));
     expect(route.trimRight(), endsWith('...'));
     expect(route.length, 56);
   });
@@ -1294,8 +1311,8 @@ void main() {
     );
     expect(lines.any((l) => _plain(l).contains('@work@example.com')), isTrue);
     expect(lines.any((l) => _plain(l).contains('@home@example.com')), isTrue);
-    final route = _plain(lines.firstWhere((l) => _plain(l).contains('route')));
-    expect(route, contains('-> grok @home@example.com'));
+    final route = _plain(lines.firstWhere((l) => _plain(l).contains('next')));
+    expect(route, contains('Grok @home@example.com'));
     final narrow = _frame(
       [grok('work@example.com', 57), grok('home@example.com', 22)],
       width: 76,
@@ -1421,7 +1438,7 @@ void main() {
       ],
       width: 58,
     );
-    final route = _plain(lines.firstWhere((l) => l.contains('route')));
+    final route = _plain(lines.firstWhere((l) => l.contains('next')));
     expect(route, isNot(contains('@very-long')));
     expect(route, isNot(contains('@very')));
     expect(route.length, 58);

@@ -84,17 +84,17 @@ account. Quota advice cannot switch a fixed deployment's credential.
    cp quotabot-routing.example.yaml quotabot-routing.yaml
    ```
 
-   Use Python 3.10 through 3.13; Python 3.14 is outside this integration's
-   supported and tested range. The requirements file locks the proxy dependency and
-   its transitive packages with hashes. Dependabot reports available updates;
-   selected versions are regenerated and tested on a first-party branch.
-   `pyproject.toml` declares that supported range for package tooling and for
-   Dependabot's resolver. `.python-version` selects an exact supported Python
-   3.13 patch for local version managers. Update both declarations deliberately
-   when the supported runtime range advances.
+   Python 3.14 is the default. Python 3.11 through 3.14 are tested, and
+   Python 3.15 is blocked by litellm's Requires-Python. The requirements file
+   locks the proxy dependency and its transitive packages with hashes.
+   Dependabot reports available updates; selected versions are regenerated and
+   tested on a first-party branch. `pyproject.toml` declares that supported
+   range for package tooling and for Dependabot's resolver. `.python-version`
+   selects Python 3.14 for local version managers. Update both declarations
+   deliberately when the supported runtime range advances.
 
-   Regenerate the universal hash lock against the oldest supported interpreter,
-   then verify installation on every supported Python line:
+   Regenerate the universal hash lock, then verify installation on Python 3.11
+   through 3.14:
 
    ```bash
    uv pip compile --universal --generate-hashes --python-version 3.10 \

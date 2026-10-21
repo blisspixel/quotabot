@@ -498,13 +498,18 @@ void main() {
     test('normalizes app theme preferences safely', () {
       expect(normalizeAppTheme(' Hacker '), appThemeHacker);
       expect(normalizeAppTheme('dark'), appThemeDark);
-      expect(normalizeAppTheme('unknown'), appThemeSystem);
-      expect(storedAppTheme(appThemeSystem), isNull);
+      expect(normalizeAppTheme(null), appThemeDark);
+      expect(normalizeAppTheme('system'), appThemeSystem);
+      expect(normalizeAppTheme('unknown'), 'unknown');
+      expect(normalizeAppTheme('!!!'), appThemeDark);
+      expect(storedAppTheme(appThemeSystem), appThemeSystem);
+      expect(storedAppTheme(appThemeLight), appThemeLight);
       expect(storedAppTheme(appThemeHacker), appThemeHacker);
+      expect(themeModeForAppTheme(appThemeSystem), ThemeMode.system);
       expect(themeModeForAppTheme(appThemeHacker), ThemeMode.dark);
       expect(
         AppChromeTheme.forSpec(Brightness.dark, appThemeHacker).accent,
-        const Color(0xFF39FF14),
+        const Color(0xFF8FD19E),
       );
     });
 
@@ -840,7 +845,7 @@ void main() {
       );
 
       // Compact glance line: route and headroom only, so it never truncates.
-      expect(line, contains('Next: Claude'));
+      expect(line, contains('next  Claude'));
       expect(line, contains('80% included'));
       expect(line, isNot(contains('80% free')));
       expect(line, isNot(contains('confidence')));
@@ -920,7 +925,7 @@ void main() {
         );
         final line = desktopRouteSignalLine(suggestion, [antigravity], now);
 
-        expect(line, contains('Next: Antigravity'));
+        expect(line, contains('next  Antigravity'));
         expect(line, contains('100% open pool'));
         expect(line, isNot(contains('100% free')));
         expect(line, isNot(contains('100% included')));
@@ -1016,7 +1021,7 @@ void main() {
         showAccounts: true,
       );
 
-      expect(line, contains('Next: Codex (work@example.com)'));
+      expect(line, contains('next  Codex (work@example.com)'));
       final detail = desktopRouteDetailLine(
         suggestion,
         [work, home],
@@ -1059,7 +1064,7 @@ void main() {
 
       final suggestion = suggestRoute([ollama], now, preferLocal: true);
       final line = desktopRouteSignalLine(suggestion, [ollama], now);
-      expect(line, 'Next: Ollama - local fallback');
+      expect(line, 'next  Ollama  local fallback');
 
       final detail = desktopRouteDetailLine(suggestion, [ollama], now);
       expect(detail, startsWith('Next: Ollama | local runtime | fallback'));
@@ -1117,7 +1122,7 @@ void main() {
       expect(suggestion.recommended, isNull);
       expect(
         desktopRouteSignalLine(suggestion, [grok], now),
-        'No quota data - use your usual model',
+        'next  your usual model (no quota read yet)',
       );
       expect(
         desktopRouteDetailLine(suggestion, [grok], now),

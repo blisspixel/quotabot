@@ -17,7 +17,7 @@ import 'provider_ids.dart';
 
 /// The date the catalog was last refreshed (YYYY-MM-DD). Surfaced so consumers
 /// can see how fresh the capability hints are.
-const String kCatalogUpdated = '2026-09-30';
+const String kCatalogUpdated = '2026-10-20';
 
 /// Providers whose windows are true rolling included-quota plans. Only these
 /// can ever mark a model quota-backed for the no-surprise `--budget=quota`
@@ -186,6 +186,20 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
     ),
   ],
   'antigravity': [
+    // Gemini API model id, checked 2026-10-20:
+    // https://ai.google.dev/gemini-api/docs/models/gemini-4-argon
+    // 1,048,576 unified context, default sync max output 65,536, tools,
+    // vision, and thinking. The catalog has no price fields.
+    ModelInfo(
+      id: 'gemini-4-argon',
+      displayName: 'Gemini 4 Argon',
+      contextTokens: 1048576,
+      maxOutputTokens: 65536,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'flagship',
+    ),
     ModelInfo(
       id: 'gemini-3.8-flash',
       displayName: 'Gemini 3.8 Flash',
@@ -194,6 +208,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       reasoning: 'reasoning',
       tier: 'standard',
     ),
+    // Reported alias of gemini-3.8-flash. Kept so a 3.7 read still matches.
     ModelInfo(
       id: 'gemini-3.7-flash',
       displayName: 'Gemini 3.7 Flash',
@@ -201,6 +216,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       vision: true,
       tier: 'standard',
     ),
+    // gemini-3.5-flash is a reported alias of this id. Kept so a 3.6 read still matches.
     ModelInfo(
       id: 'gemini-3.6-flash',
       displayName: 'Gemini 3.6 Flash',

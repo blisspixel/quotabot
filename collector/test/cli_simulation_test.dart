@@ -707,7 +707,8 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('no provider to route to right now'));
+    expect(out, contains('next  Grok'));
+    expect(out, isNot(contains('no provider to route to right now')));
     expect(out, contains('Only cached quota evidence is present'));
     expect(out, contains('48% last known'));
     expect(out, contains('unavailable'));
@@ -771,8 +772,8 @@ void main() {
     final out = result.stdout as String;
     expect(out, contains('[live, authoritative, quota plan'));
     expect(out, contains('you@example.com'));
-    expect(out, contains('local runtime, loaded'));
-    expect(out, contains('local runtime, cold'));
+    expect(out, contains('[loaded, local runtime'));
+    expect(out, contains('[cold, local runtime'));
     expect(out, isNot(contains('this machine')));
     expect(out, contains('captured'));
   });
@@ -818,7 +819,8 @@ void main() {
     expectExitCode(result, 0);
     final out = result.stdout as String;
     expect(out, contains('SIMULATION - synthetic provider evidence'));
-    expect(out, contains('[live, authoritative, quota plan, captured'));
+    expect(out, contains('[authoritative, quota plan, captured'));
+    expect(out, isNot(contains('[live, authoritative')));
     expect(out, isNot(contains('Claude (simulated)')));
     expect(
       out,
@@ -897,7 +899,8 @@ void main() {
 
       expectExitCode(result, 0);
       final out = result.stdout as String;
-      expect(out, contains('[sign-in needed, no quota evidence]'));
+      expect(out, contains('sign-in needed'));
+      expect(out, contains('[no quota evidence]'));
       expect(out, isNot(contains('[error, authoritative')));
       expect(out, isNot(contains('Run quotabot doctor')));
       expect(out, isNot(contains('re-run doctor')));
@@ -965,12 +968,12 @@ void main() {
     expect(out, contains('PROVIDER DRIFT'));
     expect(
       out,
-      contains(
-        '[provider drift, authoritative, quota plan, captured 60m ago]',
-      ),
+      contains('[authoritative, quota plan, captured 60m ago]'),
     );
+    expect(out, contains('provider drift'));
     expect(out, contains('usage fell'));
     expect(out, contains('quotabot verify'));
+    expect(out, isNot(contains('quotabot login claude')));
   });
 
   test('doctor demo output labels local scope without duplicate badges',
@@ -984,11 +987,11 @@ void main() {
     final out = result.stdout as String;
     expect(
       out,
-      contains('[live, authoritative, quota plan, you@example.com'),
+      contains('[authoritative, quota plan, you@example.com'),
     );
-    expect(out, contains('[live, passive local, metered plan, captured'));
-    expect(out, contains('[loaded, local runtime, loaded, captured'));
-    expect(out, contains('[ready, local runtime, cold, captured'));
+    expect(out, contains('[passive local, metered plan, captured'));
+    expect(out, contains('[local runtime, captured'));
+    expect(out, contains('[local runtime, cold, captured'));
     expect(out, isNot(contains('note: this machine only')));
     expect(out, isNot(contains('local fallback; other devices may differ')));
     expect(out, isNot(contains('local runtime, loaded, this machine')));
