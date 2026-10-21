@@ -24,6 +24,11 @@ TARGET_CONTRACT = "omarchy-4.0.4"
 MAX_ACCOUNTS = 24
 MAX_WINDOWS = 8
 MAX_TEXT = 180
+# A collected "live" row is only current for one default widget interval.
+# The bar ages the stored file on load, so a restart cannot keep yesterday's
+# label. QML uses these same two bounds.
+LIVE_MAX_AGE_SECONDS = 900
+FUTURE_SKEW_SECONDS = 120
 
 _PROVIDER_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _PUBLIC_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9 ._-]{0,31}$")
@@ -59,6 +64,110 @@ def finite_number(value: object) -> float | None:
     if not math.isfinite(number):
         return None
     return number
+
+
+def present_display(record: object, *, now: int) -> JsonObject:
+    """Age a stored display without rewriting its capture times.
+
+    The file keeps the freshness it had when quotabot wrote it. The widget
+    calls this on load so a restart, a missed refresh, or a clock change
+    cannot keep calling old evidence live. Last-known percents stay. Drift
+    and unknown stay themselves, and a missing percent stays null.
+    """
+    if not isinstance(record, dict) or record.get("schema") != SCHEMA:
+        return {}
+    view = dict(record)
+    snapshot_as_of = epoch_seconds(record.get("snapshot_as_of"))
+    suggestion_as_of = epoch_seconds(record.get("suggestion_as_of"))
+    document_time = _earliest(snapshot_as_of, suggestion_as_of)
+    view["evidence_as_of"] = document_time
+    view["evidence_age_seconds"] = _public_age(document_time, now)
+    accounts = record.get("accounts")
+    if isinstance(accounts, list):
+        view["accounts"] = [
+            _present_account(item, fallback=document_time, now=now)
+            if isinstance(item, dict)
+            else item
+            for item in accounts
+        ]
+    recommendation = record.get("recommendation")
+    if isinstance(recommendation, dict):
+        view["recommendation"] = _present_recommendation(
+            _as_object(recommendation),
+            fallback=suggestion_as_of
+            if suggestion_as_of is not None
+            else document_time,
+            now=now,
+        )
+    return view
+
+
+def _earliest(left: int | None, right: int | None) -> int | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return left if left < right else right
+
+
+def _public_age(evidence: int | None, now: int) -> int | None:
+    if evidence is None:
+        return None
+    age = now - evidence
+    if age < -FUTURE_SKEW_SECONDS:
+        return None
+    if age < 0:
+        return 0
+    return age
+
+
+def _present_account(
+    account: Mapping[str, object],
+    *,
+    fallback: int | None,
+    now: int,
+) -> JsonObject:
+    view = dict(account)
+    evidence = epoch_seconds(account.get("as_of"))
+    if evidence is None:
+        evidence = fallback
+    freshness, age = _aged_freshness(account.get("freshness"), evidence, now)
+    view["freshness"] = freshness
+    view["evidence_age_seconds"] = age
+    if freshness != "live":
+        view["routable"] = False
+    return view
+
+
+def _present_recommendation(
+    recommendation: JsonObject,
+    *,
+    fallback: int | None,
+    now: int,
+) -> JsonObject:
+    view = dict(recommendation)
+    freshness, age = _aged_freshness(recommendation.get("freshness"), fallback, now)
+    view["freshness"] = freshness
+    view["evidence_age_seconds"] = age
+    if freshness != "live":
+        view["available"] = False
+    return view
+
+
+def _aged_freshness(
+    freshness: object,
+    evidence: int | None,
+    now: int,
+) -> tuple[str, int | None]:
+    label = freshness if isinstance(freshness, str) else "unknown"
+    if label not in {"live", "stale", "drift", "unknown"}:
+        label = "unknown"
+    age = _public_age(evidence, now)
+    if label != "live":
+        return label, age
+    if evidence is None or age is None or age > LIVE_MAX_AGE_SECONDS:
+        return "stale", age
+    return "live", age
 
 
 def epoch_seconds(value: object) -> int | None:
@@ -190,7 +299,6 @@ def preserve_failure(
         and isinstance(previous.get("accounts"), list)
     ):
         updated = dict(previous)
-        updated["generated_at"] = now
         updated["read_ok"] = False
         updated["read_error"] = cleaned or "refresh failed"
         updated["read_failed_at"] = now

@@ -279,6 +279,107 @@ class DisplayTests(unittest.TestCase):
         self.assertEqual(failed["read_error"], "quotabot timed out")
         self.assertEqual(failed["accounts"], previous["accounts"])
         self.assertEqual(failed["recommendation"], previous["recommendation"])
+        self.assertEqual(failed["generated_at"], previous["generated_at"])
+        self.assertEqual(failed["snapshot_as_of"], previous["snapshot_as_of"])
+        self.assertEqual(failed["suggestion_as_of"], previous["suggestion_as_of"])
+        self.assertEqual(failed["read_failed_at"], 1_800_000_100)
+
+    def test_present_display_ages_old_live_evidence_without_rewriting_it(self) -> None:
+        record = display.build_display(
+            _snapshot(),
+            _suggestion(),
+            now=1_800_000_020,
+            alias_key=KEY,
+            home=HOME,
+        )
+        captured = record["snapshot_as_of"]
+        aged = display.present_display(record, now=1_800_000_020 + 86_400)
+        account = aged["accounts"][0]
+        recommendation = aged["recommendation"]
+        assert isinstance(account, dict)
+        assert isinstance(recommendation, dict)
+        self.assertEqual(account["freshness"], "stale")
+        self.assertEqual(account["headroom_percent"], 60.0)
+        self.assertFalse(account["routable"])
+        self.assertEqual(account["evidence_age_seconds"], 86_400 + 20)
+        self.assertEqual(recommendation["freshness"], "stale")
+        self.assertEqual(recommendation["headroom_percent"], 58)
+        self.assertFalse(recommendation["available"])
+        self.assertEqual(record["accounts"][0]["freshness"], "live")
+        self.assertEqual(record["snapshot_as_of"], captured)
+        self.assertEqual(aged["snapshot_as_of"], captured)
+        self.assertEqual(aged["generated_at"], record["generated_at"])
+
+    def test_present_display_keeps_a_fresh_live_row(self) -> None:
+        record = display.build_display(
+            _snapshot(),
+            _suggestion(),
+            now=1_800_000_020,
+            alias_key=KEY,
+            home=HOME,
+        )
+        aged = display.present_display(record, now=1_800_000_020 + 100)
+        account = aged["accounts"][0]
+        assert isinstance(account, dict)
+        self.assertEqual(account["freshness"], "live")
+        self.assertTrue(account["routable"])
+        self.assertEqual(account["evidence_age_seconds"], 120)
+
+    def test_present_display_rejects_missing_time_and_future_skew(self) -> None:
+        record = display.build_display(
+            _snapshot(),
+            _suggestion(),
+            now=1_800_000_020,
+            alias_key=KEY,
+            home=HOME,
+        )
+        record["snapshot_as_of"] = None
+        record["suggestion_as_of"] = None
+        record["accounts"][0]["as_of"] = None
+        missing = display.present_display(record, now=1_800_000_020)
+        account = missing["accounts"][0]
+        assert isinstance(account, dict)
+        self.assertEqual(account["freshness"], "stale")
+        self.assertIsNone(account["evidence_age_seconds"])
+        self.assertEqual(account["headroom_percent"], 60.0)
+        self.assertIsNone(missing["evidence_as_of"])
+
+        skewed = display.present_display(
+            display.build_display(
+                _snapshot(),
+                _suggestion(),
+                now=1_800_000_020,
+                alias_key=KEY,
+                home=HOME,
+            ),
+            now=1_800_000_000 - (display.FUTURE_SKEW_SECONDS + 1),
+        )
+        skewed_account = skewed["accounts"][0]
+        assert isinstance(skewed_account, dict)
+        self.assertEqual(skewed_account["freshness"], "stale")
+        self.assertIsNone(skewed_account["evidence_age_seconds"])
+
+    def test_present_display_leaves_drift_and_unknown_unchanged(self) -> None:
+        record = display.build_display(
+            _snapshot(),
+            _suggestion(),
+            now=1_800_000_020,
+            alias_key=KEY,
+            home=HOME,
+        )
+        record["accounts"][0]["freshness"] = "drift"
+        record["accounts"][0]["headroom_percent"] = None
+        record["accounts"][1]["freshness"] = "unknown"
+        record["accounts"][1]["headroom_percent"] = None
+        aged = display.present_display(record, now=1_800_000_020 + 86_400)
+        drift = aged["accounts"][0]
+        unknown = aged["accounts"][1]
+        assert isinstance(drift, dict)
+        assert isinstance(unknown, dict)
+        self.assertEqual(drift["freshness"], "drift")
+        self.assertIsNone(drift["headroom_percent"])
+        self.assertEqual(unknown["freshness"], "unknown")
+        self.assertIsNone(unknown["headroom_percent"])
         empty = display.preserve_failure(
             {"schema": "other"},
             "missing",

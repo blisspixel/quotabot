@@ -45,7 +45,15 @@ Item {
       return "unknown"
     var prefix = row.local ? "local " : ""
     var suffix = row.freshness === "stale" ? "% remaining, stale" : "% remaining"
-    return prefix + Math.round(Number(row.headroom_percent)) + suffix
+    var age = row.evidence_age_seconds
+    var ageText = ""
+    if (row.freshness === "stale" && typeof age === "number" && isFinite(age) && age >= 90)
+      ageText = age < 5400
+        ? ", " + Math.round(age / 60) + "m old"
+        : age < 172800
+          ? ", " + Math.round(age / 3600) + "h old"
+          : ", " + Math.round(age / 86400) + "d old"
+    return prefix + Math.round(Number(row.headroom_percent)) + suffix + ageText
   }
 
   function windowText(row) {

@@ -27,6 +27,10 @@ Notable changes to quotabot. Newest first.
 - CI and the local gate default to Python 3.14. Python 3.11 through 3.14 are
   tested for LiteLLM. Python 3.15 stays blocked by litellm's own
   Requires-Python. Node engines accept 24 and newer.
+- The Omarchy bar ages a stored display on load. A live row older than 15
+  minutes, missing its capture time, or more than two minutes ahead of the
+  clock is shown as stale with its last percent. A failed refresh does not
+  make that evidence newer. A rendered Quickshell panel was not run.
 
 ## 0.11.16 - 2026-10-13
 
