@@ -61,12 +61,15 @@ verification, is [CLAUDE.md](CLAUDE.md).
 
 ## Project status
 
-The current verified stable release is 0.11.16. Callers should treat a snapshot
+The current verified stable release is 0.11.17. Callers should treat a snapshot
 with `drift_reason` as non-routable, keep measured percentages visible on
 admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
 explicit-spend evidence. Fresh quota publishes before advisory analytics.
 
+Version 0.11.17 shares one human route line across doctor, suggest, and top,
+reads desktop theme files, and ages a stored Omarchy display before calling
+it live. A rendered Quickshell panel was not run. Python 3.15 stays blocked.
 Version 0.11.16 names a hand-extracted desktop bundle whose embedded version
 differs from the CLI and leaves that copy in place. The desktop dialog uses the
 installed CLI version.
