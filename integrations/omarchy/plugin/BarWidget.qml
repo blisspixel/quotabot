@@ -36,7 +36,9 @@ Item {
     var recommendation = display ? display.recommendation : null
     if (!recommendation) return "quotabot: no recommendation"
     var freshness = recommendation.freshness || "unknown"
-    return "quotabot " + recommendation.provider + " " + freshness
+    var age = ageLabel(recommendation.evidence_age_seconds)
+    var failed = display && display.read_ok === false ? ", refresh failed" : ""
+    return "quotabot " + recommendation.provider + " " + freshness + (age ? ", " + age : "") + failed
   }
   readonly property string collectorPath: fileUrlToPath(Qt.resolvedUrl("collect.py"))
   readonly property string displayPath: stateDirectory() + "/omarchy-display.json"
@@ -64,12 +66,90 @@ Item {
     return String(Quickshell.env("HOME") || "") + "/.local/state/quotabot"
   }
 
+  // Same bounds as display.py LIVE_MAX_AGE_SECONDS and FUTURE_SKEW_SECONDS.
+  readonly property int liveMaxAgeSeconds: 900
+  readonly property int futureSkewSeconds: 120
+
+  function finiteEpoch(value) {
+    if (typeof value !== "number" || !isFinite(value)) return null
+    var epoch = Math.floor(value)
+    if (epoch < 1000000000 || epoch > 10000000000) return null
+    return epoch
+  }
+
+  function earliestEpoch(left, right) {
+    if (left === null) return right
+    if (right === null) return left
+    return left < right ? left : right
+  }
+
+  function publicAge(evidence, now) {
+    if (evidence === null) return null
+    var age = now - evidence
+    if (age < -futureSkewSeconds) return null
+    if (age < 0) return 0
+    return age
+  }
+
+  function agedFreshness(freshness, evidence, now) {
+    var label = freshness || "unknown"
+    if (label !== "live" && label !== "stale" && label !== "drift" && label !== "unknown")
+      label = "unknown"
+    var age = publicAge(evidence, now)
+    if (label !== "live") return { freshness: label, age: age }
+    if (evidence === null || age === null || age > liveMaxAgeSeconds)
+      return { freshness: "stale", age: age }
+    return { freshness: "live", age: age }
+  }
+
+  function ageLabel(age) {
+    if (typeof age !== "number" || !isFinite(age) || age < 0) return ""
+    if (age < 90) return Math.round(age) + "s old"
+    if (age < 5400) return Math.round(age / 60) + "m old"
+    if (age < 172800) return Math.round(age / 3600) + "h old"
+    return Math.round(age / 86400) + "d old"
+  }
+
+  function presentDisplay(record) {
+    var now = Math.floor(Date.now() / 1000)
+    var snapshotAsOf = finiteEpoch(record.snapshot_as_of)
+    var suggestionAsOf = finiteEpoch(record.suggestion_as_of)
+    var documentTime = earliestEpoch(snapshotAsOf, suggestionAsOf)
+    var view = record
+    view.evidence_as_of = documentTime
+    view.evidence_age_seconds = publicAge(documentTime, now)
+    var accounts = record.accounts || []
+    var index
+    for (index = 0; index < accounts.length; index++) {
+      var row = accounts[index]
+      if (!row) continue
+      var evidence = finiteEpoch(row.as_of)
+      if (evidence === null) evidence = documentTime
+      var aged = agedFreshness(row.freshness, evidence, now)
+      row.freshness = aged.freshness
+      row.evidence_age_seconds = aged.age
+      if (aged.freshness !== "live") row.routable = false
+    }
+    var recommendation = record.recommendation
+    if (recommendation) {
+      var recommendationAge = agedFreshness(
+        recommendation.freshness,
+        suggestionAsOf !== null ? suggestionAsOf : documentTime,
+        now
+      )
+      recommendation.freshness = recommendationAge.freshness
+      recommendation.evidence_age_seconds = recommendationAge.age
+      if (recommendationAge.freshness !== "live") recommendation.available = false
+    }
+    return view
+  }
+
   function applyDisplay(raw) {
     var text = String(raw || "").trim()
     if (!text) return
     try {
       var parsed = JSON.parse(text)
-      if (parsed && parsed.schema === "quotabot.omarchy.v1") display = parsed
+      if (parsed && parsed.schema === "quotabot.omarchy.v1") display = presentDisplay(parsed)
     } catch (error) {
       return
     }

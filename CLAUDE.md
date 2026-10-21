@@ -196,10 +196,12 @@ contains spaces. That script is what CI's format, analyze, test, coverage, and
 integration steps correspond to. Workflow lint, native packaging, signing,
 installed-client checks, and hosted CI remain separate. Do not treat a subset
 as the ship gate.
-Confirm the pinned Flutter/Dart versions and Python 3.13 resolve in this shell
-first, matching the repository tooling in CI. The LiteLLM integration's supported
-runtime range is a separate contract. A successful SDK lookup is not a version
-check. Keep dependency resolution locked as the contributor gate does.
+Confirm the pinned Flutter/Dart versions and Python 3.14 (the default; 3.11
+through 3.14 are tested, and 3.15 is blocked by litellm's Requires-Python)
+resolve in this shell first, matching the repository tooling in CI. The LiteLLM
+integration's supported runtime range is a separate contract. A successful SDK
+lookup is not a version check. Keep dependency resolution locked as the
+contributor gate does.
 
 Focused loops, after the toolchain is on PATH:
 

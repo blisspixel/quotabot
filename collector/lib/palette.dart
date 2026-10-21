@@ -1,14 +1,12 @@
 /// Color palettes for the live `quotabot top` view.
 ///
-/// A palette is just the four headroom-scale colors (healthy -> tightening ->
-/// low -> spent) plus an accent, an interpolation between them giving the smooth
-/// gradient meters. Built-ins cover the default, a phosphor "green" CRT look, a
-/// muted "dark", a "light" terminal palette, and a "synthwave" for fun. A custom
-/// palette is a one-liner, so anyone can make their own without touching code.
+/// A palette is the four headroom-scale colors (healthy, tightening, low, spent)
+/// plus an accent. With no `--theme`, `top` uses the terminal's own ANSI colors.
+/// A named or custom palette is an explicit opt-in for 24-bit gradients.
 ///
-/// Palettes only change the 24-bit (truecolor) rendering; on 256/16-color
-/// terminals the view falls back to the standard named headroom colors, so a
-/// custom palette never produces unreadable output.
+/// Retired names (`light`, `dark`, `green`, `matrix`, `synthwave`, `rainbow`)
+/// do not change colors. Community palettes stay, with no neon, magenta, pink,
+/// or purple accent.
 library;
 
 /// A 24-bit color.
@@ -60,42 +58,6 @@ const kDefaultPalette = Palette(
   accent: Rgb(0x58, 0xA6, 0xFF),
 );
 
-const _green = Palette(
-  name: 'green',
-  healthy: Rgb(0x39, 0xFF, 0x14), // phosphor
-  tight: Rgb(0x00, 0xCC, 0x5A),
-  low: Rgb(0x00, 0x99, 0x46),
-  spent: Rgb(0x00, 0x5A, 0x32),
-  accent: Rgb(0x7C, 0xFF, 0x9E),
-);
-
-const _dark = Palette(
-  name: 'dark',
-  healthy: Rgb(0x2E, 0xA0, 0x43),
-  tight: Rgb(0x9E, 0x86, 0x28),
-  low: Rgb(0xAA, 0x5A, 0x28),
-  spent: Rgb(0xB4, 0x46, 0x46),
-  accent: Rgb(0x58, 0x8C, 0xC8),
-);
-
-const _light = Palette(
-  name: 'light',
-  healthy: Rgb(0x23, 0x86, 0x36),
-  tight: Rgb(0x9A, 0x67, 0x00),
-  low: Rgb(0xB4, 0x50, 0x14),
-  spent: Rgb(0xC8, 0x28, 0x28),
-  accent: Rgb(0x28, 0x5A, 0xC8),
-);
-
-const _synthwave = Palette(
-  name: 'synthwave',
-  healthy: Rgb(0x00, 0xF5, 0xC8), // aqua
-  tight: Rgb(0xFF, 0xC8, 0x00), // gold
-  low: Rgb(0xFF, 0x6E, 0x3C), // orange
-  spent: Rgb(0xFF, 0x3C, 0x78), // hot pink
-  accent: Rgb(0xC8, 0x78, 0xFF), // purple
-);
-
 /// The palettes people already rice their terminals with. Matching an existing
 /// setup matters more than inventing colors: a dashboard that is meant to stay
 /// open all day should look like it belongs on the desktop it sits on.
@@ -123,7 +85,7 @@ const _dracula = Palette(
   tight: Rgb(0xF1, 0xFA, 0x8C),
   low: Rgb(0xFF, 0xB8, 0x6C),
   spent: Rgb(0xFF, 0x55, 0x55),
-  accent: Rgb(0xBD, 0x93, 0xF9),
+  accent: Rgb(0x8B, 0xE9, 0xFD),
 );
 
 const _catppuccin = Palette(
@@ -131,8 +93,8 @@ const _catppuccin = Palette(
   healthy: Rgb(0xA6, 0xE3, 0xA1),
   tight: Rgb(0xF9, 0xE2, 0xAF),
   low: Rgb(0xFA, 0xB3, 0x87),
-  spent: Rgb(0xF3, 0x8B, 0xA8),
-  accent: Rgb(0xCB, 0xA6, 0xF7),
+  spent: Rgb(0xD2, 0x0F, 0x39),
+  accent: Rgb(0x89, 0xB4, 0xFA),
 );
 
 const _tokyoNight = Palette(
@@ -140,45 +102,64 @@ const _tokyoNight = Palette(
   healthy: Rgb(0x9E, 0xCE, 0x6A),
   tight: Rgb(0xE0, 0xAF, 0x68),
   low: Rgb(0xFF, 0x9E, 0x64),
-  spent: Rgb(0xF7, 0x76, 0x8E),
+  spent: Rgb(0xDB, 0x4B, 0x4B),
   accent: Rgb(0x7A, 0xA2, 0xF7),
-);
-
-/// Monochrome phosphor, for the CRT look. Every step is a brighter green, so the
-/// meter reads as glow intensity rather than hue.
-const _matrix = Palette(
-  name: 'matrix',
-  healthy: Rgb(0x39, 0xFF, 0x6A),
-  tight: Rgb(0x24, 0xC0, 0x4C),
-  low: Rgb(0x15, 0x84, 0x33),
-  spent: Rgb(0x0B, 0x4A, 0x1E),
-  accent: Rgb(0x8C, 0xFF, 0xB0),
-);
-
-/// Full-spectrum, for people who want the meter to be the wallpaper.
-const _rainbow = Palette(
-  name: 'rainbow',
-  healthy: Rgb(0x4C, 0xC9, 0xF0),
-  tight: Rgb(0x72, 0xEF, 0x36),
-  low: Rgb(0xFF, 0xD1, 0x00),
-  spent: Rgb(0xF7, 0x25, 0x85),
-  accent: Rgb(0xB5, 0x17, 0xFF),
 );
 
 const _builtins = {
   'default': kDefaultPalette,
-  'green': _green,
-  'dark': _dark,
-  'light': _light,
-  'synthwave': _synthwave,
   'gruvbox': _gruvbox,
   'nord': _nord,
   'dracula': _dracula,
   'catppuccin': _catppuccin,
   'tokyonight': _tokyoNight,
-  'matrix': _matrix,
-  'rainbow': _rainbow,
 };
+
+const _followedTerminalThemes = {'light', 'dark'};
+
+const _retiredThemes = {'green', 'matrix', 'synthwave', 'rainbow'};
+
+/// How `top` should apply a theme spec.
+class TopPaletteChoice {
+  final Palette palette;
+
+  /// True when the user asked for a 24-bit palette.
+  final bool applyTruecolor;
+
+  /// One-line note for a retired or unnecessary theme name.
+  final String? notice;
+
+  const TopPaletteChoice(this.palette, this.applyTruecolor, this.notice);
+}
+
+/// Resolves [spec] for `top`. An empty spec follows the terminal theme.
+TopPaletteChoice resolveTopPalette(String? spec) {
+  if (spec == null || spec.trim().isEmpty) {
+    return const TopPaletteChoice(kDefaultPalette, false, null);
+  }
+  final s = spec.trim().toLowerCase();
+  if (_followedTerminalThemes.contains(s)) {
+    return TopPaletteChoice(
+      kDefaultPalette,
+      false,
+      'top follows your terminal theme; --theme $s is no longer needed',
+    );
+  }
+  if (_retiredThemes.contains(s)) {
+    return TopPaletteChoice(
+      kDefaultPalette,
+      false,
+      'theme "$s" was retired; top follows your terminal theme',
+    );
+  }
+  final builtin = _builtins[s];
+  if (builtin != null) return TopPaletteChoice(builtin, true, null);
+  if (s.startsWith('custom:')) {
+    final parsed = _parseCustom(s.substring('custom:'.length));
+    if (parsed != null) return TopPaletteChoice(parsed, true, null);
+  }
+  return const TopPaletteChoice(kDefaultPalette, false, null);
+}
 
 /// The names of the built-in palettes, for help text.
 List<String> get paletteNames => _builtins.keys.toList();

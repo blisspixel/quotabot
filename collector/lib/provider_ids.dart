@@ -35,6 +35,22 @@ const windsurfProviderName = 'Windsurf';
 const nvidiaProviderId = 'nvidia';
 const nvidiaProviderName = 'NVIDIA NIM';
 
+/// Display name for a provider id. Unknown ids are returned unchanged.
+String providerDisplayName(String id) => switch (id) {
+      antigravityProviderId => antigravityProviderName,
+      claudeProviderId => claudeProviderName,
+      codexProviderId => codexProviderName,
+      cursorProviderId => cursorProviderName,
+      grokProviderId => grokProviderName,
+      kiroProviderId => kiroProviderName,
+      lemonadeProviderId => lemonadeProviderName,
+      lmStudioProviderId => lmStudioProviderName,
+      ollamaProviderId => ollamaProviderName,
+      windsurfProviderId => windsurfProviderName,
+      nvidiaProviderId => nvidiaProviderName,
+      _ => id,
+    };
+
 const Set<String> kCurrentProviderIds = {
   antigravityProviderId,
   claudeProviderId,

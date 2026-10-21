@@ -9,6 +9,8 @@
 /// be unit tested without a terminal; the I/O and timer live in the CLI.
 library;
 
+import 'cli_layout.dart';
+
 /// Braille spinner frames for the live status line.
 const List<String> kFleetSpinnerFrames = [
   '⠋',
@@ -44,6 +46,18 @@ String fleetProviderDoneLine({
 String fleetReadHeader(int total) =>
     'reading quota from $total providers - live reads, usually under a minute';
 
+/// The one line left after a quiet read, for example
+/// "read 11 providers in 0 s: 1 live, 10 no data".
+String fleetReadSummary({
+  required int total,
+  required int elapsedSeconds,
+  required int live,
+  required int quiet,
+}) {
+  final noun = total == 1 ? 'provider' : 'providers';
+  return 'read $total $noun in $elapsedSeconds s: $live live, $quiet no data';
+}
+
 /// The live, in-place status line while a read is in flight, for example
 /// "  ⠇ reading quota  6/11 - 27s - waiting: Grok, Antigravity". At most
 /// three outstanding providers are named; any remainder is summarized as
@@ -69,36 +83,45 @@ String fleetProgressLine({
 /// Drives the interactive fleet-read progress display against an injected
 /// [StringSink], so the terminal control sequence is unit testable without a
 /// real terminal. The caller owns the animation timer (calling [tick]) and the
-/// clock (via [elapsedSeconds]); this class only sequences the header, the
-/// committed per-provider lines, and the single rewritten status line. It never
-/// emits an escape-based clear - only a carriage return and trailing spaces - so
-/// it renders correctly on terminals without VT support such as cmd.exe.
+/// clock (via [elapsedSeconds]). A quiet read prints the header and one summary.
+/// [verbose] keeps one committed line per provider. The live status is truncated
+/// to one column inside [columns] and cleared with CSI K, so a wrapped fragment
+/// does not survive the next paint.
 class FleetProgress {
   final StringSink _sink;
   final String Function(String) _dim;
   final int Function() _elapsedSeconds;
+  final int Function() _columns;
+  final bool verbose;
   final int total;
   final Set<String> _pending;
   int _done = 0;
+  int _live = 0;
+  int _quiet = 0;
   int _tick = 0;
-  int _lastLen = 0;
+  bool _statusVisible = false;
 
   FleetProgress({
     required StringSink sink,
     required Iterable<String> pending,
     required int Function() elapsedSeconds,
     String Function(String)? dim,
+    int Function()? columns,
+    this.verbose = false,
   })  : _sink = sink,
         _pending = {...pending},
         total = {...pending}.length,
         _elapsedSeconds = elapsedSeconds,
+        _columns = columns ?? (() => 10000),
         _dim = dim ?? _identity;
 
   static String _identity(String s) => s;
 
   /// Prints the time-expectation header and the first status line.
   void start() {
-    _sink.writeln(_dim(fleetReadHeader(total)));
+    for (final line in wrapCliLine(fleetReadHeader(total), _width())) {
+      _sink.writeln(_dim(line));
+    }
     _drawStatus();
   }
 
@@ -108,10 +131,20 @@ class FleetProgress {
     _drawStatus();
   }
 
-  /// Commits one settled provider above the live status line, then repaints it.
+  /// Records one settled provider. Verbose mode commits its line above the
+  /// status; a quiet read only updates the summary counts.
   void providerDone(String displayName, bool ok) {
     _done++;
+    if (ok) {
+      _live++;
+    } else {
+      _quiet++;
+    }
     _pending.remove(displayName);
+    if (!verbose) {
+      _drawStatus();
+      return;
+    }
     _clearStatus();
     _sink.writeln(
       _dim(
@@ -128,25 +161,45 @@ class FleetProgress {
   }
 
   void _drawStatus() {
-    final line = fleetProgressLine(
+    final limit = _width() - 1;
+    var line = fleetProgressLine(
       spinner: fleetSpinnerFrame(_tick),
       done: _done,
       total: total,
       elapsedSeconds: _elapsedSeconds(),
       pending: _pending.toList(),
     );
+    if (limit > 0 && line.length > limit) {
+      line = line.substring(0, limit);
+    }
     _clearStatus();
     _sink.write(_dim(line));
-    _lastLen = line.length;
+    _statusVisible = true;
+  }
+
+  int _width() {
+    final columns = _columns();
+    return columns < 8 ? 8 : columns;
   }
 
   void _clearStatus() {
-    if (_lastLen > 0) {
-      _sink.write('\r${' ' * _lastLen}\r');
-      _lastLen = 0;
-    }
+    if (!_statusVisible) return;
+    _sink.write('\r\x1b[K');
+    _statusVisible = false;
   }
 
-  /// Erases the live status line, leaving the committed lines as scrollback.
-  void stop() => _clearStatus();
+  /// Erases the live status line. A quiet read then leaves one summary.
+  void stop() {
+    _clearStatus();
+    if (verbose) return;
+    final summary = fleetReadSummary(
+      total: total,
+      elapsedSeconds: _elapsedSeconds(),
+      live: _live,
+      quiet: _quiet,
+    );
+    for (final line in wrapCliLine(summary, _width())) {
+      _sink.writeln(_dim(line));
+    }
+  }
 }

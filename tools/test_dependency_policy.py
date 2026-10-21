@@ -226,20 +226,43 @@ class DependencyPolicyTest(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        self.assertEqual(">=3.10,<3.14", metadata["project"]["requires-python"])
+        self.assertEqual(">=3.11,<3.15", metadata["project"]["requires-python"])
 
         runtime = (ROOT / "integrations" / "litellm" / ".python-version").read_text(
             encoding="utf-8"
         )
-        self.assertRegex(runtime, r"^3\.13\.\d+\n?$")
+        self.assertRegex(runtime, r"^3\.14\n?$")
 
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        self.assertIn("python-version: '3.13'", ci)
+        jobs = _job_blocks(ci)
+        self.assertIn("python-version: '3.14'", jobs["static-quality"])
+        self.assertIn("python-version: '3.14'", jobs["test"])
+        self.assertIn("os: [ubuntu-latest, macos-15, windows-latest]", jobs["test"])
+        self.assertNotIn("python-version: ['3.11'", jobs["test"])
+        litellm = jobs["litellm-python"]
+        self.assertIn("runs-on: ubuntu-latest", litellm)
+        self.assertNotIn("macos", litellm)
+        self.assertNotIn("windows", litellm)
+        self.assertIn(
+            "python-version: ['3.11', '3.12', '3.13', '3.14']",
+            litellm,
+        )
+        self.assertIn(
+            "python -m unittest test_quotabot_router.py test_quotabot_proxy_integration.py",
+            litellm,
+        )
+        self.assertNotIn("python-version: '3.13'", ci)
+        self.assertNotIn("python-version: '3.15'", ci)
 
         requirements = (
             ROOT / "integrations" / "litellm" / "requirements.in"
         ).read_text(encoding="utf-8")
-        self.assertIn("Python 3.10 through 3.13", requirements)
+        self.assertIn("Python 3.14 is the default", requirements)
+        self.assertIn("Python 3.11 through 3.14 are tested", requirements)
+        self.assertIn(
+            "Python 3.15 is blocked by litellm's Requires-Python",
+            requirements,
+        )
 
         lock = (ROOT / "integrations" / "litellm" / "requirements.txt").read_text(
             encoding="utf-8"
@@ -427,16 +450,33 @@ class DependencyPolicyTest(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("sdk: '3.12.2'", release)
-        self.assertEqual(19, release.count("uses: actions/setup-python@"))
-        self.assertEqual(19, release.count("python-version: '3.13'"))
-
-        install_smoke = (
-            ROOT / ".github" / "workflows" / "install-smoke.yml"
-        ).read_text(encoding="utf-8")
-        self.assertEqual(2, install_smoke.count("uses: actions/setup-python@"))
-        self.assertEqual(2, install_smoke.count("python-version: '3.13'"))
+        setup_python = (
+            "uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
+            " # v7.0.0"
+        )
+        python_counts = {
+            "release.yml": 19,
+            "install-smoke.yml": 2,
+            "macos-signing-rehearsal.yml": 2,
+            "windows-signing-rehearsal.yml": 3,
+        }
+        for name, count in python_counts.items():
+            with self.subTest(workflow=name):
+                text = (ROOT / ".github" / "workflows" / name).read_text(
+                    encoding="utf-8"
+                )
+                self.assertEqual(count, text.count(setup_python))
+                self.assertEqual(count, text.count("python-version: '3.14'"))
+                self.assertNotIn("python-version: '3.13'", text)
+                self.assertNotIn("python-version: '3.15'", text)
+                self.assertNotIn("ece7cb06caefa5fff74198d8649806c4678c61a1", text)
+                self.assertNotIn("pip-install:", text)
 
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertEqual(3, ci.count(setup_python))
+        self.assertEqual(2, ci.count("python-version: '3.14'"))
+        self.assertNotIn("ece7cb06caefa5fff74198d8649806c4678c61a1", ci)
+        self.assertNotIn("pip-install:", ci)
         self.assertIn("dart run coverage:format_coverage", ci)
         self.assertNotIn("dart pub global activate coverage", ci)
         self.assertNotIn("dart pub global run coverage:format_coverage", ci)

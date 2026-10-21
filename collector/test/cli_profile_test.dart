@@ -77,11 +77,11 @@ void main() {
     ]);
 
     expectExitCode(doctor, 0);
-    expect(doctor.stdout as String, contains('Suggested: Use codex'));
+    expect(doctor.stdout as String, contains('next  Codex'));
     expect(doctor.stdout as String, contains('first by your preference'));
 
     expectExitCode(top, 0);
-    expect(top.stdout as String, contains('route -> codex'));
+    expect(top.stdout as String, contains('next  Codex'));
     expect(top.stdout as String, contains('first by your preference'));
 
     expectExitCode(report, 0);

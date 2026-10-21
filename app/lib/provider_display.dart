@@ -116,7 +116,7 @@ String desktopRouteSignalLine(
     // everywhere" and alarms a user who in fact has quota that just could not be
     // read this cycle.
     final noEvidence = switch (suggestion.decisionCode) {
-      RouteDecisionCode.noData => 'No quota data - use your usual model',
+      RouteDecisionCode.noData => 'next  your usual model (no quota read yet)',
       RouteDecisionCode.staleEvidence =>
         'Quota data is stale - use your usual model',
       _ => null,
@@ -143,11 +143,15 @@ String desktopRouteSignalLine(
     snapshot,
     showAccounts,
   );
-  final buf = StringBuffer('Next: $display$accountLabel');
+  final buf = StringBuffer('next  $display$accountLabel');
   if (candidate.isLocal) {
-    buf.write(' - local fallback');
+    buf.write('  local fallback');
   } else if (candidate.headroom != null) {
-    buf.write(' - ${_routeHeadroomPhrase(candidate)}');
+    buf.write('  ${_routeHeadroomPhrase(candidate)}');
+    if (candidate.resetsAt != null) {
+      final reset = resetsLabel(candidate.resetsAt, now);
+      if (reset.isNotEmpty) buf.write(', $reset');
+    }
   }
   return buf.toString();
 }

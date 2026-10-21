@@ -114,15 +114,9 @@ void main() {
         sink: buf,
         pending: ['Claude', 'Codex'],
         elapsedSeconds: () => clock,
+        verbose: true,
       );
       p.start();
-      final initialStatus = fleetProgressLine(
-        spinner: fleetSpinnerFrame(0),
-        done: 0,
-        total: 2,
-        elapsedSeconds: 0,
-        pending: ['Claude', 'Codex'],
-      );
       clock = 12;
       buf.clear();
       p.providerDone('Claude', true);
@@ -140,57 +134,59 @@ void main() {
         elapsedSeconds: 12,
         pending: ['Codex'],
       );
-      // Clears the prior status line with CR + spaces + CR (no VT escape),
-      // commits the done line, then repaints the shorter status line.
+      // Clears the prior status line with CSI K, commits the done line, then
+      // repaints the shorter status line.
       expect(
         buf.toString(),
-        '\r${' ' * initialStatus.length}\r$doneLine\n$newStatus',
+        '\r\x1b[K$doneLine\n$newStatus',
       );
     });
 
-    test('stop erases the live status line and leaves no trailing escape', () {
+    test('a quiet stop leaves one summary and clears with CSI K', () {
       final buf = StringBuffer();
       final p = FleetProgress(
         sink: buf,
-        pending: ['Claude'],
+        pending: ['Claude', 'Codex'],
         elapsedSeconds: () => 0,
       );
       p.start();
-      final status = fleetProgressLine(
-        spinner: fleetSpinnerFrame(0),
-        done: 0,
-        total: 1,
-        elapsedSeconds: 0,
-        pending: ['Claude'],
-      );
+      p.providerDone('Claude', true);
+      p.providerDone('Codex', false);
       buf.clear();
       p.stop();
-      expect(buf.toString(), '\r${' ' * status.length}\r');
-      expect(buf.toString(), isNot(contains('\x1B')));
+      expect(
+        buf.toString(),
+        '\r\x1b[Kread 2 providers in 0 s: 1 live, 1 no data\n',
+      );
+      expect(buf.toString(), isNot(contains('Claude')));
     });
 
-    test('a color styler wraps every line but clearing stays visible-width',
-        () {
+    test('a status line wider than the terminal is truncated', () {
+      final buf = StringBuffer();
+      final p = FleetProgress(
+        sink: buf,
+        pending: ['Claude', 'Codex', 'Grok', 'Antigravity'],
+        elapsedSeconds: () => 0,
+        columns: () => 40,
+      );
+      p.start();
+      final status = buf.toString().split('\n').last;
+      expect(status.length, lessThan(40));
+    });
+
+    test('a color styler wraps the summary and CSI K clears the status', () {
       final buf = StringBuffer();
       final p = FleetProgress(
         sink: buf,
         pending: ['Claude'],
         elapsedSeconds: () => 0,
         dim: (s) => '<$s>',
+        verbose: true,
       );
       p.start();
       buf.clear();
       p.stop();
-      // The clear width tracks the raw (unstyled) status length, so a styled
-      // line does not leave residual characters behind.
-      final rawStatus = fleetProgressLine(
-        spinner: fleetSpinnerFrame(0),
-        done: 0,
-        total: 1,
-        elapsedSeconds: 0,
-        pending: ['Claude'],
-      );
-      expect(buf.toString(), '\r${' ' * rawStatus.length}\r');
+      expect(buf.toString(), '\r\x1b[K');
     });
   });
 }

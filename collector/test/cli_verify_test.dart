@@ -630,7 +630,8 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('[live, authoritative, quota plan, captured'));
+    expect(out, contains('[authoritative, quota plan, captured'));
+    expect(out, isNot(contains('[live, authoritative')));
   });
 
   test('verify human output labels truthful read failures', () async {
@@ -643,7 +644,9 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('[error, authoritative, quota plan, captured'));
+    expect(out, contains('ERROR'));
+    expect(out, contains('[authoritative, quota plan, captured'));
+    expect(out, isNot(contains('[error, authoritative')));
     expect(out, contains('read_or_reason'));
     expect(out, contains('simulated signed-out state'));
     expect(out, contains('HONEST'));
@@ -661,8 +664,10 @@ void main() {
     final out = result.stdout as String;
     expect(
       out,
-      contains('[cached, authoritative, quota plan, captured 60m ago]'),
+      contains('[authoritative, quota plan, captured 60m ago]'),
     );
+    expect(out, contains('cached'));
+    expect(out, isNot(contains('[cached,')));
     expect(out, contains('stale_honesty'));
     expect(out, contains('simulated stale cache'));
     expect(out, contains('HONEST'));
@@ -741,7 +746,7 @@ void main() {
     expect(
       out,
       contains(
-        '[provider drift, authoritative, quota plan, captured 60m ago]',
+        '[authoritative, quota plan, captured 60m ago]',
       ),
     );
   });

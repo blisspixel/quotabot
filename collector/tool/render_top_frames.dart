@@ -141,6 +141,7 @@ void main(List<String> args) {
       clock: _clock,
       depth: depth,
       palette: paletteFromSpec(palette),
+      applyPalette: color && depth == ColorDepth.truecolor,
       updated: updated,
       sort: sort,
       selected: selected,
@@ -173,16 +174,16 @@ void main(List<String> args) {
       depth: ColorDepth.none,
       updated: '',
       sort: '');
-  render('demo-100-green',
+  render('demo-100-gruvbox',
       providers: demoFleet,
       suggestion: demoSuggestion,
       width: 100,
-      palette: 'green');
-  render('demo-100-synthwave',
+      palette: 'gruvbox');
+  render('demo-100-nord',
       providers: demoFleet,
       suggestion: demoSuggestion,
       width: 100,
-      palette: 'synthwave');
+      palette: 'nord');
   render('demo-100-selected',
       providers: demoFleet,
       suggestion: demoSuggestion,

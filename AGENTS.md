@@ -200,7 +200,9 @@ for that surface.
     explicitly to admit credit-backed or paid catalog entries. Pass
     `use_expiring_quota: true` to let a measured quota-backed
     model beat local only when local analytics project meaningful included quota
-    would otherwise expire unused soon.
+    would otherwise expire unused soon. When no generation model meets the
+    filter, `excluded` lists up to 20 `{model, provider, gate}` items and is
+    omitted when empty. The human `reason` names the first model and gate.
   - Resource `quotas://current` - the same unfiltered live snapshot.
   - Resource `quotas://alerts` - the last MCP quota alerts fired by the
     subscription loop.
@@ -226,7 +228,11 @@ for that surface.
   `--exclude=A,B` to quota-reading commands after `--profile` when one request
   should avoid specific providers. Add `--use-expiring-quota` to a profiled
   `suggest` call only when you want soon-resetting included quota to outrank
-  local capacity.
+  local capacity. Human doctor, suggest, and top share one route line
+  (`next  Provider  79% free`). JSON `reason` and `explanation` stay unchanged.
+  `quotabot theme` lists, installs, updates, or removes a desktop color theme.
+  Install copies only regular toml files from a shallow git clone and does not
+  read prompts or quota.
 - **Push alerts.** `quotabot watch --json` streams a `quotabot.alert.v1` line
   the moment a provider's binding window goes red, naming where to route next, so
   a long-running agent can react to a crossing instead of polling. Add

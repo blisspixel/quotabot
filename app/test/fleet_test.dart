@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/fleet.dart';
+import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
@@ -39,10 +40,8 @@ List<HeadroomBucket> _buckets(double base) {
   return out;
 }
 
-Color _defaultPaletteColor(num remaining) {
-  final rgb = kDefaultPalette.rgbFor(remaining.toDouble());
-  return Color.fromARGB(0xFF, rgb.r, rgb.g, rgb.b);
-}
+AppChromeTheme get _darkChrome =>
+    AppChromeTheme.forSpec(Brightness.dark, appThemeDark);
 
 List<HeadroomBucket> _scheduleBuckets() {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -949,9 +948,13 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  test('fleetColor maps the shared collector palette scale', () {
-    for (final remaining in [80, 30, 5, 0]) {
-      expect(fleetColor(remaining), _defaultPaletteColor(remaining));
-    }
+  test('fleetColor maps theme status stops', () {
+    final theme = _darkChrome;
+    expect(fleetColor(100), theme.success);
+    expect(fleetColor(50), theme.warning);
+    expect(fleetColor(25), theme.caution);
+    expect(fleetColor(0), theme.error);
+    expect(fleetColor(80), theme.headroom(80));
+    expect(theme.chart, hasLength(6));
   });
 }

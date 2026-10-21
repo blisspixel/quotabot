@@ -494,7 +494,10 @@ can select credit-backed or paid catalog entries.
 
 `quotabot suggest --json` with a model profile and MCP `suggest_model` emit
 `quotabot.suggest_model.v1` with `schema`, `generated_at`, `budget_policy`,
-optional `recommended`, `reason`, and ranked model candidates. When the caller
+optional `recommended`, `reason`, and ranked model candidates. When every
+generation model misses a requirement filter, optional `excluded` lists up to
+20 `{model, provider, gate}` items and `reason` names the first model and gate.
+The field is omitted when it would be empty. When the caller
 uses the unrestricted `any` policy and included quota is not proven, the reason
 states that fact. When the caller
 opts into expiring-quota routing, the response adds `use_expiring_quota`,

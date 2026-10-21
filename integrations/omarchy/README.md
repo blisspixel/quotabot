@@ -62,14 +62,24 @@ is not given a remaining percent. A stale snapshot keeps the last trusted
 percent and says `stale`. A provider that fails without last-trusted windows
 stays in the list as `unknown`. If the CLI times out, exits nonzero, or
 returns invalid JSON, the previous display file is kept and `read_ok` becomes
-false. The meters are not replaced with zeros.
+false. That failure records `read_failed_at` and does not advance
+`generated_at`, `snapshot_as_of`, or `suggestion_as_of`. The meters are not
+replaced with zeros.
+
+The stored file keeps the freshness from the moment quotabot wrote it. On
+load, including a shell restart before the next refresh, the widget ages that
+file from the original capture times. A `live` row older than 900 seconds,
+missing a capture time, or more than 120 seconds ahead of the clock is shown
+as `stale` with its last percent. Drift and unknown do not change. The
+default refresh interval is 900 seconds and can be changed with the widget
+setting `refreshIntervalSec` (30 through 3600). A rendered Quickshell panel
+was not part of the fixture check.
 
 The bar button shows the recommendation's remaining percent, or `qb` when
-that percent is unknown or drifted. Left click opens the panel. Middle click
+that percent is unknown or drifted. The tooltip names the aged freshness and,
+when known, how old the evidence is. Left click opens the panel. Middle click
 or the panel's Refresh line runs the collector again. Right click does
-nothing. The panel does not switch accounts. A shell restart loads the same
-file before the next timed refresh. The default interval is 900 seconds and
-can be changed with the widget setting `refreshIntervalSec` (30 through 3600).
+nothing. The panel does not switch accounts.
 
 ## Install on Omarchy 4.0.4
 

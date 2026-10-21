@@ -4,12 +4,15 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'windows-build-prereqs.ps1')
 
 Assert-QuotabotGateVersions `
-  -FlutterVersion '3.44.6' -DartVersion '3.12.2' -PythonVersion '3.13.15'
+  -FlutterVersion '3.44.6' -DartVersion '3.12.2' -PythonVersion '3.14.7'
+Assert-QuotabotGateVersions `
+  -FlutterVersion '3.44.6' -DartVersion '3.12.2' -PythonVersion '3.14.0'
 foreach ($versions in @(
-    @('3.44.5', '3.12.2', '3.13.15'),
-    @('3.44.6', '3.12.1', '3.13.15'),
-    @('3.44.6', '3.12.2', '3.14.0'),
-    @('3.44.6', '3.12.2', '3.13.0rc1'))) {
+    @('3.44.5', '3.12.2', '3.14.7'),
+    @('3.44.6', '3.12.1', '3.14.7'),
+    @('3.44.6', '3.12.2', '3.13.15'),
+    @('3.44.6', '3.12.2', '3.15.0'),
+    @('3.44.6', '3.12.2', '3.14.0rc1'))) {
   $rejected = $false
   try {
     Assert-QuotabotGateVersions `
