@@ -4,26 +4,27 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.11.16.
+The current verified stable release is 0.11.17.
 
-Version [0.11.16](https://github.com/blisspixel/quotabot/releases/tag/v0.11.16) names a
-hand-extracted desktop bundle whose embedded version differs from the CLI,
-including the path, a shipped archive name, and the checksum and extract steps.
-That copy stays in place. The desktop dialog uses the installed CLI version.
-Managed desktop updates from 0.11.15 remain: an existing managed desktop updates
-to the same tag, and a running managed tray reopens after the swap. Fresh
-installs stay CLI-only. Earlier quota-readiness and bounded MCP contracts remain
-in effect. See the
+Version [0.11.17](https://github.com/blisspixel/quotabot/releases/tag/v0.11.17) shares one
+human route line across doctor, suggest, and top, reads desktop theme files,
+and adds gemini-4-argon to the Antigravity catalog. CI defaults to Python
+3.14. Python 3.15 stays blocked. The Omarchy bar ages a stored display on
+load and shows an old live row as stale with its last percent. A rendered
+Quickshell panel was not run. The 0.11.16 hand-extracted desktop notice
+remains: that copy stays in place, and the desktop dialog uses the installed
+CLI version. Managed desktop updates from 0.11.15 remain. Earlier
+quota-readiness and bounded MCP contracts remain in effect. See the
 [changelog](../CHANGELOG.md) and
 [quality review](research/2026-10-11-next-quality-review.md).
 
-The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/38438538062),
-[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/38445193196), and
-[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/38460041381).
+The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/39681035175),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/39687026307), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/39694171558).
 The immutable fourteen-asset set contains four CLI and three desktop
 archive/checksum pairs. Publication verified exact workflow provenance and
 fresh downloads. Unpinned Latest smoke covers clean install, upgrade from
-0.11.15, persistent state, source setup, and stable-channel resolution on
+0.11.16, persistent state, source setup, and stable-channel resolution on
 Windows, macOS, and Linux. Desktop checks verify Windows/Linux startup and
 the installed macOS bundle.
 
