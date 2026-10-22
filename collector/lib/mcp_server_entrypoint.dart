@@ -24,9 +24,10 @@ const defaultMcpShutdownDrainTimeout = Duration(seconds: 5);
 const maxMcpStdioMessageBytes = 256 * 1024;
 
 /// MCP server exposing AI subscription quota as a primitive other agents can
-/// query before routing work. Communicates over stdio, speaks MCP 2025-11-25
-/// (tool annotations plus output schemas via mcp_dart), and every tool runs the
-/// same metadata reads as the collector and costs no usage tokens.
+/// query before routing work. Communicates over stdio. Legacy clients still
+/// initialize through MCP 2025-11-25. A 2026-07-28 client can discover and call
+/// tools without that handshake. Every tool runs the same metadata reads as
+/// the collector and costs no usage tokens.
 ///
 /// All tool shapes, schemas, and behavior live in `lib/mcp.dart`; this is a thin
 /// wiring shell that supplies the live snapshot and burn sources.

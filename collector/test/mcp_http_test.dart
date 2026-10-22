@@ -92,9 +92,14 @@ Future<_Harness> _start({
   }
 }
 
-Future<McpClient> _connect(Uri uri, {String token = _token}) async {
+Future<McpClient> _connect(
+  Uri uri, {
+  String token = _token,
+  McpProtocol protocol = McpProtocol.stable,
+}) async {
   final client = McpClient(
     const Implementation(name: 'quotabot-http-test', version: '1.0.0'),
+    options: McpClientOptions(protocol: protocol),
   );
   final transport = StreamableHttpClientTransport(
     uri,
@@ -106,6 +111,52 @@ Future<McpClient> _connect(Uri uri, {String token = _token}) async {
   );
   await client.connect(transport);
   return client;
+}
+
+Map<String, String> _modernHeaders(
+  String method, {
+  String protocol = stableProtocolVersion,
+}) =>
+    {
+      HttpHeaders.authorizationHeader: 'Bearer $_token',
+      HttpHeaders.acceptHeader: 'application/json, text/event-stream',
+      HttpHeaders.contentTypeHeader: 'application/json',
+      'mcp-protocol-version': protocol,
+      'mcp-method': method,
+    };
+
+Map<String, Object?> _modernBody(
+  String method, {
+  String protocol = stableProtocolVersion,
+}) =>
+    {
+      'jsonrpc': '2.0',
+      'id': 1,
+      'method': method,
+      'params': {
+        '_meta': {
+          McpMetaKey.protocolVersion: protocol,
+          McpMetaKey.clientInfo: {
+            'name': 'direct-http-test',
+            'version': '1.0.0',
+          },
+          McpMetaKey.clientCapabilities: <String, Object?>{},
+        },
+      },
+    };
+
+Map<String, dynamic> _decodeMcpHttpBody(http.Response response) {
+  final body = response.body.trim();
+  if (body.startsWith('{')) {
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
+  final data = body
+      .split('\n')
+      .where((line) => line.startsWith('data:'))
+      .map((line) => line.substring(5).trim())
+      .where((line) => line.isNotEmpty && line != '[DONE]')
+      .last;
+  return jsonDecode(data) as Map<String, dynamic>;
 }
 
 Map<String, Object?> _initializeBody() => const {
@@ -492,7 +543,7 @@ void main() {
   test('bounds authenticated Streamable HTTP sessions', () async {
     final harness = await _start(maxSessions: 1);
     addTearDown(harness.stop);
-    final first = await _connect(harness.uri);
+    final first = await _connect(harness.uri, protocol: McpProtocol.legacy);
     addTearDown(first.close);
 
     final second = await http.post(
@@ -542,9 +593,9 @@ void main() {
   test('stopping multiple sessions tolerates their close callbacks', () async {
     final harness = await _start();
     addTearDown(harness.stop);
-    final first = await _connect(harness.uri);
+    final first = await _connect(harness.uri, protocol: McpProtocol.legacy);
     addTearDown(first.close);
-    final second = await _connect(harness.uri);
+    final second = await _connect(harness.uri, protocol: McpProtocol.legacy);
     addTearDown(second.close);
 
     await expectLater(harness.stop(), completes);
@@ -635,6 +686,102 @@ void main() {
         burnByProvider: (providers, now) => const <String, BurnStat>{},
       ),
       throwsArgumentError,
+    );
+  });
+
+  test('stateless HTTP serves discovery and tools without a session', () async {
+    final harness = await _start();
+    addTearDown(harness.stop);
+
+    final discovered = await http.post(
+      harness.uri,
+      headers: _modernHeaders(Method.serverDiscover),
+      body: jsonEncode(_modernBody(Method.serverDiscover)),
+    );
+    final discovery = _decodeMcpHttpBody(discovered);
+    expect(discovered.statusCode, HttpStatus.ok, reason: discovered.body);
+    expect(discovered.headers['mcp-session-id'], isNull);
+    final result = discovery['result'] as Map<String, dynamic>;
+    expect(result['supportedVersions'], contains(stableProtocolVersion));
+    expect(result['supportedVersions'], contains('2025-11-25'));
+    expect(result['cacheScope'], CacheScope.private);
+    expect(result['ttlMs'], 0);
+
+    final listed = await http.post(
+      harness.uri,
+      headers: _modernHeaders(Method.toolsList),
+      body: jsonEncode(_modernBody(Method.toolsList)),
+    );
+    final tools = _decodeMcpHttpBody(listed);
+    expect(listed.statusCode, HttpStatus.ok, reason: listed.body);
+    expect(listed.headers['mcp-session-id'], isNull);
+    final toolResult = tools['result'] as Map<String, dynamic>;
+    expect(toolResult['cacheScope'], CacheScope.private);
+    expect(toolResult['ttlMs'], 0);
+    expect(
+      (toolResult['tools'] as List<dynamic>)
+          .map((tool) => (tool as Map<String, dynamic>)['name']),
+      contains('list_quotas'),
+    );
+  });
+
+  test('a completed stateless request releases its session slot', () async {
+    final harness = await _start(maxSessions: 1);
+    addTearDown(harness.stop);
+
+    final first = await http.post(
+      harness.uri,
+      headers: _modernHeaders(Method.serverDiscover),
+      body: jsonEncode(_modernBody(Method.serverDiscover)),
+    );
+    expect(first.statusCode, HttpStatus.ok, reason: first.body);
+
+    final second = await http.post(
+      harness.uri,
+      headers: _modernHeaders(Method.toolsList),
+      body: jsonEncode(_modernBody(Method.toolsList)),
+    );
+    expect(second.statusCode, HttpStatus.ok, reason: second.body);
+    expect(second.headers['mcp-session-id'], isNull);
+  });
+
+  test('stateless HTTP rejects a mirrored header and an unknown version',
+      () async {
+    final harness = await _start();
+    addTearDown(harness.stop);
+
+    final mismatched = await http.post(
+      harness.uri,
+      headers: _modernHeaders(
+        Method.toolsList,
+        protocol: '2025-11-25',
+      ),
+      body: jsonEncode(_modernBody(Method.toolsList)),
+    );
+    final mismatchBody = _decodeMcpHttpBody(mismatched);
+    expect(mismatched.statusCode, HttpStatus.badRequest,
+        reason: mismatched.body);
+    expect(
+      (mismatchBody['error'] as Map<String, dynamic>)['code'],
+      ErrorCode.headerMismatch.value,
+    );
+
+    final unknown = await http.post(
+      harness.uri,
+      headers: _modernHeaders(
+        Method.toolsList,
+        protocol: '1999-01-01',
+      ),
+      body: jsonEncode(_modernBody(
+        Method.toolsList,
+        protocol: '1999-01-01',
+      )),
+    );
+    final unknownBody = _decodeMcpHttpBody(unknown);
+    expect(unknown.statusCode, HttpStatus.badRequest, reason: unknown.body);
+    expect(
+      (unknownBody['error'] as Map<String, dynamic>)['code'],
+      ErrorCode.unsupportedProtocolVersion.value,
     );
   });
 }

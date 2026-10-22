@@ -223,13 +223,17 @@ fresh-download checksum and provenance verification, and immutable publication.
 Published install smoke upgrades from 0.11.16. Source commit:
 `f0ce184bd614503c9027ae5d04d262e685d834e8`. Native interaction and account evidence remain separate.
 
-**Next compatibility increment:** the
+**Compatibility increment in source:** the server accepts MCP `2026-07-28`
+beside legacy initialization through `2025-11-25`, rechecked against the
+[July 28 specification](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
+on 2026-10-22. A connection that calls `initialize` stays on the legacy path.
+A metadata-bearing request can use `server/discover`, tools, resources, and
+`subscriptions/listen` without a session. Quota list and read results use
+private cache scope and a zero TTL. The
 [MCP and Agent Plugins review](docs/research/2026-09-13-mcp-agent-plugins.md)
-records modern protocol support in the upstream SDK. Release 0.11.13 takes SDK
-2.4.2's bounded input while deliberately retaining legacy initialization through
-2025-11-25; it does not implement `2026-07-28`. Implement the modern path against
-its separate transport/client matrix without dropping legacy clients. Native
-legacy launch and published install checks do not prove modern compatibility.
+records the earlier legacy-only probe. Installed harness clients and the four
+legacy native launch checks remain separate evidence. Those launch checks still
+pin `2024-11-05` through `2025-11-25`.
 
 **Build in this order**
 
@@ -346,11 +350,11 @@ legacy launch and published install checks do not prove modern compatibility.
    the actual transport or CLI entry point, supported version, OS/runtime
    boundary, model identifier mapping, spend class, and failure behavior. Pin
    the shipped `2025-11-25` protocol and verify legacy compatibility for each
-   harness while implementing the published `2026-07-28` revision through a
-   separate matrix covering stdio and authenticated loopback HTTP, discovery,
-   tools, schemas, cache scope, subscriptions, cancellation, bounded messages,
-   version errors, and shutdown. A stable SDK path is now available; the custom
-   HTTP admission and subscription integration still need explicit adaptation.
+   harness. The server now also accepts the published `2026-07-28` revision for
+   stdio and authenticated loopback HTTP, including discovery, tools, private
+   cache scope, independent subscriptions, version errors, and header mismatches.
+   Installed-client proof for that revision remains open. A stable SDK path is
+   in use at 2.4.2; do not treat a later SDK release as behavior-neutral.
    Package the same advice in the portable
    [Agent Plugins format](integrations/agent_plugin/) where a client supports
    it, with a shipped `quotabot mcp` entrypoint and explicit credential and
@@ -1268,15 +1272,14 @@ can be biased. Relevant methods are summarized in
 
 The [`2026-07-28` MCP specification was published on July 28](https://blog.modelcontextprotocol.io/posts/2026-07-28/).
 The stateless core changes initialization, sessions, discovery, and request
-metadata. quotabot currently implements `2025-11-25`; documentation must not
-call that the latest revision or imply support for the new wire contract.
+metadata. Source now accepts that revision beside `2025-11-25`. Documentation
+must not call an installed harness client modern until that client is tested.
+The four legacy native launch checks remain the legacy proof.
 
-The harness work in [Next](#next) must verify legacy compatibility now and
-implement a dual-version matrix against supported Dart SDK and client releases.
-Preserve existing clients while validating discovery, subscriptions, caching,
-authorization, and JSON Schema on the new path. Trace metadata stays
-content-free. Continue that matrix after stabilization whenever dependencies
-or supported harness versions change.
+The harness work in [Next](#next) must keep legacy compatibility and carry the
+dual-version matrix through installed clients. Preserve existing clients.
+Trace metadata stays content-free. Continue that matrix after stabilization
+whenever dependencies or supported harness versions change.
 
 ### P1. Model quota as a typed shared pool
 

@@ -5,6 +5,15 @@ Reviewed 2026-09-13 against quotabot 0.11.5 at
 [ROADMAP.md](../../ROADMAP.md#next) owns execution order. This report records
 verified behavior, primary sources, and requirements for the compatibility work.
 
+## Later source change
+
+Rechecked 2026-10-22. The modern `server/discover` row below records the 0.11.5
+server, which rejected discovery before initialization. Unreleased source now
+accepts MCP `2026-07-28` beside legacy initialization through `2025-11-25`.
+That change does not replace the September native-launch results, and it does
+not prove an installed harness client. The Dart SDK pin remains 2.4.2. The
+table's lock note of 2.2.2 is the September baseline.
+
 ## Current versions and their meaning
 
 | Surface | Current evidence | Quotabot consequence |
@@ -56,6 +65,10 @@ access to a user's real account.
 
 ## Required modern protocol integration
 
+The source increment in CHANGELOG Unreleased follows the server-side list
+below. The September text remains the requirement record. It does not claim
+that TypeScript or Python client SDKs, or any installed harness, were exercised.
+
 The [July change list](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
 requires more than accepting a new version string. Add `server/discover`,
 per-request version and capability metadata, required result discriminators,
@@ -66,9 +79,10 @@ Discovery is optional for clients: an ordinary modern request must also work
 before `server/discover`. Every request declares its version and capabilities;
 do not replace mandatory initialization with mandatory discovery.
 
-`collector/lib/mcp_http.dart` currently admits a request without a session only
-when it is `initialize`, and constructs a server during session initialization.
-That boundary must accommodate stateless requests explicitly. Preserve bearer,
+On 2026-09-13, `collector/lib/mcp_http.dart` admitted a request without a
+session only when it was `initialize`, and constructed a server during session
+initialization. That boundary had to accommodate stateless requests explicitly.
+Preserve bearer,
 host and origin checks, body deadlines, size and concurrency bounds, and
 shutdown ownership before delegating protocol handling to the SDK.
 
@@ -85,7 +99,7 @@ their existing timestamps. The protocol's cacheable operations include
 discovery, catalogs, and `resources/read`, not `tools/call`; do not add invented
 tool cache fields. See the [caching contract](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/caching).
 
-The current subscription hub uses a URI set and a shared callback. Modern
+The September subscription hub used a URI set and a shared callback. Modern
 listeners need separate IDs, accepted URI subsets, delivery, and cancellation.
 Cancelling one overlapping subscription must leave the other alive; closing
 the last listener stops polling. Reuse the existing alert loop with explicit

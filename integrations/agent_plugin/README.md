@@ -117,17 +117,17 @@ may support skills without supporting this stdio transport. This package makes
 no Agent Plugins loading claim for pi, OpenCode, or managed NemoClaw; their
 separate [harness recipes](https://github.com/blisspixel/quotabot/tree/main/integrations/harnesses) still apply.
 
-quotabot currently uses legacy MCP `2025-11-25` initialization. The client must
-retain that negotiation path. The final MCP `2026-07-28` lifecycle is a separate
-protocol change that this package does not implement. Agent Plugins 1.0.0 has
-no portable protocol-version override, so no unsupported field is added to
-`mcp.json`.
+The quotabot server accepts MCP `2026-07-28` beside legacy initialization
+through `2025-11-25`. This package's launch checks still negotiate each
+published legacy revision from `2024-11-05` through `2025-11-25`. Agent
+Plugins 1.0.0 has no portable protocol-version override, so no unsupported
+field is added to `mcp.json`. Those launch checks do not establish
+`2026-07-28` support, and installed clients were not retested.
 
 The current Agent Plugins specification remains 1.0.0, and both vendored
 schemas matched the canonical published bytes on 2026-09-13. Package format,
 MCP protocol revision, and installed-client loading are separate compatibility
-checks. Native bundle tests negotiate each published legacy revision from
-`2024-11-05` through `2025-11-25`; they do not establish `2026-07-28` support.
+checks.
 
 ## Use the advice
 

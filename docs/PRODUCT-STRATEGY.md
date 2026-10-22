@@ -247,14 +247,19 @@ classify expected inclusion, but it cannot prove what remains in an account now.
 ### MCP now requires an explicit revision compatibility plan
 
 The final MCP `2026-07-28` revision was published on July 28. Its stateless core
-replaces the initialization handshake and transport sessions, with new discovery,
-request metadata, caching, and authorization behavior. quotabot still implements
-the `2025-11-25` contract. Preserve that working path and verify each named
-harness's legacy compatibility while preparing a tested dual-version migration
-against supported Dart and client SDKs. Publication of a standard alone is not
-evidence that the installed server implements it.
+changes initialization, sessions, discovery, request metadata, and caching.
+Unreleased source accepts that revision beside the `2025-11-25` contract. A
+connection that calls `initialize` stays on the legacy path. A metadata-bearing
+request can discover, call tools, read resources, and open `subscriptions/listen`
+without a session. Quota list and read results use private cache scope and a
+zero TTL. Preserve the legacy path and verify each named harness. Installed
+clients and the four legacy launch checks remain separate evidence. Publication
+of a standard, or a passing in-process test, is not evidence that an installed
+harness speaks the new revision.
 
-Source: [MCP 2026-07-28 final release, checked 2026-09-04](https://blog.modelcontextprotocol.io/posts/2026-07-28/).
+Source: [MCP 2026-07-28 final release, checked 2026-09-04](https://blog.modelcontextprotocol.io/posts/2026-07-28/),
+rechecked against the [July 28 specification](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
+on 2026-10-22.
 
 MCP tool annotations affect client approval and retry behavior. Current MCP
 guidance treats `readOnlyHint` as a signal that a client may skip confirmation,
