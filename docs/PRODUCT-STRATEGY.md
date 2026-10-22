@@ -329,8 +329,9 @@ evidence, versions, and uncertainty. The rationale for the order is:
 A signed-in account that cannot be discovered and a stale machine that cannot
 refresh its quota both undermine the default recommendation. Establish a
 supported Claude metadata integration before expanding token discovery or new
-grants. A credential-free status-line projection needs original response age
-and account isolation; session-fed evidence cannot prove idle-machine freshness.
+grants. The opt-in status-line projection records local observation time
+because the payload has no provider response timestamp, and it stays isolated
+from the OAuth account. Session-fed evidence cannot prove idle-machine freshness.
 After permission is established, validate supported native credential sources
 and collect dated two-machine evidence across expiry. Deterministic tests prove
 implemented recovery behavior; a real account cross-check separately establishes

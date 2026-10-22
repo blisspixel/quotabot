@@ -225,6 +225,24 @@ PROV-DM conformance.
   this recent live evidence from stale fallback. A shared read makes no usage
   or companion-profile request and adds no analytics sample.
 
+- Opt-in session projection, checked 2026-10-22 against the
+  [Claude Code status-line contract](https://code.claude.com/docs/en/statusline):
+  `quotabot claude-status` reads one JSON payload from stdin and writes
+  `quotabot/projections/claude_status.json`. The allowlist is
+  `rate_limits.five_hour` and `rate_limits.seven_day`, each with
+  `used_percentage` and `resets_at`, plus the local time those values were
+  first observed. Gateway `spend_limit` is not a plan window. Any other
+  `rate_limits` key rejects the payload and leaves the previous file unchanged.
+  Transcripts, paths, cost, context, model, and session identifiers are dropped
+  before the write. Stdin is limited to 64 KiB. A payload with no `rate_limits`
+  object does not erase a previous file. A present `rate_limits` object with no
+  current plan window deletes the file. Repeated identical values do not refresh
+  the observation time. A reset at or before the local clock, or farther ahead
+  than the documented window plus ten minutes, is not stored as capacity.
+  Quota collection, routing, and the OAuth account cache do not read this file.
+  It is not `authoritative_live` and it does not prove idle-machine freshness.
+  The command does not write `~/.claude` and does not launch claude.
+
 - Source: `GET https://api.anthropic.com/api/oauth/usage`, with a companion
   `GET https://api.anthropic.com/api/oauth/profile` metadata read using the same
   credential when current account-pool or plan evidence is needed. Both are

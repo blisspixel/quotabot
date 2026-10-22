@@ -4,6 +4,11 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- Add opt-in `quotabot claude-status`. It stores documented Claude Code
+  status-line plan windows in a quotabot-owned file and drops every other
+  field. The projection is session-fed, is not account-wide, and is not a
+  routing input.
+
 ## 0.11.17 - 2026-10-20
 
 - Human doctor, suggest, and top share one route line. A stale or drifted

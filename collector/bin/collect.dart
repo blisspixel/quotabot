@@ -12,6 +12,7 @@ import 'package:quotabot_collector/auth/provider_disconnect.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/cache.dart';
+import 'package:quotabot_collector/claude_session_projection.dart';
 import 'package:quotabot_collector/cli_layout.dart';
 import 'package:quotabot_collector/collect_progress.dart';
 import 'package:quotabot_collector/collector.dart';
@@ -710,6 +711,9 @@ Future<void> _runMain(List<String> rawArgs) async {
     case 'calibration':
       await _runCalibration(wantsJson, profile, excludedProviders);
       return;
+    case 'claude-status':
+      await _runClaudeStatus(flags, wantsJson);
+      return;
     case 'explain':
       _runExplain(flags, wantsJson, profile, excludedProviders);
       return;
@@ -749,6 +753,9 @@ Future<void> _runMain(List<String> rawArgs) async {
     return;
   }
   if (cmd.isEmpty || cmd == 'status' || cmd == 'doctor') {
+    final sessionProjection = cmd == 'doctor' && !_usingSimulation
+        ? claudeStatusDoctorJson(nowEpoch())
+        : null;
     wantsJson
         ? print(_jsonPretty({
             ..._snapshot(results, incidentInventory, profile),
@@ -756,6 +763,8 @@ Future<void> _runMain(List<String> rawArgs) async {
               'providers': results
                   .map((q) => doctorProviderJson(q, nowEpoch()))
                   .toList(),
+            if (sessionProjection != null)
+              'claude_session_projection': sessionProjection,
           }))
         : _printDoctor(
             results,
@@ -1015,6 +1024,7 @@ bool _isKnownCommand(String command) =>
 const _knownCommands = {
   'calibration',
   'check',
+  'claude-status',
   'doctor',
   'explain',
   'hide',
@@ -1762,6 +1772,7 @@ const _switchOptions = {
   '--require-reasoning',
   '--require-tools',
   '--require-vision',
+  '--show',
   '--stable',
   '--truecolor',
   '--tuned-burn',
@@ -1808,6 +1819,7 @@ String? _commandOptionError(String command, Set<String> flags) {
   const jsonCommands = {
     '',
     'status',
+    'claude-status',
     'doctor',
     'json',
     'check',
@@ -1827,6 +1839,7 @@ String? _commandOptionError(String command, Set<String> flags) {
   };
   final allowed = <String>{'color', 'no-color'};
   if (jsonCommands.contains(command)) allowed.add('json');
+  if (command == 'claude-status') allowed.add('show');
   if (_usesQuotaRead(command)) {
     allowed.addAll(const {'profile', 'exclude'});
     if (command != 'explain') {
@@ -2666,6 +2679,90 @@ void _printThemeHelp() {
   _helpLine('built-in themes.');
 }
 
+Future<void> _runClaudeStatus(Set<String> flags, bool wantsJson) async {
+  final show = flags.contains('--show');
+  if (claudeStatusShouldShowHelp(
+    show: show,
+    stdinIsTerminal: _stdinIsTerminal(),
+  )) {
+    _printClaudeStatusHelp();
+    return;
+  }
+  final result = await runClaudeStatusCommand(
+    show: show,
+    asJson: wantsJson,
+    stdin: stdin,
+    now: nowEpoch(),
+  );
+  if (result.stdoutText.isNotEmpty) stdout.writeln(result.stdoutText);
+  if (result.stderrText.isNotEmpty) stderr.writeln(result.stderrText);
+  if (result.exitCode != 0) exitCode = result.exitCode;
+}
+
+bool _stdinIsTerminal() {
+  try {
+    return stdin.hasTerminal;
+  } catch (_) {
+    return false;
+  }
+}
+
+void _printClaudeStatusHelp() {
+  _helpLine('quotabot claude-status');
+  _helpLine('');
+  _helpLine(
+    'Read a Claude Code status-line JSON payload on stdin and store only the',
+  );
+  _helpLine(
+    'documented five-hour and seven-day plan windows. The command prints one',
+  );
+  _helpLine('status line and does not collect quota.');
+  _helpLine('');
+  _helpLine('  quotabot claude-status');
+  _helpLine('  quotabot claude-status --show');
+  _helpLine('  quotabot claude-status --show --json');
+  _helpLine('');
+  _helpLine(
+    'Point Claude Code at the command yourself. quotabot does not write',
+  );
+  _helpLine('~/.claude and does not launch claude. Example settings:');
+  _helpLine('');
+  _helpLine(
+    '  "statusLine": { "type": "command", "command": "quotabot claude-status" }',
+  );
+  _helpLine('');
+  _helpLine(
+    'Kept fields are rate_limits.five_hour and rate_limits.seven_day',
+  );
+  _helpLine(
+    '(used_percentage and resets_at) plus the local time those values were',
+  );
+  _helpLine(
+    'first observed. Transcripts, paths, cost, context, model, session',
+  );
+  _helpLine(
+    'identifiers, and gateway spend limits are dropped before the file is',
+  );
+  _helpLine('written. Stdin is limited to 64 KiB.');
+  _helpLine('');
+  _helpLine(
+    'The stored file is session-fed evidence for this machine. It is not an',
+  );
+  _helpLine(
+    'account, not authoritative_live, and not a routing input. The same window',
+  );
+  _helpLine(
+    'values do not refresh the observation time. A window at or past resets_at',
+  );
+  _helpLine(
+    'is omitted. A payload with no rate_limits object leaves a previous file',
+  );
+  _helpLine(
+    'in place. This does not prove idle-machine freshness. Exit 1 means the',
+  );
+  _helpLine('payload or stored file could not be used. Nothing is written.');
+}
+
 void _printHelp([String? command]) {
   switch (command) {
     case 'mcp':
@@ -2683,6 +2780,9 @@ void _printHelp([String? command]) {
     case 'theme':
       _printThemeHelp();
       return;
+    case 'claude-status':
+      _printClaudeStatusHelp();
+      return;
   }
 
   String head(String s) => style.bold(s);
@@ -2696,6 +2796,9 @@ void _printHelp([String? command]) {
   _helpLine(head('SEE QUOTA'));
   _helpLine(
     '  status, doctor      every provider, its windows and resets (default)',
+  );
+  _helpLine(
+    '  claude-status       project a Claude Code status line into local evidence',
   );
   _helpLine(
     '  hide <provider>     keep a cancelled subscription off the default view',
@@ -4244,6 +4347,17 @@ void _printDoctor(
           '--recover-analytics=${incident.provider} '
           '--account=EXACT_ACCOUNT --tier=$tier',
         );
+      }
+    }
+  }
+
+  // Session projection is local display evidence. It stays out of the route.
+  if (!_usingSimulation) {
+    final projectionLines = claudeStatusDoctorLines(now);
+    if (projectionLines.isNotEmpty) {
+      stdout.writeln('');
+      for (final line in projectionLines) {
+        _humanLine(line);
       }
     }
   }

@@ -115,10 +115,13 @@ The October 12 primary-policy review supersedes the earlier unconditional
 Keychain-discovery priority: defer expanded token discovery and new OAuth/grant
 work until a supported metadata authentication path or provider confirmation
 exists. Existing metadata-only behavior is described, not certified as permitted.
-Research a user-configured projection of documented status-line quota fields
-without credentials, host-setting writes, or requests to populate them. Resolve
-provider capture age, missing windows, and account binding before routing; this
-session-fed alternative does not prove idle-machine freshness. Extend
+`quotabot claude-status` is an opt-in projection of documented status-line
+plan windows. It stores those windows in a quotabot-owned file, keeps the
+local time the values were first observed, and drops every other field. It
+does not write host settings, launch claude, merge into the OAuth account
+cache, or enter routing. The payload has no provider response time and no
+account id, so age and account binding stay in front of routing. This
+session-fed file does not prove idle-machine freshness. Extend
 successful-read sharing to another provider only after proving its credential and
 account identity seam; profile settings and unproven account sharing are deferred.
 
@@ -129,7 +132,7 @@ Use these concrete increments to assess progress:
 | Increment | User outcome | Acceptance boundary |
 |---|---|---|
 | Bounded MCP maintenance, released 0.11.13 | A malformed stdio peer cannot buffer an unlimited frame; existing clients keep working. | SDK 2.4.2, explicit legacy mode, 256 KiB UTF-8 ceiling, incomplete-frame closure, no post-overflow dispatch, subscription delivery and cancellation, four legacy revisions, client fallback, independent review, full gates and published install smoke. |
-| Supported Claude quota integration | A signed-in user can see clearly scoped quota through a permitted integration. | First establish a supported metadata path or provider confirmation before expanding token handling. Research a credential-free status-line projection with original response age and account isolation. If credential discovery is permitted, require one bounded path for collection and cache identity, native storage evidence, replacement/disconnect tests, and no host writes or guessed plan dates. |
+| Supported Claude quota integration | A signed-in user can see clearly scoped quota through a permitted integration. | Credential discovery stays deferred until a supported metadata path or provider confirmation exists. The opt-in status-line projection stores only documented plan windows, keeps the local observation time, and isolates that file from the OAuth account cache. It is not authoritative and does not route. Idle-machine proof remains a separate gate. If credential discovery is later permitted, require one bounded path for collection and cache identity, native storage evidence, replacement/disconnect tests, and no host writes or guessed plan dates. |
 | Idle-machine account truth | The quota view stays current when work happens on another machine. | A provider-permitted refresh path plus sanitized two-machine comparison across credential expiry; original capture/reset scope visible; host files unchanged; no collection inference. Session-fed status-line evidence alone cannot satisfy this gate. |
 | Positive execution scope | A stronger local-only choice explains where execution is proven. | Producer plus endpoint-scope evidence, direct/forwarded/WSL/LM Link/composite cases; unknown stays unknown; loaded context and advertised maximum remain separate. |
 | Modern MCP compatibility | Current clients can use the modern wire path without losing older clients. | Separate stdio and authenticated HTTP matrix for discovery-free calls, mirrored metadata, private cache scope, independent subscriptions, cancellation, bounds, and shutdown against exact clients. |
@@ -239,8 +242,9 @@ legacy launch and published install checks do not prove modern compatibility.
    consumed while the non-prefixed Cloud Code Assist host still reported a
    full unused balance. Before expanding Claude credentials, establish a
    supported metadata authentication path or provider confirmation under the
-   current credential policy. Investigate a user-configured, credential-free
-   status-line quota projection with explicit age and account limits. The
+   current credential policy. The opt-in status-line projection is local
+   observation evidence with explicit age and account limits. It is not a
+   supported account read. The
    following host-discovery design is deferred until permission is established.
    The remaining storage gap is Claude on macOS: it can store its
    credentials only in the login Keychain, so a Keychain-only sign-in is

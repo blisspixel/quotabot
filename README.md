@@ -11,10 +11,11 @@ models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
 > **Current stable:** 0.11.17. quotabot remains under active 0.x development.
-> **Next:** confirm a supported Claude quota integration before expanding
-> credential discovery, prove account-wide freshness on idle machines through
-> a permitted path, and strengthen execution-scope evidence for local-only
-> advice. Native signing proceeds alongside product
+> **Next:** the opt-in Claude status-line projection is session-fed and is not
+> account or idle-machine proof. Confirm a supported Claude quota integration
+> before expanding credential discovery, prove account-wide freshness on idle
+> machines through a permitted path, and strengthen execution-scope evidence
+> for local-only advice. Native signing proceeds alongside product
 > development and remains a 1.0 release gate. See [roadmap Next](ROADMAP.md#next)
 > and the [documentation index](docs/README.md).
 
