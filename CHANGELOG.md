@@ -8,6 +8,11 @@ Notable changes to quotabot. Newest first.
   status-line plan windows in a quotabot-owned file and drops every other
   field. The projection is session-fed, is not account-wide, and is not a
   routing input.
+- Raise the hash-locked LiteLLM integration's certifi pin to 2026.10.19 and
+  its aiohttp pin to 3.14.5, which also moves yarl to 1.25.1. LiteLLM stays
+  at the clean 1.102.2 pin. The removed 1.107.0 wheel is not used.
+- Raise the MCP example lock's Hono package to 4.13.13 and its Node adapter
+  to 2.1.5. The MCP SDK pin stays 1.32.1.
 
 ## 0.11.17 - 2026-10-20
 

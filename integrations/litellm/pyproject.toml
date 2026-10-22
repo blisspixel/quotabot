@@ -2,7 +2,7 @@
 name = "quotabot-litellm-integration"
 version = "0.0.0"
 description = "LiteLLM routing integration and policy tests for quotabot"
-# Cap is litellm 1.106.1's own Requires-Python, checked 2026-10-20, and 3.15 waits on that upstream cap.
+# Cap is litellm's own Requires-Python. 1.102.2 and upstream 1.108.0 both declare <3.15, checked 2026-10-22. PyPI removed 1.107.0.
 requires-python = ">=3.11,<3.15"
 
 # Runtime dependency pins and hashes remain in requirements.in and
