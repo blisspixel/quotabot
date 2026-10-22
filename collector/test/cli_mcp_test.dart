@@ -416,6 +416,15 @@ void main() {
       // Fewer characters than the limit, but more UTF-8 bytes. Keep stdin open
       // so an unterminated frame cannot rely on EOF for rejection.
       final oversized = 'é' * (maxMcpStdioMessageBytes ~/ 2 + 1);
+      // The server closes the pipe once the frame exceeds the ceiling. Observe
+      // the SocketException on the writer. An unobserved done future becomes
+      // an unhandled asynchronous error after the process has already exited.
+      final stdinFinished = process.stdin.done.then<void>((void _) {},
+          onError: (Object error, StackTrace stack) {
+        if (error is! SocketException) {
+          Error.throwWithStackTrace(error, stack);
+        }
+      });
       process.stdin.write(oversized);
       if (terminated) {
         process.stdin.writeln();
@@ -426,7 +435,11 @@ void main() {
           'params': {'name': 'list_quotas'},
         }));
       }
-      await process.stdin.flush();
+      try {
+        await process.stdin.flush();
+      } on SocketException {
+        // The peer already closed the pipe.
+      }
       expect(
           await _exitWithin(process, const Duration(seconds: 10), errorLines,
               vmServiceInfo: vmServiceFiles[process.pid],
@@ -438,7 +451,12 @@ void main() {
       expect(errorLines, contains('fixture CLI main returned'));
       expect(collections, 0);
       expect(temp.listSync(), isEmpty);
-      await process.stdin.close();
+      try {
+        await process.stdin.close();
+      } on SocketException {
+        // Already closed by the peer.
+      }
+      await stdinFinished;
       // The process still must exit within ten seconds. The harness separately
       // allows bounded observation and teardown after that deadline fails.
     }, timeout: const Timeout(Duration(seconds: 45)));
