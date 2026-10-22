@@ -50,14 +50,17 @@ void setQuotabotDirOverrideForTesting(Directory? directory) {
   _quotabotDirOverrideForTesting = directory;
 }
 
-/// Per-user config/data base directory for quotabot, created if missing.
-Directory quotabotDir(String sub) {
+/// Per-user config/data base directory for quotabot.
+///
+/// [create] is false for a read that must not create an empty directory when
+/// the file is absent.
+Directory quotabotDir(String sub, {bool create = true}) {
   final base = _quotabotDirOverrideForTesting?.path ??
       Platform.environment['LOCALAPPDATA'] ??
       Platform.environment['XDG_CONFIG_HOME'] ??
       '${home()}/.config';
   final dir = Directory('$base/quotabot/$sub');
-  if (!dir.existsSync()) dir.createSync(recursive: true);
+  if (create && !dir.existsSync()) dir.createSync(recursive: true);
   return dir;
 }
 

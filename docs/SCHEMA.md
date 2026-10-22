@@ -15,6 +15,11 @@ omitted, as with other snapshot commands; `verify` reports registry coverage.
 `sign-in needed` is readiness without quota evidence. The normalized `ok`,
 `error`, `windows`, and `source_class` fields remain unchanged. An adapter's
 declared source class on a failed read does not establish measured quota.
+`doctor --json` may add `claude_session_projection` when a local Claude
+status-line projection file is present. The object is presentation only. It
+is omitted from `quotabot.v1` snapshots, suggestions, and MCP resources.
+`routing`, `account_bound`, and `idle_machine_proof` are false. An unreadable
+file sets `readable` to false and includes no windows.
 
 Version 0.11.13 preserves quota JSON schemas and the legacy MCP protocol while
 upgrading its SDK. MCP schema-invalid tool arguments return `isError: true`

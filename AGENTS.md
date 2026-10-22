@@ -290,6 +290,10 @@ current Max or Team Premium provider usage or profile metadata read with the
 same credential on or after the announced July 20, 2026 UTC policy boundary.
 Do not invoke `claude -p /usage` or
 `/quota`, because print mode is a prompt-execution surface.
+`quotabot claude-status` is an opt-in local projection of a Claude Code
+status-line payload. It is not a quota read, not `authoritative_live`, and
+not an input to `suggest`, `decide_now`, or MCP routing. Do not treat its
+percentages as the account balance.
 
 ## Decision recipe
 
