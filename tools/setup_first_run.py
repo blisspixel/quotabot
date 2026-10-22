@@ -84,6 +84,24 @@ def _has_current_measured_windows(provider: Mapping[str, Any], now: int) -> bool
     return True
 
 
+def _has_loopback_capacity(model: object) -> bool:
+    """True for a local model that is not already known to execute elsewhere.
+
+    `execution_location: unknown` and a missing field keep the loopback safety
+    net. A claimed `on_device` value is not extra proof. `remote`, a cloud
+    route, or an upstream declaration is not first-run local capacity.
+    """
+    if not isinstance(model, Mapping):
+        return False
+    if model.get("cloud_offloaded") is True:
+        return False
+    if model.get("execution_location") == "remote":
+        return False
+    if model.get("upstream_routing") in ("declared", "unresolved"):
+        return False
+    return True
+
+
 def _is_ready(provider: Mapping[str, Any], now: int) -> bool:
     if provider.get("ok") is not True:
         return False
@@ -102,10 +120,7 @@ def _is_ready(provider: Mapping[str, Any], now: int) -> bool:
         return (
             source_class == "local_runtime"
             and isinstance(models, list)
-            and any(
-                isinstance(model, Mapping) and model.get("cloud_offloaded") is not True
-                for model in models
-            )
+            and any(_has_loopback_capacity(model) for model in models)
         )
     if source_class == "status_only":
         return False

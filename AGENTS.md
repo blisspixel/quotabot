@@ -197,6 +197,9 @@ for that surface.
     provider fallback. Declared upstreams remain inspectable under `any` with
     execution location and cost unverified; unresolved entries are unavailable
     under every budget. Missing upstream evidence is not on-device proof.
+    Local models also carry `execution_location`: `remote` repeats a cloud or
+    upstream veto, and `unknown` keeps the loopback safety net. `unknown` is
+    not an on-device claim. No `on_device` value is emitted.
   - `suggest_model` - one concrete model for a task profile (same filter as
     `list_models`): available first, then local-runtime readiness, provider tier,
     and headroom. It defaults to `budget: "quota"`; pass `budget: "any"`

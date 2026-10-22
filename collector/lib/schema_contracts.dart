@@ -292,6 +292,10 @@ const quotabotV1JsonSchema = <String, Object?>{
           'type': 'string',
           'enum': UpstreamRouting.wireValues,
         },
+        'execution_location': {
+          'type': 'string',
+          'enum': ExecutionLocation.wireValues,
+        },
         'loaded': {'type': 'boolean'},
         'size_bytes': {'type': 'integer', 'minimum': 0},
         'vram_bytes': {'type': 'integer', 'minimum': 0},
@@ -913,6 +917,9 @@ void _validateModel(
   _checkStringEnum(model, 'upstream_routing', path,
       UpstreamRouting.wireValues.toSet(), errors,
       required: model.containsKey('upstream_routing'));
+  _checkStringEnum(model, 'execution_location', path,
+      ExecutionLocation.wireValues.toSet(), errors,
+      required: model.containsKey('execution_location'));
   _checkBool(model, 'loaded', path, errors, required: false);
   _checkNonNegativeInt(model, 'size_bytes', path, errors, required: false);
   _checkNonNegativeInt(model, 'vram_bytes', path, errors, required: false);

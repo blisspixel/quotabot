@@ -685,6 +685,9 @@ reasoning field. Missing or malformed declarations cannot satisfy a reasoning
 requirement, and capability support cannot override cloud, embedding, stale,
 context, or spend exclusions. LM Studio reasoning remains unadmitted while its
 LM Link execution location cannot be established from the model-list contract.
+Rechecked on 2026-10-22, that list still has no producer-device field.
+Normalized local models publish `execution_location` as `unknown` or `remote`
+only.
 Ollama exposes cloud-offloaded models through the local daemon with a `-cloud`
 tag suffix. Lemonade exposes configured cloud routes with `recipe: "cloud"` and
 `cloud_provider`. quotabot preserves either as `cloud_offloaded` and excludes it

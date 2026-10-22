@@ -162,6 +162,38 @@ class SetupFirstRunTests(unittest.TestCase):
         self.assertIn("Lemonade - no fresh quota evidence", output)
         self.assertNotIn("No extra login required", output)
 
+    def test_remote_execution_is_not_first_run_local_capacity(self) -> None:
+        claimed = provider(
+            "ollama",
+            name="Ollama",
+            source_class="local_runtime",
+            kind="local",
+            windows=[],
+        )
+        claimed["models"] = [
+            {"id": "llama", "local": True, "execution_location": "on_device"}
+        ]
+        remote = provider(
+            "lmstudio",
+            name="LM Studio",
+            source_class="local_runtime",
+            kind="local",
+            windows=[],
+        )
+        remote["models"] = [
+            {"id": "alias", "local": True, "execution_location": "remote"},
+            {
+                "id": "upstream",
+                "local": True,
+                "upstream_routing": "declared",
+            },
+        ]
+
+        output = render_first_run({"providers": [claimed, remote]}, now=NOW)
+
+        self.assertIn("Already live (no extra login): Ollama", output)
+        self.assertIn("LM Studio - no fresh quota evidence", output)
+
     def test_a_live_account_hides_a_sibling_login_for_the_same_provider(self) -> None:
         live = provider("claude", name="Claude")
         stale_login = provider(

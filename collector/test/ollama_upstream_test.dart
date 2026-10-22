@@ -607,6 +607,10 @@ void main() {
           ((modelSchema['properties'] as Map)['upstream_routing']
               as Map)['enum'],
           UpstreamRouting.wireValues);
+      expect(
+          ((modelSchema['properties'] as Map)['execution_location']
+              as Map)['enum'],
+          ExecutionLocation.wireValues);
     });
 
     test('unknown or malformed persisted enums fail closed', () {

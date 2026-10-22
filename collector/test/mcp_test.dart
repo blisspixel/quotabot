@@ -818,8 +818,10 @@ void main() {
       final unresolved = models
           .singleWhere((model) => model['id'] == 'unresolved-alias') as Map;
       expect(declared['upstream_routing'], 'declared');
+      expect(declared['execution_location'], 'remote');
       expect(declared['available'], isTrue);
       expect(unresolved['upstream_routing'], 'unresolved');
+      expect(unresolved['execution_location'], 'remote');
       expect(unresolved['available'], isFalse);
       for (final model in [declared, unresolved]) {
         expect(model, isNot(contains('local_readiness')));
@@ -887,6 +889,7 @@ void main() {
             ? (payload['models'] as List).single as Map
             : payload['recommended'] as Map;
         expect(model['loaded_state_known'], isFalse);
+        expect(model['execution_location'], 'unknown');
         expect(model, isNot(contains('loaded')));
         expect(model, isNot(contains('local_readiness')));
         expect(model['available'], isTrue);
@@ -965,6 +968,7 @@ void main() {
           'fit_available_bytes',
           'fit_total_bytes',
           'hardware_observed_at',
+          'execution_location',
           'drift_reason',
           'drift_observed_at',
         ]),

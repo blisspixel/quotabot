@@ -286,7 +286,12 @@ legacy launch and published install checks do not prove modern compatibility.
    Lemonade composites, require complete component scope rather than assuming
    `collection.router` is local. The bounded resolver shipped in 0.11.8 excludes
    cloud and unresolved components; positive producer identity remains open.
-   No routing-classifier or validation inference
+   As of 2026-10-22, local models publish `execution_location` as `unknown` or
+   `remote` only. `remote` repeats a cloud or upstream veto. `unknown` keeps
+   the loopback safety net. Loaded state, localhost, KV-cache GPU offload, and
+   a host GPU counter do not prove on-device execution, and no `on_device`
+   value is emitted. The current LM Studio model list still has no
+   producer-device field. No routing-classifier or validation inference
    belongs in a metadata probe.
 4. **Polish one consistent desktop language.** Build on the existing typography,
    theme and controls. Make the recommendation prominent, distinguish remaining

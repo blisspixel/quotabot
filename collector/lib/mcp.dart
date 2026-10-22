@@ -1131,19 +1131,22 @@ final _modelEntrySchema = JsonSchema.object(
     ),
     'hardware_fit': JsonSchema.string(
       description: 'Advisory metadata-only local fit: loaded, comfortable, '
-          'tight, constrained, or unknown. Never an availability gate.',
+          'tight, constrained, or unknown. Never an availability gate. Host '
+          'memory and GPU counters do not prove on-device execution.',
       enumValues: LocalHardwareFitStatus.wireValues,
     ),
     'hardware_fit_basis': JsonSchema.string(
       description: 'Evidence pool used for local hardware fit: '
           'runtime_loaded, system_memory, gpu_memory, insufficient_evidence, '
-          'or load_state_unreported.',
+          'load_state_unreported, or local_execution_unverified. The basis '
+          'does not prove on-device execution.',
       enumValues: const [
         'runtime_loaded',
         'system_memory',
         'gpu_memory',
         'insufficient_evidence',
         'load_state_unreported',
+        'local_execution_unverified',
       ],
     ),
     'estimated_memory_bytes': JsonSchema.integer(
@@ -1193,6 +1196,13 @@ final _modelEntrySchema = JsonSchema.object(
           'public cloud or cost. Declared or unresolved excludes local/free '
           'capacity; not_reported or omission does not prove on-device execution.',
       enumValues: UpstreamRouting.wireValues,
+    ),
+    'execution_location': JsonSchema.string(
+      description: 'Local-runtime execution claim. remote repeats a cloud or '
+          'upstream veto. unknown keeps loopback eligibility and is not '
+          'on-device proof. Loaded state, localhost, KV-cache GPU offload, '
+          'and a host GPU counter do not change it. on_device is not emitted.',
+      enumValues: ExecutionLocation.wireValues,
     ),
     'source': JsonSchema.string(
       description: 'Data source of the gating provider, e.g. "manual" for '
@@ -2630,10 +2640,10 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'models are omitted; known entries may remain with available=false. '
         'Local-runtime inventory is read live and cloud capability hints come '
         'from a refreshable catalog. budget=local excludes cloud-offloaded '
-        'models and declared or unresolved upstream routing. Missing upstream '
-        'evidence preserves legacy eligibility and does not prove execution '
-        'location. budget=quota allows measured quota plans plus eligible '
-        'local-runtime models.',
+        'models and declared or unresolved upstream routing. Local models '
+        'carry execution_location remote or unknown. unknown preserves legacy '
+        'eligibility and does not prove execution location. budget=quota '
+        'allows measured quota plans plus eligible local-runtime models.',
     inputSchema: _modelFilterInputSchema,
     outputSchema: listModelsOutputSchema,
     annotations: _liveCollection,

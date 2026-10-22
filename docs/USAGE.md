@@ -912,6 +912,9 @@ the destination is public cloud, paid, or free. It is inspectable under `any`
 but excluded from local and quota advice. An unresolved upstream declaration
 remains unavailable for every budget. Its reported loaded state does not prove
 local readiness, and the model detail explains why host fit is unavailable.
+Local models also publish `execution_location`. `remote` repeats a cloud or
+upstream veto. `unknown` keeps the loopback safety net and is not an on-device
+claim. Loaded state, localhost, and a host GPU counter do not change it.
 For a task-profiled `suggest`, add `--use-expiring-quota` when you explicitly
 want soon-resetting included quota to beat a local model. The signal is bounded:
 it uses only local burn analytics, only measured quota-backed providers, and only
