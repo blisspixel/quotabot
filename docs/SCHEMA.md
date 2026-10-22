@@ -485,7 +485,13 @@ The state does not compare upstream target identities or prove a dispatch.
 Two different well-formed target declarations still establish upstream
 configuration and keep the local/quota exclusion.
 Missing `upstream_routing` retains legacy `not_reported` behavior and is not
-positive on-device evidence. Unknown or malformed present cache values decode
+positive on-device evidence. A local-runtime model also carries
+`execution_location`. `remote` repeats a cloud or upstream veto. `unknown`
+keeps loopback eligibility and is not an on-device claim. Loaded state,
+localhost, KV-cache GPU offload, residency bytes, and a host GPU counter do
+not change it. No `on_device` value is emitted. A cached `on_device` value, or
+`remote` without a veto flag, decodes back to the veto-derived location.
+Unknown or malformed present `upstream_routing` cache values decode
 as unresolved, so decoding cannot silently remove the exclusion. An
 embedding-only inventory also cannot qualify a provider as a generation fallback.
 Model registry listing defaults to `any` for inspection. Concrete CLI and MCP

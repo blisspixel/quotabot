@@ -4,6 +4,12 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- Local-runtime models carry `execution_location`. `remote` repeats a cloud
+  or upstream veto. `unknown` keeps the loopback safety net and is not an
+  on-device claim. Loaded state, localhost, KV-cache GPU offload, and a host
+  GPU counter do not change it. No `on_device` value is emitted. The LM Studio
+  model list, rechecked on 2026-10-22, still has no producer-device field.
+
 ## 0.11.17 - 2026-10-20
 
 - Human doctor, suggest, and top share one route line. A stale or drifted

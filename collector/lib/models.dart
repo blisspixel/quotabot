@@ -1466,6 +1466,24 @@ enum UpstreamRouting {
   }
 }
 
+/// Where current metadata can place execution of a local-runtime model.
+///
+/// `remote` repeats a cloud-offloaded route or an upstream configuration veto.
+/// `unknown` keeps the existing loopback safety net. It is not an on-device
+/// claim. Localhost, a loaded instance, KV-cache GPU offload, residency bytes,
+/// and a host GPU counter are not a producer-device field, so no `on_device`
+/// value is emitted or accepted from cache.
+enum ExecutionLocation {
+  unknown('unknown'),
+  remote('remote');
+
+  const ExecutionLocation(this.wireName);
+
+  final String wireName;
+
+  static const wireValues = ['unknown', 'remote'];
+}
+
 /// A negative local-execution check shared by raw and normalized model records.
 /// Its absence is not positive evidence that execution stays on this device.
 bool localExecutionVeto({
@@ -1541,6 +1559,13 @@ class ModelInfo {
         upstreamRouting: upstreamRouting,
       );
 
+  /// Published execution claim. [ExecutionLocation.remote] repeats
+  /// [hasLocalExecutionVeto]. [ExecutionLocation.unknown] preserves legacy
+  /// loopback eligibility and is not on-device proof.
+  ExecutionLocation get executionLocation => hasLocalExecutionVeto
+      ? ExecutionLocation.remote
+      : ExecutionLocation.unknown;
+
   /// Generation routing excludes explicitly declared non-text deployments.
   bool get hasLocalGenerationVeto =>
       hasLocalExecutionVeto || embedding == true || textGeneration == false;
@@ -1604,6 +1629,7 @@ class ModelInfo {
         if (cloudOffloaded) 'cloud_offloaded': cloudOffloaded,
         if (upstreamRouting != UpstreamRouting.notReported)
           'upstream_routing': upstreamRouting.wireName,
+        if (local) 'execution_location': executionLocation.wireName,
         if (loaded) 'loaded': loaded,
         if (sizeBytes != null) 'size_bytes': sizeBytes,
         if (vramBytes != null) 'vram_bytes': vramBytes,
@@ -1637,6 +1663,8 @@ class ModelInfo {
       upstreamRouting: j.containsKey('upstream_routing')
           ? UpstreamRouting.fromWire(j['upstream_routing'])
           : UpstreamRouting.notReported,
+      // execution_location is not an input. A cached on_device value, or a
+      // remote value without a veto flag, cannot become stored proof.
       loaded: rawLoaded == true,
       loadedStateKnown: loadedStateKnown,
       sizeBytes: (j['size_bytes'] as num?)?.toInt(),

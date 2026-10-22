@@ -719,10 +719,13 @@ format overhead can differ from the estimate.
   never loads or invokes a model. The v0 shape carries `arch` (architecture), not
   a parameter count, so quotabot does not fill the parameter-size slot from it.
   LM Link can serve a localhost request on another device, and the current model
-  list has no documented per-model execution-location field. The current
-  runtime classification does not certify LM Link as on-device; do not use its
-  host-fit estimate as proof of remote-device capacity. Reasoning declarations
-  remain unadmitted pending that location contract.
+  list has no documented per-model execution-location field. Rechecked on
+  2026-10-22, `GET /api/v1/models` still has no producer-device field.
+  `offload_kv_cache_to_gpu` and a loaded instance do not establish where the
+  model runs. The current runtime classification does not certify LM Link as
+  on-device; do not use its host-fit estimate as proof of remote-device
+  capacity. Reasoning declarations remain unadmitted pending that location
+  contract.
 - Lemonade: the AMD/lemonade-sdk OpenAI-compatible server. `GET /api/v1/models`
   (falling back to `/v1/models`) lists downloaded local models by default and
   can also list configured cloud-provider routes. quotabot reads
@@ -843,8 +846,13 @@ Current compatibility limits:
   budgets, readiness preference, provider fallback, or host hardware fit.
   Declared configuration remains inspectable under `any`; unresolved
   configuration is unavailable there too. This additional exclusion does not
-  prove on-device execution when upstream fields are absent. Tunnels, WSL,
-  LM Link, and composite backends still need explicit scope evidence.
+  prove on-device execution when upstream fields are absent. Normalized local
+  models carry `execution_location`: `remote` when a cloud route or upstream
+  declaration is already vetoed, otherwise `unknown`. `unknown` preserves
+  loopback routing eligibility and is not on-device proof. WSL port forwards
+  and tunnels that present as loopback stay `unknown`. Non-loopback host
+  overrides remain ineligible. Tunnels, WSL, LM Link, and composite backends
+  still need a producer field before a positive on-device claim.
 - Ollama can expose cloud-offloaded models through its local daemon (a `-cloud`
   tag suffix, e.g. `qwen3-coder:480b-cloud`); these execute on ollama.com, not
   on-device. quotabot detects the suffix, flags the model `cloud_offloaded`, and

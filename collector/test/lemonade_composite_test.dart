@@ -89,7 +89,8 @@ void main() {
             requirements:
                 const ModelRequirements(budgetPolicy: ModelBudgetPolicy.local)),
         hasLength(1));
-    expect(quota.models.single.toJson(), isNot(contains('execution_location')));
+    expect(quota.models.single.executionLocation, ExecutionLocation.unknown);
+    expect(quota.models.single.toJson()['execution_location'], 'unknown');
   });
 
   test('collection policies are outside component metadata normalization', () {
