@@ -312,7 +312,8 @@ local metadata. Add `--json` to any read command for machine output.
 
 | Command                | What it does                                          |
 |------------------------|-------------------------------------------------------|
-| `status` (or `doctor`) | Every provider, its windows, and resets (the default).|
+| `status` (or `doctor`) | Every provider, its windows, and resets (the default). Doctor also shows a Claude session projection when one is stored. |
+| `claude-status` | Project a Claude Code status-line payload from stdin into a local file. `--show` prints the stored file. |
 | `update` | Check or install the newest checksum-verified release for the selected channel. |
 | `top`                  | Live dashboard that redraws in place (q quit, r now, s sort, m models). |
 | `models`               | Catalogued models ordered by routability, with explicit availability and caps. |
@@ -336,6 +337,12 @@ one, and capture age. The source class already communicates machine scope,
 manual origin, or runtime classification, so those ideas are not repeated as
 separate tags.
 The frozen `quotabot.v1` contract is documented in [SCHEMA.md](SCHEMA.md).
+
+`quotabot claude-status` reads a Claude Code status-line payload from stdin.
+It stores only the documented five-hour and seven-day plan windows in a
+quotabot-owned file. Doctor shows that file when it is present. Suggest,
+snapshots, and MCP routing do not. The command does not write `~/.claude` or
+launch claude. Exit 1 means the payload or stored file could not be used.
 
 Logout is provider-wide, including named accounts. It removes quotabot-owned
 grants and installs a local disconnect marker, so adapters ignore otherwise

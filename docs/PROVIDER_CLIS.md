@@ -35,10 +35,16 @@ and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
   Extra-usage credits on that same response can appear as display-only card
   detail; they are not plan windows.
 - `claude auth status` checks authentication, not remaining quota. Current
-  [status-line input](https://code.claude.com/docs/en/statusline) can supply
-  quota percentages and reset times after an existing session receives an API
-  response. Missing windows are unknown. A future metadata-only bridge must
-  allowlist those fields without reading transcripts or initiating a model turn.
+  [status-line input](https://code.claude.com/docs/en/statusline), rechecked
+  2026-10-22, can supply five-hour and seven-day used percentages and reset
+  times for claude.ai Pro and Max after an existing session receives an API
+  response. Either window can be absent, and Claude drops a window after
+  `resets_at`. `quotabot claude-status` allowlists those two windows and the
+  local time their values were first observed. It drops transcripts, paths,
+  cost, context, model, session identifiers, and gateway `spend_limit` before
+  writing a quotabot-owned file. Missing windows stay unknown. The command
+  does not write `~/.claude`, launch claude, or start a model turn. The file
+  is not account-wide quota and is not a routing input.
   A quota-endpoint HTTP 429 describes a throttled metadata check, not proof that
   the user's included plan is spent.
 - Quota shape: a rolling 5-hour window plus a weekly cap, shared across Claude

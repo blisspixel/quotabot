@@ -15,6 +15,7 @@ import 'util.dart';
 part 'src/parsing/wire.dart';
 part 'src/parsing/codex.dart';
 part 'src/parsing/claude.dart';
+part 'src/parsing/claude_status.dart';
 part 'src/parsing/antigravity.dart';
 part 'src/parsing/local_quota.dart';
 part 'src/parsing/identity.dart';
