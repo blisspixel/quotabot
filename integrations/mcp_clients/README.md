@@ -16,10 +16,13 @@ prompts, code, or model requests.
   `StreamableHTTPClientTransport` or `StdioClientTransport`. The checkout pins
   the maintained v1 release `1.32.1` with patched OAuth client handling and
   `proxy-addr`.
-- TypeScript snippets require Node.js 20 or later. The lock overrides the MCP
-  SDK's transitive Hono Node adapter to patched version 2.0.11 because versions
-  below 2.0.5 are affected by the Windows path traversal in
+- TypeScript snippets require Node.js 24 or later. The lock overrides the MCP
+  SDK's transitive Hono package to 4.13.13 and its Node adapter to 2.1.5.
+  Adapter versions below 2.0.5 are affected by the Windows path traversal in
   [GHSA-frvp-7c67-39w9](https://github.com/advisories/GHSA-frvp-7c67-39w9).
+  Hono versions below 4.13.11 decode a static path twice
+  ([GHSA-5r4p-p66f-jhc7](https://github.com/advisories/GHSA-5r4p-p66f-jhc7)).
+  The same static-path fix is in the Node adapter from 2.1.3.
 - Prefer stdio when the MCP client can spawn quotabot directly. Use Streamable
   HTTP when a host requires HTTP, keeping the endpoint on loopback and enabling
   bearer auth for long-lived processes.
