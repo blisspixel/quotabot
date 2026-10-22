@@ -135,9 +135,14 @@ for that surface.
   with `--token-file` or `--token-env` (loopback only, bearer auth required).
   HTTP POST bodies must declare a length and are capped at 256 KiB. Missing
   bearer is HTTP 401; oversized or chunked bodies are HTTP 413. The shipped
-  server uses legacy `initialize` negotiation through `2025-11-25`;
-  `2026-07-28` stateless support remains pending. See the
-  [verified revision matrix](docs/research/2026-09-13-mcp-agent-plugins.md).
+  server accepts MCP `2026-07-28` beside legacy `initialize` through
+  `2025-11-25`. A connection that initializes stays on the legacy path. A
+  request that carries `2026-07-28` metadata can call tools, read resources,
+  and open `subscriptions/listen` without a session. Quota list and read
+  results use private cache scope and a zero TTL. The
+  [September revision matrix](docs/research/2026-09-13-mcp-agent-plugins.md)
+  records the earlier legacy-only probe. Installed harness clients were not
+  retested.
   Version 0.11.13 also caps incoming stdio messages at 256 KiB of UTF-8 before
   each newline, closing on overflow even when the newline never arrives.
   Schema-invalid tool arguments return `isError: true` before handler work.

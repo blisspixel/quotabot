@@ -1481,10 +1481,9 @@ McpServer buildQuotabotMcpServer({
   final server = McpServer(
     const Implementation(name: quotabotMcpName, version: quotabotMcpVersion),
     options: McpServerOptions(
-      // Bound messages with the current SDK while retaining the initialized
-      // protocol. Stateless HTTP and subscription ownership need a separate
-      // compatibility increment before modern discovery is advertised.
-      protocol: McpProtocol.legacy,
+      // One server accepts both eras. Legacy initialize locks that connection
+      // to 2025-11-25. A metadata-bearing 2026-07-28 request does not.
+      protocol: McpProtocol.stable,
       capabilities: ServerCapabilities(
         tools: ServerCapabilitiesTools(),
         resources: ServerCapabilitiesResources(),
@@ -1772,6 +1771,13 @@ Map<String, dynamic> _releaseJson(
   };
 }
 
+class _ModernResourceListener {
+  final Set<String> uris;
+  final Future<void> Function(JsonRpcNotification notification) send;
+
+  const _ModernResourceListener(this.uris, this.send);
+}
+
 class QuotaResourceSubscriptionHub {
   final SnapshotProvider snapshot;
   final BurnProvider burnByProvider;
@@ -1786,6 +1792,7 @@ class QuotaResourceSubscriptionHub {
   final RefreshTimerFactory? _timerFactory;
 
   final Set<String> _subscribed = {};
+  final Map<Object, _ModernResourceListener> _listeners = {};
   var _armed = <String>{};
   var _lastAlerts = <QuotaAlert>[];
   int? _lastAlertAt;
@@ -1824,11 +1831,32 @@ class QuotaResourceSubscriptionHub {
   Future<void> unsubscribe(String uri) async {
     _assertSubscribable(uri);
     _subscribed.remove(uri);
-    if (_subscribed.isEmpty) _timer?.cancel();
+    if (!_watching) _timer?.cancel();
   }
 
+  /// Registers one `subscriptions/listen` stream. Cancelling that stream does
+  /// not remove any other listener for the same URI.
+  void attachModernListener(
+    Object id,
+    Set<String> uris,
+    Future<void> Function(JsonRpcNotification notification) send,
+  ) {
+    for (final uri in uris) {
+      _assertSubscribable(uri);
+    }
+    _listeners[id] = _ModernResourceListener(uris, send);
+    if (autoStart && uris.isNotEmpty) _schedule(0);
+  }
+
+  void detachModernListener(Object id) {
+    _listeners.remove(id);
+    if (!_watching) _timer?.cancel();
+  }
+
+  bool get _watching => _subscribed.isNotEmpty || _listeners.isNotEmpty;
+
   Future<void> pollOnce() async {
-    if (_disposed || _subscribed.isEmpty || _polling) return;
+    if (_disposed || !_watching || _polling) return;
     _polling = true;
     try {
       final data = await snapshot();
@@ -1836,8 +1864,8 @@ class QuotaResourceSubscriptionHub {
       final n = now();
       final anyLive = data.any((q) => q.ok && q.hasWindows && !q.stale);
       _failStreak = anyLive ? 0 : _failStreak + 1;
-      if (_subscribed.contains(quotasCurrentResourceUri)) {
-        await notifyUpdated(quotasCurrentResourceUri);
+      if (_wants(quotasCurrentResourceUri)) {
+        await _publish(quotasCurrentResourceUri);
       }
       final burnStats = burnByProvider(data, n);
       final leaseState = leaseStore.activeState(n);
@@ -1867,8 +1895,8 @@ class QuotaResourceSubscriptionHub {
       if (alerts.fired.isNotEmpty) {
         _lastAlerts = alerts.fired;
         _lastAlertAt = n;
-        if (_subscribed.contains(quotasAlertsResourceUri)) {
-          await notifyUpdated(quotasAlertsResourceUri);
+        if (_wants(quotasAlertsResourceUri)) {
+          await _publish(quotasAlertsResourceUri);
         }
       }
     } catch (_) {
@@ -1882,14 +1910,38 @@ class QuotaResourceSubscriptionHub {
     _disposed = true;
     _timer?.cancel();
     _subscribed.clear();
+    _listeners.clear();
+  }
+
+  bool _wants(String uri) =>
+      _subscribed.contains(uri) ||
+      _listeners.values.any((listener) => listener.uris.contains(uri));
+
+  Future<void> _publish(String uri) async {
+    if (_subscribed.contains(uri)) {
+      await notifyUpdated(uri);
+    }
+    for (final listener
+        in List<_ModernResourceListener>.of(_listeners.values)) {
+      if (!listener.uris.contains(uri)) continue;
+      try {
+        await listener.send(
+          JsonRpcResourceUpdatedNotification(
+            updatedParams: ResourceUpdatedNotification(uri: uri),
+          ),
+        );
+      } catch (_) {
+        // A closed listen stream cannot block the other listeners.
+      }
+    }
   }
 
   void _schedule(int seconds) {
-    if (_disposed || _subscribed.isEmpty) return;
+    if (_disposed || !_watching) return;
     _timer?.cancel();
     _timer = RefreshTimer.seconds(seconds, () async {
       await pollOnce();
-      if (_disposed || _subscribed.isEmpty) return;
+      if (_disposed || !_watching) return;
       final nextSeconds = _lastSnapshot.isEmpty
           ? 60
           : nextRefreshSeconds(
@@ -1949,6 +2001,59 @@ void _registerQuotaResourceSubscriptions(
     ),
   );
   server.server.onclose = hub.dispose;
+}
+
+void _registerModernQuotaSubscriptions(
+  McpServer server,
+  QuotaResourceSubscriptionHub hub,
+) {
+  server.server.assertCanSetRequestHandler(Method.subscriptionsListen);
+  server.server.setRequestHandler<JsonRpcSubscriptionsListenRequest>(
+    Method.subscriptionsListen,
+    (request, extra) async {
+      final allowed = request.listenParams.notifications
+          .acknowledgedBy(server.server.getCapabilities())
+          .resourceSubscriptions
+          ?.where((uri) =>
+              uri == quotasCurrentResourceUri || uri == quotasAlertsResourceUri)
+          .toList(growable: false);
+      final acknowledged = SubscriptionFilter(
+        resourceSubscriptions:
+            allowed == null || allowed.isEmpty ? null : allowed,
+      );
+      await extra.sendSubscriptionAcknowledged(acknowledged);
+      if (allowed == null || allowed.isEmpty) return const EmptyResult();
+      final id = extra.requestId;
+      if (id is Object) {
+        hub.attachModernListener(
+          id,
+          allowed.toSet(),
+          extra.sendSubscriptionNotification,
+        );
+      }
+      final closed = Completer<void>();
+      StreamSubscription<void>? abort;
+      if (extra.signal.aborted) {
+        closed.complete();
+      } else {
+        abort = extra.signal.onAbort.listen((_) {
+          if (!closed.isCompleted) closed.complete();
+        });
+      }
+      try {
+        await closed.future;
+      } finally {
+        await abort?.cancel();
+        if (id is Object) hub.detachModernListener(id);
+      }
+      return const EmptyResult();
+    },
+    (id, params, meta) => JsonRpcSubscriptionsListenRequest(
+      id: id,
+      listenParams: SubscriptionsListenRequest.fromJson(params ?? const {}),
+      meta: meta,
+    ),
+  );
 }
 
 RouteCandidate? _explicitReserveTarget(
@@ -2805,6 +2910,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       mimeType: 'application/json',
     ),
     (uri, extra) async => ReadResourceResult(
+      ttlMs: 0,
+      cacheScope: CacheScope.private,
       contents: [
         TextResourceContents(
           uri: uri.toString(),
@@ -2824,6 +2931,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       mimeType: 'application/json',
     ),
     (uri, extra) async => ReadResourceResult(
+      ttlMs: 0,
+      cacheScope: CacheScope.private,
       contents: [
         TextResourceContents(
           uri: uri.toString(),
@@ -2835,5 +2944,21 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     ),
   );
   _registerQuotaResourceSubscriptions(server, subscriptionHub);
+  if (_serverAcceptsStatelessSubscriptions(server)) {
+    _registerModernQuotaSubscriptions(server, subscriptionHub);
+  }
   return subscriptionHub;
+}
+
+/// Legacy profiles reject the stateless acknowledgment notification. Stable
+/// profiles accept it before any connection has negotiated a revision.
+bool _serverAcceptsStatelessSubscriptions(McpServer server) {
+  try {
+    server.server.assertNotificationCapability(
+      Method.notificationsSubscriptionsAcknowledged,
+    );
+    return true;
+  } on StateError {
+    return false;
+  }
 }

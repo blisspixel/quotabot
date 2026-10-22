@@ -4,6 +4,11 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- The MCP server accepts `2026-07-28` beside legacy initialization through
+  `2025-11-25`. Metadata-bearing requests do not need a session. Quota list
+  and read results stay private with a zero TTL. Cancelling one
+  `subscriptions/listen` stream leaves another listener for the same quota
+  resource in place. Installed harness clients were not retested.
 - Local-runtime models carry `execution_location`. `remote` repeats a cloud
   or upstream veto. `unknown` keeps the loopback safety net and is not an
   on-device claim. Loaded state, localhost, KV-cache GPU offload, and a host

@@ -133,10 +133,11 @@ harness process inherits the same secret from your protected environment.
 Rendering does not read that variable, contact the server, or launch a harness.
 Keep proxy handling appropriate for loopback in the harness's environment.
 
-quotabot currently speaks MCP `2025-11-25` with the legacy `initialize`
-handshake over stdio or Streamable HTTP. The `2026-07-28` MCP specification is
-final, but this pack does not implement its stateless lifecycle. A compatible
-harness must retain legacy negotiation. Hermes is explicitly set to `legacy`.
+The quotabot server accepts MCP `2026-07-28` beside legacy `initialize`
+through `2025-11-25` over stdio or authenticated Streamable HTTP. These
+fragments still negotiate `2025-11-25`. Hermes is explicitly set to `legacy`.
+A harness that only speaks the older handshake keeps working. Installed
+clients were not retested against `2026-07-28`.
 [quotabot server](../../collector/bin/mcp_server.dart),
 [final specification announcement](https://blog.modelcontextprotocol.io/posts/2026-07-28/).
 

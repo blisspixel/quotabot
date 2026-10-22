@@ -59,8 +59,12 @@ Future<Map<String, Object>> _run(String scenario, _Timers timers) async {
   McpServer? server;
   Future<void>? serverRun;
   StreamController<ProcessSignal>? signals;
+  // This fixture measures resources/subscribe cadence. MCP 2026-07-28
+  // removed that method, so the client stays on the legacy handshake.
   final client = McpClient(
-      const Implementation(name: 'subscription-fixture', version: '1'));
+    const Implementation(name: 'subscription-fixture', version: '1'),
+    options: const McpClientOptions(protocol: McpProtocol.legacy),
+  );
   try {
     if (entrypoint) {
       final probe = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);

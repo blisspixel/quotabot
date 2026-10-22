@@ -97,6 +97,7 @@ class QuotabotStreamableHttpServer {
   final Map<String, StreamableHTTPServerTransport> _transports = {};
   final Map<String, McpServer> _servers = {};
   int _pendingSessionInitializations = 0;
+  int _pendingStatelessRequests = 0;
   int _activeRequests = 0;
 
   QuotabotStreamableHttpServer({
@@ -415,7 +416,7 @@ class QuotabotStreamableHttpServer {
       return;
     }
     if (body['method'] == 'initialize') {
-      if (_transports.length + _pendingSessionInitializations >= maxSessions) {
+      if (_occupiedSessions >= maxSessions) {
         request.response.headers.set(HttpHeaders.retryAfterHeader, '1');
         await _jsonRpcError(
           request,
@@ -435,6 +436,10 @@ class QuotabotStreamableHttpServer {
       }
       return;
     }
+    if (_isStatelessAdmission(body)) {
+      await _handleStatelessPost(request, body);
+      return;
+    }
     await _jsonRpcError(
       request,
       httpStatus: HttpStatus.badRequest,
@@ -443,6 +448,53 @@ class QuotabotStreamableHttpServer {
           'Bad Request: No valid session ID provided or not an initialization request',
       bodyConsumed: true,
     );
+  }
+
+  int get _occupiedSessions =>
+      _transports.length +
+      _pendingSessionInitializations +
+      _pendingStatelessRequests;
+
+  Future<void> _handleStatelessPost(
+    HttpRequest request,
+    Map<dynamic, dynamic> body,
+  ) async {
+    if (_occupiedSessions >= maxSessions) {
+      request.response.headers.set(HttpHeaders.retryAfterHeader, '1');
+      await _jsonRpcError(
+        request,
+        httpStatus: HttpStatus.serviceUnavailable,
+        errorCode: ErrorCode.connectionClosed,
+        message: 'Session capacity reached',
+        bodyConsumed: true,
+      );
+      return;
+    }
+    _pendingStatelessRequests++;
+    final transport = StreamableHTTPServerTransport(
+      options: StreamableHTTPServerTransportOptions(
+        sessionIdGenerator: () => null,
+        enableJsonResponse: true,
+        enableDnsRebindingProtection: true,
+        allowedHosts: _mcpAllowedHosts,
+        allowedOrigins: _boundOrigins,
+        strictProtocolVersionHeaderValidation: true,
+        rejectBatchJsonRpcPayloads: true,
+      ),
+    );
+    final server = serverFactory('stateless');
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(request, body);
+    } finally {
+      _pendingStatelessRequests--;
+      try {
+        await server.close();
+      } catch (_) {}
+      try {
+        await transport.close();
+      } catch (_) {}
+    }
   }
 
   Future<void> _handleSessionRequest(HttpRequest request) async {
@@ -586,6 +638,19 @@ QuotabotStreamableHttpServer buildQuotabotStreamableHttpServer({
       profileLoader: profileLoader,
     ),
   );
+}
+
+bool _isStatelessAdmission(Map<dynamic, dynamic> body) {
+  final params = body['params'];
+  if (params is Map) {
+    final meta = params['_meta'];
+    if (meta is Map && meta.containsKey(McpMetaKey.protocolVersion)) {
+      return true;
+    }
+  }
+  final method = body['method'];
+  return method == Method.serverDiscover ||
+      method == Method.subscriptionsListen;
 }
 
 String _mcpSessionId() {

@@ -1133,10 +1133,14 @@ and exposes nine tools plus two resources:
 
 Version 0.11.13 caps incoming stdio frames at 256 KiB of UTF-8 before each
 newline. Overflow closes the connection even for an incomplete frame. The
-limit applies per message, not to total connection traffic. The server keeps
-legacy initialization through `2025-11-25`; upgrading the SDK does not advertise
-modern protocol support. Schema-invalid tool arguments return a tool result
-with `isError: true` before the handler performs work.
+limit applies per message, not to total connection traffic. The server accepts
+MCP `2026-07-28` beside legacy initialization through `2025-11-25`. A
+connection that calls `initialize` stays on that legacy path. A request that
+carries `2026-07-28` metadata can call tools, read resources, and open
+`subscriptions/listen` without a session. Quota list and read results use
+private cache scope and a zero TTL. Installed harness clients were not
+retested. Schema-invalid tool arguments return a tool result with
+`isError: true` before the handler performs work.
 
 - `list_quotas` - the full normalized snapshot for every provider.
 - `provider_with_most_headroom` - the account with the most remaining budget.

@@ -316,17 +316,23 @@ void main() {
       return '$encoded${' ' * (maxMcpStdioMessageBytes - utf8.encode(encoded).length)}\n';
     }
 
+    // A request before initialization must fail without selecting the
+    // stateless protocol, so the following legacy initialize still works.
     process.stdin.writeln(jsonEncode({
       'jsonrpc': '2.0',
       'id': 0,
-      'method': 'server/discover',
+      'method': 'tools/call',
+      'params': {
+        'name': 'list_quotas',
+        'arguments': <String, Object?>{},
+      },
     }));
     await process.stdin.flush();
     expect(await lines.moveNext().timeout(const Duration(seconds: 20)), isTrue);
-    final discovery = jsonDecode(lines.current) as Map;
-    expect(discovery['id'], 0);
-    expect(discovery['error'], isA<Map<String, dynamic>>());
-    expect(discovery.containsKey('result'), isFalse);
+    final beforeInitialize = jsonDecode(lines.current) as Map;
+    expect(beforeInitialize['id'], 0);
+    expect(beforeInitialize['error'], isA<Map<String, dynamic>>());
+    expect(beforeInitialize.containsKey('result'), isFalse);
     process.stdin.write(frame(_initialize(1)));
     await process.stdin.flush();
     expect(await lines.moveNext().timeout(const Duration(seconds: 20)), isTrue);
@@ -692,7 +698,7 @@ void main() {
           'headers': {HttpHeaders.authorizationHeader: 'Bearer $_token'},
         }),
       ));
-      expect(client.getProtocolVersion(), '2025-11-25');
+      expect(client.getProtocolVersion(), stableProtocolVersion);
       final tools = await client.listTools();
       expect(
           tools.tools.map((tool) => tool.name), contains('suggest_provider'));

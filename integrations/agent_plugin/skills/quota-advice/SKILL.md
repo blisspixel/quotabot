@@ -6,7 +6,8 @@ description: Inspect quota and availability for the user's existing configured A
 # Quota advice
 
 This skill requires quotabot MCP tools or an installed quotabot CLI. MCP clients
-must retain legacy `2025-11-25` initialization. Provider access depends on the
+can use legacy `2025-11-25` initialization or MCP `2026-07-28`. A legacy client
+must still initialize before calling tools. Provider access depends on the
 client's host and credential configuration.
 
 Use the existing quotabot connection to report quota availability and explain
