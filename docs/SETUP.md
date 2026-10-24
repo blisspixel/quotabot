@@ -256,7 +256,8 @@ and is not treated as currently available for routing. A spent cached window
 names the spend and when it resets. It does not also mark that line last known
 and repeat that the refresh failed. A rate limit or outage is one short note,
 without "last known". A sign-in repair, and a reset that has already passed,
-still get their own note. A percentage that is not spent still says last known.
+still get their own note. A percentage that is not spent still says how much
+is free, then last known or last trusted.
 
 `doctor --json` uses the normal snapshot envelope and adds each observed row's
 `read_state` plus `next_step` when one applies. Its `source_class` declares the

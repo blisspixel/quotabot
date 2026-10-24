@@ -56,6 +56,12 @@ class ClaudeAdapter {
   static const name = claudeProviderName;
   static const _endpoint = 'https://api.anthropic.com/api/oauth/usage';
   static const _profileEndpoint = 'https://api.anthropic.com/api/oauth/profile';
+
+  /// The usage endpoint puts an unrecognized agent in a separate 429 bucket.
+  /// The same bearer returns the account windows with the Claude Code prefix.
+  /// Community captures of this metadata call still documented that header in
+  /// September 2026. A quota read does not call a model.
+  static const metadataUserAgent = 'claude-code/2.1';
   static const _profileDeadline = Duration(seconds: 4);
   static const _maxProfileBodyBytes = 64 * 1024;
   static const _duplicateFallbackDeadline = Duration(seconds: 8);
@@ -88,7 +94,7 @@ class ClaudeAdapter {
             ProviderReadGate(
               acquisitionTimeout: const Duration(seconds: 12),
               minimumLiveInterval:
-                  ProviderReadGate.configuredMinimumLiveInterval,
+                  ProviderReadGate.claudeUsageMinimumLiveInterval(),
             ),
         _grantResolutionDeadline = grantResolutionDeadline,
         _grantCredential = grantCredential ??
@@ -484,6 +490,13 @@ class ClaudeAdapter {
     );
   }
 
+  static Map<String, String> _metadataHeaders(ClaudeCredential credential) => {
+        'Authorization': 'Bearer ${credential.accessToken}',
+        'anthropic-beta': 'oauth-2025-04-20',
+        'anthropic-version': '2023-06-01',
+        'User-Agent': metadataUserAgent,
+      };
+
   Future<_ReadOutcome> _readUsage(
     ClaudeCredential credential,
     _PlanEvidence? fallbackPlanEvidence,
@@ -498,11 +511,7 @@ class ClaudeAdapter {
       return operation.get(
         _http ?? sharedHttpClient,
         Uri.parse(_endpoint),
-        headers: {
-          'Authorization': 'Bearer ${credential.accessToken}',
-          'anthropic-beta': 'oauth-2025-04-20',
-          'anthropic-version': '2023-06-01',
-        },
+        headers: _metadataHeaders(credential),
         timeout: timeout,
       );
     }
@@ -648,10 +657,8 @@ class ClaudeAdapter {
             _http ?? sharedHttpClient,
             Uri.parse(_profileEndpoint),
             headers: {
-              'Authorization': 'Bearer ${credential.accessToken}',
+              ..._metadataHeaders(credential),
               'Content-Type': 'application/json',
-              'anthropic-beta': 'oauth-2025-04-20',
-              'anthropic-version': '2023-06-01',
             },
             timeout: _profileDeadline,
           );

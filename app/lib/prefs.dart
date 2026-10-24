@@ -237,8 +237,12 @@ class Prefs {
   final bool webhookAllowExternal;
 
   /// True once the first-run setup walkthrough has been completed.
-  /// "Skip for now" is process-local and is never persisted here.
   final bool setupDone;
+
+  /// True once the user left the walkthrough without finishing it. Later
+  /// launches do not ask again. Finishing still sets [setupDone] and applies
+  /// the chosen providers.
+  final bool setupDismissed;
   final double? windowX;
   final double? windowY;
 
@@ -257,9 +261,20 @@ class Prefs {
     this.webhookUrl,
     this.webhookAllowExternal = false,
     this.setupDone = false,
+    this.setupDismissed = false,
     this.windowX,
     this.windowY,
   });
+
+  /// The first-run prompt is finished when the user completed it, dismissed
+  /// it, or this install already saved ordinary use. A saved window, a hidden
+  /// provider, or a delivered reset reminder is that use.
+  bool get firstRunPromptSettled =>
+      setupDone ||
+      setupDismissed ||
+      hidden.isNotEmpty ||
+      (windowX != null && windowY != null) ||
+      handledResetReminders.isNotEmpty;
 
   Prefs copyWith({
     Set<String>? hidden,
@@ -277,6 +292,7 @@ class Prefs {
     bool? webhookAllowExternal,
     bool clearWebhook = false,
     bool? setupDone,
+    bool? setupDismissed,
     double? windowX,
     double? windowY,
     bool clearWindowPosition = false,
@@ -295,6 +311,7 @@ class Prefs {
     webhookUrl: clearWebhook ? null : webhookUrl ?? this.webhookUrl,
     webhookAllowExternal: webhookAllowExternal ?? this.webhookAllowExternal,
     setupDone: setupDone ?? this.setupDone,
+    setupDismissed: setupDismissed ?? this.setupDismissed,
     windowX: clearWindowPosition ? null : windowX ?? this.windowX,
     windowY: clearWindowPosition ? null : windowY ?? this.windowY,
   );
@@ -317,6 +334,7 @@ class Prefs {
     if (webhookUrl != null) 'webhook_url': webhookUrl,
     'webhook_allow_external': webhookAllowExternal,
     'setup_done': setupDone,
+    'setup_dismissed': setupDismissed,
     if (windowX != null && windowY != null) 'window_x': windowX,
     if (windowX != null && windowY != null) 'window_y': windowY,
   };
@@ -359,6 +377,7 @@ class Prefs {
           : (j['webhook_url'] as String).trim(),
       webhookAllowExternal: j['webhook_allow_external'] as bool? ?? false,
       setupDone: j['setup_done'] as bool? ?? false,
+      setupDismissed: j['setup_dismissed'] as bool? ?? false,
       windowX: validWindowPosition ? windowX : null,
       windowY: validWindowPosition ? windowY : null,
     );

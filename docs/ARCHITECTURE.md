@@ -160,7 +160,9 @@ Quota collection is I/O-bound: HTTP metadata, local files, and SQLite. The
 useful parallelism is overlapping those waits, not occupying every CPU core.
 
 Claude successful reads may reuse the canonical admitted account snapshot for
-30 seconds under `provider_read_gate.dart`'s existing exact-credential guard.
+20 minutes under `provider_read_gate.dart`'s existing exact-credential guard.
+`QUOTABOT_MIN_LIVE_INTERVAL` from 0 through 60 seconds overrides that window.
+Other providers keep the 30 second default.
 The bounded sharing receipt stores only capture time and a SHA-256 digest.
 The original pending/cooldown format stays compatible with older binaries.
 Concurrent commands wait for original work; shared reads preserve capture age

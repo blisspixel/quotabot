@@ -82,6 +82,40 @@ upgrade that toolchain, or reopen the language choice, as a drive-by.
 How to *call* the shipped CLI and MCP surface is [AGENTS.md](AGENTS.md). This
 file governs changing the source.
 
+## Start tidy, stop tidy
+
+Work in this repository may come from several agent tools, and a session can
+end partway through a task. These checks do not relax the rules above.
+
+- Check first. Before starting new work, run `git fetch --prune` and check
+  `git worktree list`, local and remote branches, and open pull requests.
+  Finish, merge, or park leftover work instead of starting a parallel attempt.
+  Squash merges hide merged work from ancestry, so check pull request state,
+  not only `git branch --merged`.
+- Checkpoint and hand off. When the task is to land repository work, commit
+  and push at meaningful checkpoints. Before stopping, leave a short handoff
+  in the pull request or commit message saying what is done and what is next.
+  Do not tag or publish unless that was requested.
+- Keep the tree clean. Test fixtures, scratch scripts, logs, and generated
+  output go only in the designated test or temp locations or the gitignored
+  `.agent/` directory. Never leave throwaway test files elsewhere in the tree,
+  and remove scratch artifacts before finishing.
+- Keep branches short-lived. Merge promptly and delete branches after merge.
+  Keep GitHub current: push finished work, update or close pull requests, and
+  close finished issues.
+- Goal state. One `main` with CI passing. Never leave `main` red or work
+  stranded on side branches.
+- Remove only with evidence. Remove a worktree or branch only once its work is
+  merged, contained in `main`, or pushed to the remote. Never use `--force` to
+  remove one; report anything uncertain instead of deleting it. Run
+  `git worktree prune` for entries whose directories are gone.
+- Ask when unclear. If it is unclear whether leftover work should be finished,
+  kept, or removed, stop and ask instead of guessing.
+
+`.claude/` stays gitignored, so a Claude Code `SessionStart` hook is local
+only. If you add one, it may print worktrees, branches, and open pull
+requests. It must not remove or change anything.
+
 ## Where truth lives
 
 Keep these states distinct. Source, tests, lockfiles, and git outrank stale

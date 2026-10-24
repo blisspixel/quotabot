@@ -2887,8 +2887,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('Refresh failed; showing previous data'), findsOneWidget);
-    expect(find.text('80% last known'), findsOneWidget);
-    expect(find.textContaining('80% free'), findsNothing);
+    expect(find.text('80% free, last known'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'80% free(?!,)')), findsNothing);
     expect(find.textContaining('Next: Claude'), findsNothing);
     expect(
       find.text('Quota data is stale - use your usual model'),
@@ -3303,24 +3303,29 @@ void main() {
     },
   );
 
-  testWidgets('first run Skip for now defers only the current process', (
+  testWidgets('first run Skip for now stays dismissed after restart', (
     tester,
   ) async {
     await _useDesktopSurface(tester);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     Prefs? saved;
     final session = FirstRunSession();
-    Widget dashboard(FirstRunSession firstRunSession) => _wrap(
+    Widget dashboard(FirstRunSession firstRunSession, Prefs prefs) => _wrap(
       Dashboard.test(
-        prefs: const Prefs(enableNotifications: false, setupDone: false),
+        prefs: prefs,
         demoMode: false,
         collector: () async => [_routeQuota('claude', 'Claude', now)],
-        prefsSaver: (prefs) async => saved = prefs,
+        prefsSaver: (next) async => saved = next,
         firstRunSession: firstRunSession,
       ),
     );
 
-    await tester.pumpWidget(dashboard(session));
+    await tester.pumpWidget(
+      dashboard(
+        session,
+        const Prefs(enableNotifications: false, setupDone: false),
+      ),
+    );
     await tester.pump();
     await tester.pump();
     await tester.pump();
@@ -3330,7 +3335,9 @@ void main() {
     await tester.pump();
 
     expect(find.text('What we found'), findsNothing);
-    expect(saved, isNull);
+    expect(saved?.setupDone, isFalse);
+    expect(saved?.setupDismissed, isTrue);
+    expect(saved?.hidden, isEmpty);
 
     await _selectMenuValue(tester, 'refresh');
     await tester.pump();
@@ -3338,18 +3345,83 @@ void main() {
     expect(find.text('What we found'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
-    await tester.pumpWidget(dashboard(session));
+    await tester.pumpWidget(dashboard(session, saved!));
     await tester.pump();
     await tester.pump();
     await tester.pump();
     expect(find.text('What we found'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
-    await tester.pumpWidget(dashboard(FirstRunSession()));
+    await tester.pumpWidget(dashboard(FirstRunSession(), saved!));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('What we found'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('closing the window dismisses first-run setup', (tester) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    Prefs? saved;
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: false),
+          demoMode: false,
+          collector: () async => [_routeQuota('claude', 'Claude', now)],
+          prefsSaver: (prefs) async => saved = prefs,
+        ),
+      ),
+    );
     await tester.pump();
     await tester.pump();
     await tester.pump();
     expect(find.text('What we found'), findsOneWidget);
+
+    Dashboard.dismissFirstRunPromptForCloseIn(
+      tester.state(find.byType(Dashboard)),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('What we found'), findsNothing);
+    expect(saved?.setupDone, isFalse);
+    expect(saved?.setupDismissed, isTrue);
+    expect(saved?.hidden, isEmpty);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('saved use does not reopen the first-run prompt', (tester) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    Prefs? saved;
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            enableNotifications: false,
+            setupDone: false,
+            windowX: 40,
+            windowY: 80,
+          ),
+          demoMode: false,
+          collector: () async => [_routeQuota('claude', 'Claude', now)],
+          prefsSaver: (prefs) async => saved = prefs,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('What we found'), findsNothing);
+    expect(saved?.setupDone, isFalse);
+    expect(saved?.setupDismissed, isTrue);
+    expect(saved?.windowX, 40);
+    expect(saved?.windowY, 80);
 
     await tester.pumpWidget(const SizedBox());
   });
@@ -3388,8 +3460,8 @@ void main() {
     );
     expect(find.textContaining('checked '), findsOneWidget);
     expect(find.textContaining('as of '), findsNothing);
-    expect(find.text('40% last known'), findsOneWidget);
-    expect(find.textContaining('40% free'), findsNothing);
+    expect(find.text('40% free, last known'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'40% free(?!,)')), findsNothing);
     expect(
       find.bySemanticsLabel('Trusted quota headroom unavailable'),
       findsOneWidget,
@@ -3622,12 +3694,41 @@ void main() {
           'stale evidence cannot assert',
     );
     expect(
-      find.text('100% last known'),
+      find.text('100% free, last known'),
       findsOneWidget,
       reason: 'the last observed value stays; only the meter is withdrawn',
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'a rate-limited full bar is not painted as current availability',
+    (tester) async {
+      const view = WinView('weekly', 100, false, null);
+      final chrome = AppChromeTheme.forSpec(Brightness.dark, appThemeDark);
+      await tester.pumpWidget(
+        _wrap(
+          SizedBox(
+            width: 500,
+            child: WindowBar(
+              view: view,
+              muted: chrome.muted,
+              fg: chrome.foreground,
+              evidenceLabel: 'last known',
+              rateLimited: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('100% free, last known'), findsOneWidget);
+      expect(
+        tester.widget<QuotaMeter>(find.byType(QuotaMeter)).color,
+        chrome.warning,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('insights panel renders reliability, trend, pace, and heatmap', (
     tester,

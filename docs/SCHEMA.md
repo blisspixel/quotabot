@@ -35,7 +35,8 @@ the original `as_of` for a recent successful Claude capture reused under its
 credential-scoped read guard. A shared capture is distinct from stale fallback;
 its timestamp never advances on reuse. It remains subject to quota trust,
 reset boundaries, admission, drift quarantine, and current credential discovery.
-The default reuse window is 30 seconds and is configurable from 0 through 60.
+The default Claude reuse window is 20 minutes. `QUOTABOT_MIN_LIVE_INTERVAL`
+from 0 through 60 seconds overrides it. Other providers stay at 30 seconds.
 
 Provider suggestion candidates add optional `local_model` advice. Fields are
 `model_id` when a model qualifies, `context_tokens`, `local_readiness`,

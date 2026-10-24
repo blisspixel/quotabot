@@ -138,6 +138,38 @@ class ProviderReadGate {
             seconds != null && seconds >= 0 && seconds <= 60 ? seconds : 30);
   }
 
+  /// How long a successful Claude usage capture is reused when
+  /// `QUOTABOT_MIN_LIVE_INTERVAL` is unset. Other providers keep the 30 second
+  /// gate default. A desktop refresh every few minutes against that default
+  /// exhausted the account-wide usage endpoint and left a stale full bar in
+  /// place of later spend, including spend from another machine.
+  static const claudeUsageReuseInterval = Duration(minutes: 20);
+
+  /// Claude's reuse window. An explicit `QUOTABOT_MIN_LIVE_INTERVAL` from 0
+  /// through 60 seconds still wins, matching [configuredMinimumLiveInterval].
+  /// Unset or blank keeps [claudeUsageReuseInterval]. Invalid values use 30
+  /// seconds. `--fresh` bypasses sharing and does not bypass provider backoff.
+  static Duration claudeUsageMinimumLiveInterval({String? configuredSeconds}) {
+    final raw =
+        configuredSeconds ?? Platform.environment['QUOTABOT_MIN_LIVE_INTERVAL'];
+    if (raw == null || raw.trim().isEmpty) return claudeUsageReuseInterval;
+    final seconds = int.tryParse(raw.trim());
+    if (seconds != null && seconds >= 0 && seconds <= 60) {
+      return Duration(seconds: seconds);
+    }
+    return const Duration(seconds: 30);
+  }
+
+  /// Human doctor label for [claudeUsageMinimumLiveInterval].
+  static String claudeUsageReuseWindowLabel({String? configuredSeconds}) {
+    final reuse =
+        claudeUsageMinimumLiveInterval(configuredSeconds: configuredSeconds);
+    if (reuse.inSeconds >= 60 && reuse.inSeconds % 60 == 0) {
+      return '${reuse.inMinutes}m';
+    }
+    return '${reuse.inSeconds}s';
+  }
+
   static const _schema = 'quotabot.provider-read.v1';
   static const _maxStateBytes = 2048;
   static const _backoffSeconds = [60, 120, 300, 600, 1200];

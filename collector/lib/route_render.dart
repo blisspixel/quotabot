@@ -41,10 +41,14 @@ String routeCandidateGlanceLine(
   var qualifier = c.driftReason != null
       ? c.headroom == null
           ? 'no trusted quota'
-          : 'last trusted'
-      : c.stale
-          ? 'last known'
-          : 'free';
+          : 'free, last trusted'
+      : c.headroom == null
+          ? c.stale
+              ? 'last known'
+              : 'free'
+          : c.stale
+              ? 'free, last known'
+              : 'free';
   if (c.leaseDiscount > 0) {
     qualifier += ' (-${c.leaseDiscount.round()}% reserved)';
   }

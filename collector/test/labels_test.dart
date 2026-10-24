@@ -3,6 +3,18 @@ import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('remaining headroom keeps the free scale when evidence is qualified',
+      () {
+    expect(remainingHeadroomPhrase(100), '100% free');
+    expect(remainingHeadroomPhrase(100, 'last known'), '100% free, last known');
+    expect(
+      remainingHeadroomPhrase(40, 'last trusted'),
+      '40% free, last trusted',
+    );
+    expect(remainingHeadroomPhrase(40, 'unverified'), '40% free, unverified');
+    expect(remainingHeadroomPhrase(80, 'live shared'), '80% free, live shared');
+  });
+
   test('local headlines preserve diagnostics but cannot invent cold state', () {
     ProviderQuota quota({String? status, List<ModelInfo> models = const []}) =>
         ProviderQuota(

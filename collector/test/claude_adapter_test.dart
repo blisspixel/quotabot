@@ -239,6 +239,11 @@ void main() {
       credentialsFile: credentials,
       client: MockClient((request) async {
         expect(request.headers['Authorization'], 'Bearer claude-token');
+        expect(
+          request.headers['User-Agent'],
+          ClaudeAdapter.metadataUserAgent,
+        );
+        expect(request.headers['anthropic-beta'], 'oauth-2025-04-20');
         return http.Response(
           '{}',
           429,

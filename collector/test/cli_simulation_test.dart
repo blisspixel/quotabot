@@ -80,8 +80,11 @@ void main() {
           contains(state == 'denied'
               ? 'The provider denies requests'
               : 'Request availability could not be verified'));
-      expect(
-          text.stdout, contains(state == 'denied' ? '% free' : '% last known'));
+      expect(text.stdout,
+          contains(state == 'denied' ? '% free' : '% free, last known'));
+      if (state == 'denied') {
+        expect(text.stdout, isNot(contains('last known')));
+      }
     });
   }
 
@@ -710,7 +713,7 @@ void main() {
     expect(out, contains('next  Grok'));
     expect(out, isNot(contains('no provider to route to right now')));
     expect(out, contains('Only cached quota evidence is present'));
-    expect(out, contains('48% last known'));
+    expect(out, contains('48% free, last known'));
     expect(out, contains('unavailable'));
     expect(out, isNot(contains('-> grok')));
   });
@@ -742,7 +745,7 @@ void main() {
     expectExitCode(result, 0);
     final out = result.stdout as String;
     expect(out, contains('[provider drift, authoritative, quota plan'));
-    expect(out, contains('37% last trusted'));
+    expect(out, contains('37% free, last trusted'));
     expect(out, contains('unavailable'));
     expect(out, isNot(contains('37% last known')));
   });

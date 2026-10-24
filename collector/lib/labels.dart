@@ -207,6 +207,17 @@ String spentResetPhrase(int resetsAt, int now) {
   return 'resets $when';
 }
 
+/// Remaining headroom on the free scale. Live evidence is `48% free`.
+/// Cached, drifted, unverified, or shared evidence keeps that scale and names
+/// the qualifier, so `100% free, last known` cannot be read as 100% used.
+/// `live shared` stays a provenance tag on the same free scale. Doctor windows
+/// stay on the used scale.
+String remainingHeadroomPhrase(num percent, [String? evidence]) {
+  final rounded = percent.round();
+  if (evidence == null || evidence.isEmpty) return '$rounded% free';
+  return '$rounded% free, $evidence';
+}
+
 /// One doctor window. A cached spend whose reset is still ahead reads as
 /// `weekly spent; resets Thu 3:00 PM` and does not also say last known. A
 /// percentage, a passed reset, and rejected evidence keep their qualifier.
