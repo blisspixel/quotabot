@@ -417,15 +417,18 @@ void main() {
     final lines = _frame([
       _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)],
           stale: true),
-    ], width: 90);
+    ], width: 160);
     expect(
       lines.any(
         (l) => _plain(l).contains('(cached, authoritative, quota plan)'),
       ),
       isTrue,
     );
-    expect(_plain(lines.join('\n')), contains('80% last'));
-    expect(_plain(lines.join('\n')), isNot(contains('80% free')));
+    expect(_plain(lines.join('\n')), contains('80% free, last known'));
+    expect(
+      _plain(lines.join('\n')),
+      isNot(contains(RegExp(r'80% free(?!,)'))),
+    );
   });
 
   test('a cached spent weekly names the reset without a second last-known line',
@@ -493,7 +496,7 @@ void main() {
     ], width: 100);
 
     final rendered = _plain(lines.join('\n'));
-    expect(rendered, contains('80% last'));
+    expect(rendered, contains('80% free, last known'));
     expect(
         rendered, contains('live read failed: invalid Claude usage response'));
   });
@@ -594,7 +597,7 @@ void main() {
     );
     final lines = _frame(
       [trusted.withProviderDrift('weekly reset moved earlier', _now - 30)],
-      width: 100,
+      width: 160,
     );
 
     expect(
@@ -602,8 +605,11 @@ void main() {
           .contains('(provider drift 2h, authoritative, quota plan)')),
       isTrue,
     );
-    expect(_plain(lines.join('\n')), contains('80% last'));
-    expect(_plain(lines.join('\n')), isNot(contains('80% free')));
+    expect(_plain(lines.join('\n')), contains('80% free, last trusted'));
+    expect(
+      _plain(lines.join('\n')),
+      isNot(contains(RegExp(r'80% free(?!,)'))),
+    );
   });
 
   test('legacy no-window quarantine stays labeled provider drift', () {
@@ -990,7 +996,7 @@ void main() {
       ],
     );
     final text = _frame([q], width: 110).map(_plain).join('\n');
-    expect(text, contains('6% last known'));
+    expect(text, contains('6% free, last known'));
     expect(text, contains('█'));
   });
 
@@ -1237,14 +1243,14 @@ void main() {
       stale: true,
       windows: [QuotaWindow(label: '5h', usedPercent: 44)],
     );
-    final lines = _frame([q], width: 90);
+    final lines = _frame([q], width: 160);
     expect(
       lines.any(
         (l) => _plain(l).contains('(cached 8h, authoritative, quota plan)'),
       ),
       isTrue,
     );
-    expect(_plain(lines.join('\n')), contains('56% last'));
+    expect(_plain(lines.join('\n')), contains('56% free, last known'));
   });
 
   test('a stale snapshot does not roll passed resets to full headroom', () {
@@ -1264,8 +1270,8 @@ void main() {
     );
 
     final rendered = _plain(_frame([q], width: 90).join('\n'));
-    expect(rendered, contains('20% last'));
-    expect(rendered, isNot(contains('100% last')));
+    expect(rendered, contains('20% free, last known'));
+    expect(rendered, isNot(contains('100% free, last known')));
   });
 
   test('the pool gauge ignores stale cached cloud headroom', () {
@@ -1862,7 +1868,7 @@ void main() {
     test('a recent cached row still draws its meter', () {
       final row = kiroRow(_frame([kiro(_now - 2 * 86400)], width: 120));
       expect(row, contains('░'));
-      expect(row, contains('100% last known'));
+      expect(row, contains('100% free, last known'));
     });
 
     test('a 49-day-old credit row keeps its number and loses its meter', () {
@@ -1876,7 +1882,7 @@ void main() {
       expect(row, isNot(contains('█')));
       expect(
         row,
-        contains('100% last known'),
+        contains('100% free, last known'),
         reason: 'the last observed value is still the most useful thing left',
       );
       expect(row, contains('cached 49d'));

@@ -772,8 +772,10 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
         columns.forecast &&
         forecast != null &&
         w.label == binding?.label;
-    final headroomText =
-        '${remaining.round().toString().padLeft(3)}% ${evidenceLabel ?? 'free'}';
+    final headroomNumber = remaining.round().toString().padLeft(3);
+    final headroomText = evidenceLabel == null
+        ? '$headroomNumber% free'
+        : '$headroomNumber% free, $evidenceLabel';
     lines.add(_line([
       ..._rowHead(first ? q.displayName : '', w.label,
           selected: first && selected, palette: p),
@@ -954,9 +956,11 @@ List<String> _detailRows(
   // A redeemable off-cycle reset leads in green: it is the way to keep working
   // now, so it must not read as one more dim note under a spent card.
   final poolSplit = disagreementModelQuotas(q, now);
-  if (poolSplit.isNotEmpty) {
-    for (final line
-        in _wrapReason(disagreementPoolSummary(poolSplit), detailRoom)) {
+  final crowded = crowdedModelUsageGlance(q, now);
+  if (poolSplit.isNotEmpty || crowded != null) {
+    final summary =
+        poolSplit.isNotEmpty ? disagreementPoolSummary(poolSplit) : crowded!;
+    for (final line in _wrapReason(summary, detailRoom)) {
       rows.add(_line([
         const _Cell('  '),
         _Cell(' ' * (_nameW + _labelW)),

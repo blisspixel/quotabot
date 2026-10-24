@@ -585,7 +585,7 @@ void main() {
       final tile = tester.widget<ProviderTile>(find.byType(ProviderTile));
       expect(tile.quota.stale, isTrue);
       expect(tile.insights, isNull);
-      expect(_cardText('70% last known'), findsOneWidget);
+      expect(_cardText('70% free, last known'), findsOneWidget);
       expect(find.text('Recent usage checks unavailable'), findsOneWidget);
       expect(find.textContaining('Next: Codex'), findsNothing);
       expect(find.byTooltip('Refresh now'), findsOneWidget);

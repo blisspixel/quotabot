@@ -798,6 +798,11 @@ class AntigravityAdapter {
             ? 'connected (this machine only); Antigravity local status is available, but live quota windows are not exposed here yet'
             : 'connected (this machine only); Antigravity is not returning live quota here yet');
       }
+      final cardWindows = antigravityWindowsWithModelCluster(
+        windows,
+        liveModelQuotas,
+        asOf,
+      );
 
       return ProviderQuota(
         provider: id,
@@ -809,7 +814,7 @@ class AntigravityAdapter {
         details: [
           if (source.localNote != null) source.localNote!,
         ],
-        windows: windows,
+        windows: cardWindows,
         modelQuotas: liveModelQuotas,
       );
     } on _AntigravityRequestFailure catch (failure) {

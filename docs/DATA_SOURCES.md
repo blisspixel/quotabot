@@ -215,11 +215,12 @@ PROV-DM conformance.
   or disabled paid continuation.
 
 - Successful reads with provider-proven account identity can share the exact
-  admitted capture across commands for 30 seconds by default. The scope is the
+  admitted capture across commands for 20 minutes by default. The scope is the
   current credential generation; different credentials do not share a read
   guard merely because they might represent one subscription. Configure
-  `QUOTABOT_MIN_LIVE_INTERVAL` from 0 through 60 seconds or pass `--fresh` to
-  bypass successful sharing. Neither bypasses provider backoff. Original
+  `QUOTABOT_MIN_LIVE_INTERVAL` from 0 through 60 seconds to override that
+  window, or pass `--fresh` to bypass successful sharing. Neither bypasses
+  provider backoff. Other providers keep a 30 second share. Original
   capture time, reset validity, drift, canonical evidence, and current credential
   discovery are checked before reuse. `shared_from_capture_at` distinguishes
   this recent live evidence from stale fallback. A shared read makes no usage
@@ -252,7 +253,11 @@ PROV-DM conformance.
   `claudeAiOauth.expiresAt` is still in the future), then quotabot's own
   refreshable grant from `quotabot login claude` when the host token is missing
   or expired. Both are sent as a bearer token with the
-  `anthropic-beta: oauth-2025-04-20` header. quotabot never writes the host
+  `anthropic-beta: oauth-2025-04-20` header and
+  `User-Agent: claude-code/2.1`. An unrecognized agent is placed in a separate
+  429 bucket on this metadata route, so the same bearer never returns the
+  account windows. That prefix is the one captured for this endpoint through
+  September 2026. quotabot never writes the host
   credentials file.
 - Current responses provide a `limits` array with shared session and weekly rows
   plus model-scoped weekly rows, each carrying a percent. Weekly rows also carry
@@ -469,9 +474,14 @@ State lives in the Antigravity globalStorage SQLite database at
   Gemini weekly window does not spend the Claude/GPT pool. When two to eight
   current named pools disagree, doctor, top, and the desktop card name that
   split. The suggestion names the open pool and any spent pools, and does not
-  call the whole provider free. A longer table stays off the glance; the
-  suggestion then says an open model pool remains while the account card is
-  tighter. Per-model
+  call the whole provider free. A longer table stays off the glance as
+  individual bars. When more than eight current rows share a used percent at
+  least one point tighter than every grouped summary window, and at least two
+  rows share that percent, quotabot adds a `models` window at the cluster's
+  used percent. Provider headroom follows that window, so a zeroed five-hour
+  summary cannot read as 100% free while those models are in use. The grouped
+  summary windows remain. The suggestion then says an open model pool remains
+  while the account card is tighter. Per-model
   `fetchAvailableModels` rows remain model-facing gates and are never added
   together. A present `isExhausted` that is not a boolean rejects that live
   table. `isExhausted: true` on a row with a reset is 100% used, even when

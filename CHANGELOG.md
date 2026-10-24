@@ -4,6 +4,32 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.18 - 2026-10-24
+
+- Claude account usage reads send `User-Agent: claude-code/2.1` with the
+  existing bearer and `anthropic-beta` header. Without that agent, the usage
+  endpoint answers HTTP 429 and the last account snapshot stays on the card.
+  The read is still metadata only. Print mode stays forbidden.
+- The desktop first-run prompt stays dismissed after "Skip for now" or after
+  the window closes on it. A later launch does not ask again. An install that
+  already saved a window position, a hidden provider, or a delivered reset
+  reminder is treated as already past that prompt. Finishing the walkthrough
+  still saves the chosen providers.
+- A stale or drifted remaining percent says `N% free, last known` or `N% free,
+  last trusted`, on the same scale as a live `N% free`. A rate-limited stale
+  meter uses the warning color, so a full last-known bar is not painted as
+  current availability. Doctor stays on the used scale.
+- Successful Claude usage reads are shared for 20 minutes when
+  `QUOTABOT_MIN_LIVE_INTERVAL` is unset. That env value, from 0 through 60
+  seconds, still overrides it. Other providers keep the 30 second default.
+  `--fresh` still bypasses sharing and still honors provider backoff. The
+  account-wide usage endpoint remains the read; print mode stays forbidden.
+- An Antigravity weekly bucket that stays empty while its reset tracks the
+  clock no longer quarantines model rows that recorded real usage. The empty
+  bucket is dropped from the account card. A model table longer than eight
+  rows names that tighter cluster on the glance. When at least two of those
+  rows share a used percent tighter than the grouped summary, a `models`
+  window carries that percent and provider headroom follows it.
 - The MCP server accepts `2026-07-28` beside legacy initialization through
   `2025-11-25`. Metadata-bearing requests do not need a session. Quota list
   and read results stay private with a zero TTL. Cancelling one
@@ -23,6 +49,9 @@ Notable changes to quotabot. Newest first.
   at the clean 1.102.2 pin. The removed 1.107.0 wheel is not used.
 - Raise the MCP example lock's Hono package to 4.13.13 and its Node adapter
   to 2.1.5. The MCP SDK pin stays 1.32.1.
+- Agent editing rules say to check leftover worktrees, branches, and open
+  pull requests before starting a parallel attempt, and to remove a worktree
+  or branch only when its work is merged, on main, or pushed.
 
 ## 0.11.17 - 2026-10-20
 

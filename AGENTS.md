@@ -58,6 +58,9 @@ verification, is [CLAUDE.md](CLAUDE.md).
   inspect upstream changes, and run the full project gates. Retain advisory
   intake as an emergency guard: close any unexpected bot pull request and delete
   its branch, manually if the automation fails.
+- Before new work, check leftover worktrees, branches, and open pull requests,
+  then finish or park that work. The session-start and cleanup contract is in
+  [CLAUDE.md](CLAUDE.md).
 
 ## Project status
 
@@ -113,12 +116,13 @@ download a release binary instead. Build details and prerequisites:
 ## How to call it
 
 From version 0.11.11, successful provider-identified Claude captures are
-shared through the existing credential-scoped read gate for 30 seconds by
-default. `shared_from_capture_at` preserves original capture provenance, while
-`stale` remains false only for a still-trusted recent live capture. Sharing
-never advances `as_of`, bypasses a cooldown, or admits drifted evidence.
-CLI quota reads accept `--fresh`; `QUOTABOT_MIN_LIVE_INTERVAL` accepts 0 through
-60 seconds. Other providers keep their existing live-read behavior.
+shared through the existing credential-scoped read gate. The default reuse
+window is 20 minutes. `shared_from_capture_at` preserves original capture
+provenance, while `stale` remains false only for a still-trusted recent live
+capture. Sharing never advances `as_of`, bypasses a cooldown, or admits drifted
+evidence. CLI quota reads accept `--fresh`; `QUOTABOT_MIN_LIVE_INTERVAL`
+accepts 0 through 60 seconds and overrides the Claude default. Other providers
+keep their 30 second live-read interval.
 Provider-route local candidates add `local_model` advice with the selected ID,
 context, readiness, advisory fit, context floor, and reason. Default advice uses
 a 32K context heuristic and explains shortfalls without changing provider

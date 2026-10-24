@@ -99,6 +99,53 @@ List<ModelQuota> disagreementModelQuotas(ProviderQuota quota, int now) {
   return rows;
 }
 
+/// One glance line when an Antigravity model table is too long for the pool
+/// split and a cluster is materially more used than the account windows.
+///
+/// The grouped weekly bucket can stay near zero while many catalog rows record
+/// the same real spend. More than eight rows stay off the card as bars. This
+/// line names that tighter cluster so the account window cannot look unused.
+String? crowdedModelUsageGlance(ProviderQuota quota, int now) {
+  if (quota.provider != antigravityProviderId || quota.windows.isEmpty) {
+    return null;
+  }
+  if (disagreementModelQuotas(quota, now).isNotEmpty) return null;
+  final rows = <ModelQuota>[
+    for (final row in quota.modelQuotas)
+      if (row.usedPercent != null &&
+          row.usedPercent!.isFinite &&
+          row.model.trim().isNotEmpty &&
+          isCurrentModelQuotaEvidenceAt(row, now))
+        row,
+  ];
+  if (rows.length <= 8) return null;
+  var accountUsed = 0.0;
+  var sawWindow = false;
+  for (final window in quota.windows) {
+    final used = window.percent;
+    if (used == null || !used.isFinite) continue;
+    sawWindow = true;
+    if (used > accountUsed) accountUsed = used;
+  }
+  if (!sawWindow) return null;
+  final groups = <int, int>{};
+  for (final row in rows) {
+    final bucket = row.usedPercent!.round();
+    groups[bucket] = (groups[bucket] ?? 0) + 1;
+  }
+  int? tightest;
+  var count = 0;
+  for (final entry in groups.entries) {
+    if (tightest == null || entry.key > tightest) {
+      tightest = entry.key;
+      count = entry.value;
+    }
+  }
+  if (tightest == null || tightest - accountUsed < 1) return null;
+  final noun = count == 1 ? 'model is' : 'models are';
+  return '$count $noun about $tightest% used, tighter than the account window';
+}
+
 String _disagreementPoolName(ModelQuota row) {
   final window = row.windowLabel;
   if (window == null || window.isEmpty) return row.model;

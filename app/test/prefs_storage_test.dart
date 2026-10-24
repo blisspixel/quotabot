@@ -98,6 +98,30 @@ void main() {
     }
   });
 
+  test('first-run dismissal is remembered separately from completion', () {
+    expect(const Prefs().firstRunPromptSettled, isFalse);
+    expect(
+      const Prefs(enableNotifications: false).firstRunPromptSettled,
+      isFalse,
+    );
+    expect(const Prefs(setupDismissed: true).firstRunPromptSettled, isTrue);
+    expect(const Prefs(windowX: 1, windowY: 2).firstRunPromptSettled, isTrue);
+    expect(const Prefs(hidden: {'kiro'}).firstRunPromptSettled, isTrue);
+    expect(
+      const Prefs(handledResetReminders: {1: 2}).firstRunPromptSettled,
+      isTrue,
+    );
+
+    final decoded = Prefs.fromJson({'setup_dismissed': true});
+    expect(decoded.setupDone, isFalse);
+    expect(decoded.setupDismissed, isTrue);
+    expect(decoded.toJson()['setup_dismissed'], isTrue);
+    expect(
+      const Prefs(setupDone: true).copyWith(setupDismissed: true).setupDone,
+      isTrue,
+    );
+  });
+
   test('window position persists only as a finite coordinate pair', () {
     expect(const Prefs(windowX: 120).toJson(), isNot(contains('window_x')));
     expect(const Prefs(windowY: 80).toJson(), isNot(contains('window_y')));

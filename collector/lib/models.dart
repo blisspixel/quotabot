@@ -997,6 +997,52 @@ class ProviderQuota {
         retryAfterSeconds: metadataFrom?.retryAfterSeconds ?? retryAfterSeconds,
       );
 
+  /// Drops account windows whose labels are in [labels]. Model rows stay.
+  /// Used when an idle window's reset tracks the clock and must not remain the
+  /// account card beside pools that recorded real usage.
+  ProviderQuota withoutWindowLabels(Set<String> labels) {
+    if (labels.isEmpty ||
+        windows.every((window) => !labels.contains(window.label))) {
+      return this;
+    }
+    return ProviderQuota(
+      sharedFromCaptureAt: sharedFromCaptureAt,
+      provider: provider,
+      displayName: displayName,
+      account: account,
+      asOf: asOf,
+      plan: plan,
+      planEvidenceSource: planEvidenceSource,
+      planEvidenceAsOf: planEvidenceAsOf,
+      source: source,
+      sourceClass: sourceClass,
+      supplementalManualQuota: supplementalManualQuota,
+      ok: ok,
+      error: error,
+      windows: [
+        for (final window in windows)
+          if (!labels.contains(window.label)) window,
+      ],
+      stale: stale,
+      kind: kind,
+      status: status,
+      active: active,
+      details: details,
+      models: models,
+      localHardware: localHardware,
+      modelQuotas: modelQuotas,
+      requestAdmission: requestAdmission,
+      suspect: suspect,
+      driftReason: driftReason,
+      driftObservedAt: driftObservedAt,
+      perMachine: perMachine,
+      pipeHealth: pipeHealth,
+      httpStatus: httpStatus,
+      retryAfterSeconds: retryAfterSeconds,
+      resetCreditsAvailable: resetCreditsAvailable,
+    );
+  }
+
   /// Returns a copy annotated with a drift/plausibility [reason], leaving the
   /// reading itself intact so it is shown, not hidden.
   ProviderQuota withSuspect(String reason) => ProviderQuota(

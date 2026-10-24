@@ -10,6 +10,33 @@ import 'package:quotabot_collector/provider_read_gate.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('Claude reuses a successful usage read for 20 minutes by default', () {
+    expect(
+      ProviderReadGate.claudeUsageMinimumLiveInterval(configuredSeconds: ''),
+      ProviderReadGate.claudeUsageReuseInterval,
+    );
+    expect(
+      ProviderReadGate.claudeUsageMinimumLiveInterval(configuredSeconds: '15'),
+      const Duration(seconds: 15),
+    );
+    expect(
+      ProviderReadGate.claudeUsageMinimumLiveInterval(configuredSeconds: '0'),
+      Duration.zero,
+    );
+    expect(
+      ProviderReadGate.claudeUsageMinimumLiveInterval(configuredSeconds: '90'),
+      const Duration(seconds: 30),
+    );
+    expect(
+      ProviderReadGate.claudeUsageReuseWindowLabel(configuredSeconds: ''),
+      '20m',
+    );
+    expect(
+      ProviderReadGate.claudeUsageReuseWindowLabel(configuredSeconds: '45'),
+      '45s',
+    );
+  });
+
   test('two independent processes share one successful metadata operation',
       () async {
     final sharedDirectory =

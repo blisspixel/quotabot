@@ -726,6 +726,14 @@ class Dashboard extends StatefulWidget {
          'A non-demo test dashboard requires an injected collector.',
        );
 
+  @visibleForTesting
+  static void dismissFirstRunPromptForCloseIn(State<StatefulWidget> state) {
+    if (state is! _DashboardState) {
+      throw ArgumentError.value(state, 'state', 'dashboard state required');
+    }
+    state.dismissFirstRunPromptForClose();
+  }
+
   @override
   State<Dashboard> createState() => _DashboardState();
 }
@@ -742,6 +750,7 @@ class _DashboardState extends State<Dashboard>
   late bool _enableNotifications = widget.prefs.enableNotifications;
   late bool _showAccounts = widget.prefs.showAccounts;
   late bool _setupDone = widget.prefs.setupDone;
+  late bool _setupDismissed = widget.prefs.setupDismissed;
   late TextSize _textSize = widget.prefs.textSize;
   late String? _webhookUrl = widget.prefs.webhookUrl;
   late bool _webhookAllowExternal = widget.prefs.webhookAllowExternal;
@@ -1433,8 +1442,22 @@ class _DashboardState extends State<Dashboard>
   @override
   void onWindowClose() {
     // Closing hides to the tray (see [_initTray]); Quit lives in the tray menu.
+    // A first-run prompt that is still open goes with the window and stays
+    // dismissed, so the next show does not ask again.
     _windowVisible = false;
+    dismissFirstRunPromptForClose();
     unawaited(windowManager.hide());
+  }
+
+  @visibleForTesting
+  void dismissFirstRunPromptForClose() {
+    if (!_firstRunReviewOpen || _setupDone || _setupDismissed || !mounted) {
+      return;
+    }
+    final navigator = Navigator.of(context, rootNavigator: true);
+    if (navigator.canPop()) {
+      navigator.pop(const FirstRunResult.skipped());
+    }
   }
 
   @override
@@ -1492,6 +1515,7 @@ class _DashboardState extends State<Dashboard>
       webhookUrl: _webhookUrl,
       webhookAllowExternal: _webhookAllowExternal,
       setupDone: _setupDone,
+      setupDismissed: _setupDismissed,
       windowX: _windowPos?.dx,
       windowY: _windowPos?.dy,
     );
@@ -2424,10 +2448,15 @@ class _DashboardState extends State<Dashboard>
   }
 
   void _maybeStartFirstRun() {
-    if (_setupDone ||
+    if (_loading ||
+        _setupDone ||
+        _setupDismissed ||
         _firstRunSession.deferred ||
-        _firstRunReviewOpen ||
-        _loading) {
+        _firstRunReviewOpen) {
+      return;
+    }
+    if (widget.prefs.firstRunPromptSettled) {
+      _rememberFirstRunDismissal();
       return;
     }
     if (widget._demoModeOverride ?? _demoMode) return;
@@ -2436,8 +2465,16 @@ class _DashboardState extends State<Dashboard>
     });
   }
 
+  void _rememberFirstRunDismissal() {
+    _firstRunSession.deferred = true;
+    if (_setupDismissed) return;
+    _setupDismissed = true;
+    unawaited(_persistPrefs());
+  }
+
   Future<void> _reviewFirstRunSetup() async {
     if (_setupDone ||
+        _setupDismissed ||
         _firstRunSession.deferred ||
         _firstRunReviewOpen ||
         !mounted) {
@@ -2445,6 +2482,7 @@ class _DashboardState extends State<Dashboard>
     }
     _firstRunReviewOpen = true;
     final restoreCompact = _compact;
+    var rememberDismissal = false;
     try {
       if (_compact) {
         setState(() => _compact = false);
@@ -2463,7 +2501,9 @@ class _DashboardState extends State<Dashboard>
       );
       if (!mounted) return;
       if (result == null || result.skipped) {
+        rememberDismissal = true;
         _firstRunSession.deferred = true;
+        _setupDismissed = true;
         return;
       }
       setState(() {
@@ -2482,6 +2522,9 @@ class _DashboardState extends State<Dashboard>
         _applySize();
       }
       _firstRunReviewOpen = false;
+      // Persist after compact mode is restored so a dismissal does not save
+      // the temporary expanded layout.
+      if (rememberDismissal && mounted) unawaited(_persistPrefs());
     }
   }
 
@@ -5339,7 +5382,13 @@ class ProviderTile extends StatelessWidget {
     final fg = chrome.foreground;
     final now =
         nowEpochSeconds ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final views = quota.windows.map((w) => _view(quota, w, now)).toList();
+    // A promoted Antigravity model cluster is the binding spend. Hide an
+    // unused summary bar on that card so a zeroed 5h bucket is not painted as
+    // 100% free beside it. Other providers keep every window.
+    final shownWindows = quota.windows.any((window) => window.label == 'models')
+        ? doctorVisibleWindows(quota, now)
+        : quota.windows;
+    final views = shownWindows.map((w) => _view(quota, w, now)).toList();
     final completeWindowEvidence = quota.windows.every((window) {
       final percent = window.percent;
       return percent != null &&
@@ -5381,6 +5430,10 @@ class ProviderTile extends StatelessWidget {
         ? muted
         : binding == null
         ? muted
+        : quota.pipeHealth == providerPipeHealthThrottled &&
+              quota.stale &&
+              binding.remaining >= 50
+        ? chrome.warning
         : _availColor(binding.remaining, chrome);
     final hasInsights = insights != null && insights!.samples > 0;
     // The tight default shows only the binding windows. Any card can expand to
@@ -5704,6 +5757,9 @@ class ProviderTile extends StatelessWidget {
                       fg: fg,
                       evidenceLabel: evidenceLabel,
                       requestsBlocked: quota.requestAdmission.blocksRequests,
+                      rateLimited:
+                          quota.pipeHealth == providerPipeHealthThrottled &&
+                          quota.stale,
                       showMeter: hasDisplayableStaleMeterAt(quota, now),
                     ),
                   ),
@@ -5717,7 +5773,24 @@ class ProviderTile extends StatelessWidget {
                       fg: fg,
                       evidenceLabel: evidenceLabel,
                       requestsBlocked: quota.requestAdmission.blocksRequests,
+                      rateLimited:
+                          quota.pipeHealth == providerPipeHealthThrottled &&
+                          quota.stale,
                       showMeter: hasDisplayableStaleMeterAt(quota, now),
+                    ),
+                  ),
+                ),
+              if (crowdedModelUsageGlance(quota, now) case final crowded?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    crowded,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: AppType.small,
+                      fontWeight: FontWeight.w600,
+                      color: chrome.warning,
                     ),
                   ),
                 ),
@@ -5783,6 +5856,9 @@ class ProviderTile extends StatelessWidget {
                         modelQuota,
                         now,
                       ),
+                      rateLimited:
+                          quota.pipeHealth == providerPipeHealthThrottled &&
+                          quota.stale,
                       showMeter: hasDisplayableStaleMeterAt(quota, now),
                       showCaption: showDetail,
                       qualifyWindow: quota.provider == antigravityProviderId,
@@ -5909,6 +5985,7 @@ class ProviderTile extends StatelessWidget {
     required ScopedModelSpendEvidence? spendEvidence,
     required String? evidenceLabel,
     required bool showMeter,
+    bool rateLimited = false,
     bool showCaption = true,
     bool qualifyWindow = false,
   }) {
@@ -5944,6 +6021,7 @@ class ProviderTile extends StatelessWidget {
           muted: muted,
           fg: fg,
           evidenceLabel: evidenceLabel,
+          rateLimited: rateLimited,
           showMeter: showMeter,
         ),
       ],
@@ -6551,6 +6629,10 @@ class WindowBar extends StatelessWidget {
   final String? evidenceLabel;
   final bool requestsBlocked;
 
+  /// A throttled stale read. A high remaining percent must not use the healthy
+  /// green, because that bar is last-known evidence, not current availability.
+  final bool rateLimited;
+
   /// Whether the proportional meter may still be drawn. Cached evidence with no
   /// reset boundary keeps its last known number past the age ceiling, but a
   /// filled track would assert a currency it cannot support. See
@@ -6563,6 +6645,7 @@ class WindowBar extends StatelessWidget {
     required this.fg,
     this.evidenceLabel,
     this.requestsBlocked = false,
+    this.rateLimited = false,
     this.showMeter = true,
   });
 
@@ -6572,6 +6655,8 @@ class WindowBar extends StatelessWidget {
     final chrome = AppChromeTheme.of(context);
     final color = requestsBlocked || evidenceLabel == 'last trusted'
         ? muted
+        : rateLimited && remaining >= 50
+        ? chrome.warning
         : _availColor(remaining, chrome);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
@@ -6580,7 +6665,7 @@ class WindowBar extends StatelessWidget {
     final value = evidenceLabel != null
         ? view.rolledOver
               ? 'reset passed ($evidenceLabel)'
-              : '${remaining.round()}% $evidenceLabel'
+              : remainingHeadroomPhrase(remaining, evidenceLabel)
         : view.rolledOver
         ? 'ready'
         : showsReset

@@ -6,11 +6,11 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
 ## The desktop widget
 
 Version 0.11.11 shares recent provider-identified Claude captures across
-CLI, desktop, HTTP, and MCP processes. The default window is 30 seconds.
+CLI, desktop, HTTP, and MCP processes. The default Claude window is 20 minutes.
 `live shared` preserves the original capture age and differs from stale cached
 fallback. Set `QUOTABOT_MIN_LIVE_INTERVAL` to an integer from 0 through 60
-seconds; 0 disables sharing, and invalid values use 30. Other providers keep
-their existing reads. CLI quota commands accept `--fresh` to bypass successful
+seconds to override that window; 0 disables sharing, and invalid values use 30.
+Other providers keep their 30 second reads. CLI quota commands accept `--fresh` to bypass successful
 sharing; provider cooldowns still apply. `verify --require-live` accepts a trusted
 shared capture produced by the selected adapter, with its original age visible.
 
@@ -87,11 +87,12 @@ other concrete-model policies retain their existing ordering.
   slow - retrying", HTTP 429 reads as "rate limited - retrying", and HTTP 5xx
   reads as "provider error - retrying". Temporary provider pushback does not
   offer a reconnect action; HTTP 401 and 403 keep that repair path.
-- **First run:** Review opens the provider-status dialog and records completion
-  only after the user finishes it. "Skip for now" defers the walkthrough for
-  the current app process only and writes no completed preference, so refreshes
-  and window recreation in that process stay quiet but a later app launch asks
-  again. Finishing the walkthrough persists completion across launches.
+- **First run:** The provider dialog records completion when the user finishes
+  it, and that choice of providers is saved. "Skip for now", and closing the
+  window while the dialog is open, remember the dismissal. Later launches do
+  not ask again. An install that already saved a window position, a hidden
+  provider, or a delivered reset reminder does not ask either. Providers can
+  still be shown or hidden from the Providers menu.
 - **Route signal:** the expanded header shows the next recommended route in
   accent weight, or an amber no-safe-route fallback. Measured included quota
   reads as percent included; local fallback stays labeled local. Compact mode

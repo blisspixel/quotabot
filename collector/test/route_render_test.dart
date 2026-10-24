@@ -74,7 +74,7 @@ void main() {
       style: plain,
       provenance: '[cached]',
     );
-    expect(staleLine, contains('48% last known'));
+    expect(staleLine, contains('48% free, last known'));
     expect(staleLine, contains('unavailable'));
   });
 
@@ -137,8 +137,9 @@ void main() {
       style: plain,
       provenance: '[cached]',
     );
-    expect(line, contains('last trusted'));
-    expect(line, isNot(contains('free')));
+    expect(line, contains('70% free, last trusted'));
+    expect(line, contains('unavailable'));
+    expect(line, isNot(contains(RegExp(r'70% free(?!,)'))));
   });
 
   test('an available model-budget route reads as an open pool', () {

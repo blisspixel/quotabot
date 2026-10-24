@@ -1127,6 +1127,61 @@ void main() {
       );
     });
 
+    test('recorded model usage keeps a sliding empty weekly off the card', () {
+      const week = 7 * 86400;
+      ProviderQuota reading(int observedAt, int weeklyReset) => ProviderQuota(
+            provider: antigravityProviderId,
+            displayName: 'Antigravity',
+            account: 'a',
+            asOf: observedAt,
+            windows: [
+              QuotaWindow(
+                label: '5h',
+                usedPercent: 0,
+                resetsAt: observedAt + fiveHours,
+              ),
+              QuotaWindow(
+                label: 'weekly',
+                usedPercent: 0,
+                resetsAt: weeklyReset,
+              ),
+            ],
+            modelQuotas: const [
+              ModelQuota(
+                model: 'Gemini 3.5 Flash',
+                usedPercent: 85,
+                resetsAt: t0 + week,
+              ),
+            ],
+          );
+      final previous = reading(t0, t0 + week);
+      final fresh = reading(t0 + 3600, t0 + 3600 + week);
+      final admission = admitQuotaEvidence(
+        fresh,
+        previous,
+        observedAt: t0 + 3600,
+      );
+      expect(admission.driftReason, isNull);
+      expect(admission.shouldPersist, isTrue);
+      expect(
+        admission.snapshot.windows.map((window) => window.label),
+        ['5h'],
+      );
+      expect(admission.snapshot.modelQuotas.single.usedPercent, 85);
+    });
+
+    test('a sliding weekly with no other usage still drifts', () {
+      final previous = modelSnap(t0, 0, t0 + fiveHours);
+      final fresh = modelSnap(t0 + 3600, 0, t0 + 3600 + fiveHours);
+      final admission = admitQuotaEvidence(
+        fresh,
+        previous,
+        observedAt: t0 + 3600,
+      );
+      expect(admission.driftReason, contains('reset never approaches'));
+      expect(admission.shouldPersist, isFalse);
+    });
+
     test('an idle five-hour rolling burst may stay five hours out', () {
       ProviderQuota fiveHour(int observedAt, int resetsAt) => ProviderQuota(
             provider: antigravityProviderId,

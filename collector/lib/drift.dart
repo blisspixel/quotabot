@@ -482,14 +482,25 @@ QuotaEvidenceAdmission admitQuotaEvidence(
       !isComparableQuotaEvidence(fresh, previous)) {
     return QuotaEvidenceAdmission(snapshot: fresh, shouldPersist: true);
   }
-  final detected = detectQuotaDrift(
+  final omitted = idleClockTrackingWindowLabels(
     fresh,
     previous,
     observedAt: observedAt,
   );
+  final stripped = omitted.isEmpty ? fresh : fresh.withoutWindowLabels(omitted);
+  // Dropping every account window would hide the model rows on the card.
+  // Keep the original snapshot so a sliding-only weekly allowance still drifts.
+  final compared = stripped.windows.isEmpty ? fresh : stripped;
+  final ignored = identical(compared, fresh) ? const <String>{} : omitted;
+  final detected = detectQuotaDrift(
+    compared,
+    previous,
+    observedAt: observedAt,
+    ignoredMissingLabels: ignored,
+  );
   final reason = detected == null ? null : boundedQuotaDriftReason(detected);
   if (reason == null) {
-    return QuotaEvidenceAdmission(snapshot: fresh, shouldPersist: true);
+    return QuotaEvidenceAdmission(snapshot: compared, shouldPersist: true);
   }
   return QuotaEvidenceAdmission(
     snapshot: previous.withProviderDrift(reason, observedAt),
@@ -602,6 +613,54 @@ bool _hasAdvancedResetEvidence(
   return compared;
 }
 
+/// Account windows whose reset advances with the clock while that window
+/// records no usage, when some other window or model row did record usage.
+///
+/// Those windows are not a fixed allowance. Leaving them on the account card
+/// shows a permanent full bar and, if the whole snapshot is quarantined, hides
+/// the rows that recorded spend. A snapshot with no other usage still drifts.
+Set<String> idleClockTrackingWindowLabels(
+  ProviderQuota fresh,
+  ProviderQuota previous, {
+  required int observedAt,
+}) {
+  if (!isComparableQuotaEvidence(fresh, previous)) return const {};
+  final prevWindows = {
+    for (final window in previous.windows) window.label: window
+  };
+  final labels = <String>{};
+  for (final window in fresh.windows) {
+    final prior = prevWindows[window.label];
+    if (prior == null) continue;
+    final never = _resetNeverApproaches(
+      freshUsed: window.percent,
+      freshReset: window.resetsAt,
+      prevUsed: prior.percent,
+      prevReset: prior.resetsAt,
+      observedAt: observedAt,
+      previousObservedAt: previous.asOf,
+      windowLabel: window.label,
+    );
+    if (never != null && _hasRecordedUsageOutside(fresh, window.label)) {
+      labels.add(window.label);
+    }
+  }
+  return labels;
+}
+
+bool _hasRecordedUsageOutside(ProviderQuota fresh, String label) {
+  for (final window in fresh.windows) {
+    if (window.label == label) continue;
+    final used = window.percent;
+    if (used != null && used > _neverApproachesIdleUsedPercent) return true;
+  }
+  for (final model in fresh.modelQuotas) {
+    final used = model.usedPercent;
+    if (used != null && used > _neverApproachesIdleUsedPercent) return true;
+  }
+  return false;
+}
+
 /// Returns a short reason when [fresh] is implausible versus [previous] - the
 /// signature of a silently drifted read rather than normal consumption or a
 /// reset - or null when the reading is consistent. Windows are matched by label
@@ -610,6 +669,7 @@ String? detectQuotaDrift(
   ProviderQuota fresh,
   ProviderQuota previous, {
   int? observedAt,
+  Set<String> ignoredMissingLabels = const {},
 }) {
   final observation = observedAt ?? fresh.asOf;
   // A boundary that never approaches invalidates the provider's own window.
@@ -636,7 +696,10 @@ String? detectQuotaDrift(
   }
   final freshLabels = {for (final w in fresh.windows) w.label};
   for (final prior in previous.windows) {
-    if (freshLabels.contains(prior.label)) continue;
+    if (freshLabels.contains(prior.label) ||
+        ignoredMissingLabels.contains(prior.label)) {
+      continue;
+    }
     if (_isLegacyClaudeScopedWindow(previous, prior)) continue;
     // The one admitted Codex shape change is the observed 5h plus weekly to
     // weekly-only collapse. Losing weekly is always drift, even when its reset

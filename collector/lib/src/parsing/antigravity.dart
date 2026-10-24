@@ -67,6 +67,84 @@ List<QuotaWindow>? antigravityQuotaSummaryWindows(
   ];
 }
 
+/// Adds one `models` window when a long catalog cluster is tighter than the
+/// grouped summary.
+///
+/// `agy /usage` shows the per-model rows. A grouped five-hour bucket can stay
+/// at zero while many of those rows share one real used percent. More than
+/// eight current rows never become individual glance bars, so the shared
+/// cluster becomes a window and provider headroom follows it. The original
+/// summary windows stay in the snapshot. Eight or fewer rows keep the existing
+/// pool-split glance instead of gaining this window.
+List<QuotaWindow> antigravityWindowsWithModelCluster(
+  List<QuotaWindow> windows,
+  List<ModelQuota> modelQuotas,
+  int now,
+) {
+  if (windows.isEmpty) return windows;
+  var accountUsed = 0.0;
+  for (final window in windows) {
+    final used = window.percent;
+    if (used == null || !used.isFinite || used < 0 || used > 100) {
+      return windows;
+    }
+    if (used > accountUsed) accountUsed = used;
+  }
+
+  final rows = <ModelQuota>[
+    for (final row in modelQuotas)
+      if (row.usedPercent != null &&
+          row.usedPercent!.isFinite &&
+          row.usedPercent! >= 0 &&
+          row.usedPercent! <= 100 &&
+          row.model.trim().isNotEmpty &&
+          (row.resetsAt == null || row.resetsAt! > now))
+        row,
+  ];
+  if (rows.length <= 8) return windows;
+
+  final groups = <int, List<ModelQuota>>{};
+  for (final row in rows) {
+    groups.putIfAbsent(row.usedPercent!.round(), () => []).add(row);
+  }
+  int? tightest;
+  List<ModelQuota>? cluster;
+  for (final entry in groups.entries) {
+    if (tightest == null || entry.key > tightest) {
+      tightest = entry.key;
+      cluster = entry.value;
+    }
+  }
+  if (tightest == null ||
+      cluster == null ||
+      cluster.length < 2 ||
+      tightest - accountUsed < 1) {
+    return windows;
+  }
+  var used = cluster.first.usedPercent!;
+  var reset = cluster.first.resetsAt;
+  var sharedReset = true;
+  for (final row in cluster.skip(1)) {
+    final rowUsed = row.usedPercent!;
+    if (rowUsed > used) used = rowUsed;
+    if (row.resetsAt != reset) sharedReset = false;
+  }
+  if (windows.any((window) {
+    final percent = window.percent;
+    return percent != null && (percent - used).abs() < 0.5;
+  })) {
+    return windows;
+  }
+  return [
+    ...windows,
+    QuotaWindow(
+      label: 'models',
+      usedPercent: used,
+      resetsAt: sharedReset ? reset : null,
+    ),
+  ];
+}
+
 /// Group-level Antigravity model quotas from `retrieveUserQuotaSummary`.
 ///
 /// Each named pool becomes one row whose used percent is its tightest active

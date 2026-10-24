@@ -39,7 +39,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.11.17';
+const _version = '0.11.18';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -3680,12 +3680,12 @@ Future<void> _check(
   final pct = head == null
       ? ''
       : q.driftReason != null
-          ? '  ${style.dim('${head.round()}% last trusted')}'
+          ? '  ${style.dim(remainingHeadroomPhrase(head, 'last trusted'))}'
           : q.stale
-              ? '  ${style.dim('${head.round()}% last known')}'
+              ? '  ${style.dim(remainingHeadroomPhrase(head, 'last known'))}'
               : !trusted
-                  ? '  ${style.dim('${head.round()}% unverified')}'
-                  : '  ${style.health(head, '${head.round()}% free')}';
+                  ? '  ${style.dim(remainingHeadroomPhrase(head, 'unverified'))}'
+                  : '  ${style.health(head, remainingHeadroomPhrase(head))}';
   final rs = reset == null
       ? ''
       : !trusted && reset <= now
@@ -4228,7 +4228,7 @@ void _printDoctor(
     if (q.provider == 'claude') {
       _humanLine(
         '  $indent ${_stateColumn('shared reads')} '
-        '${ProviderReadGate.configuredMinimumLiveInterval.inSeconds}s window; '
+        '${ProviderReadGate.claudeUsageReuseWindowLabel()} window; '
         '--fresh requests new metadata, subject to provider backoff.',
       );
     }
@@ -4249,10 +4249,13 @@ void _printDoctor(
       _humanLine('  $indent ${_stateColumn('')} $d');
     }
     final poolSplit = disagreementModelQuotas(q, now);
+    final crowded = crowdedModelUsageGlance(q, now);
     if (poolSplit.isNotEmpty) {
       _humanLine(
         '  $indent ${_stateColumn('pools')} ${disagreementPoolSummary(poolSplit)}',
       );
+    } else if (crowded != null) {
+      _humanLine('  $indent ${_stateColumn('pools')} $crowded');
     }
     final modelQuotas = doctorVisibleModelQuotas(q, now: now);
     if (modelQuotas.isNotEmpty) {

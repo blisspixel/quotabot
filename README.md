@@ -11,6 +11,7 @@ models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
 > **Current stable:** 0.11.17. quotabot remains under active 0.x development.
+> **Pending publication:** 0.11.18.
 > **Next:** the MCP server accepts `2026-07-28` beside legacy initialization.
 > Installed harness proof, idle-machine account freshness, a positive
 > on-device producer, and a supported Claude quota integration remain open.
@@ -94,11 +95,12 @@ quotabot suggest
 ```
 
 `doctor` explains stale or unavailable evidence and gives a repair command.
-Recent successful Claude reads are shared across processes for up to 30 seconds
+Recent successful Claude reads are shared across processes for up to 20 minutes
 with their original capture time, reducing avoidable usage-endpoint throttling.
 `live shared` distinguishes this from stale fallback. Add `--fresh` to a quota
 read to bypass sharing while retaining provider backoff. Set
-`QUOTABOT_MIN_LIVE_INTERVAL` to 0 through 60 seconds to adjust the window.
+`QUOTABOT_MIN_LIVE_INTERVAL` to 0 through 60 seconds to override that window.
+Other providers keep a 30 second share.
 Sharing requires a current credential and a provider-proven account identity;
 other providers retain their existing collection behavior.
 `suggest` ranks usable subscriptions and supplies a local fallback when one is

@@ -57,6 +57,31 @@ ProviderQuota _local(
     );
 
 void main() {
+  test('a long Antigravity table names usage the account window omitted', () {
+    final quota = ProviderQuota(
+      provider: 'antigravity',
+      displayName: 'Antigravity',
+      account: 'a',
+      asOf: _now,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 0, resetsAt: _now + 86400),
+      ],
+      modelQuotas: [
+        for (var i = 0; i < 11; i++)
+          ModelQuota(
+            model: 'gemini-$i',
+            usedPercent: 85,
+            resetsAt: _now + 86400,
+          ),
+      ],
+    );
+    expect(
+      crowdedModelUsageGlance(quota, _now),
+      '11 models are about 85% used, tighter than the account window',
+    );
+    expect(disagreementModelQuotas(quota, _now), isEmpty);
+  });
+
   group('disagreementModelQuotas', () {
     ProviderQuota split({
       required List<ModelQuota> modelQuotas,

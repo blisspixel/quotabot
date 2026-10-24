@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/parsing.dart';
 import 'package:test/test.dart';
@@ -174,5 +175,56 @@ void main() {
       expect(back.modelQuotas.first.usedPercent, 1.5);
       expect(back.perMachine, isTrue);
     });
+  });
+
+  test('a long tighter Antigravity catalog cluster binds headroom', () {
+    const now = 1782000000;
+    final windows = antigravityWindowsWithModelCluster(
+      [QuotaWindow(label: '5h', usedPercent: 0, resetsAt: now + 18000)],
+      [
+        for (var i = 0; i < 9; i++)
+          ModelQuota(
+            model: 'gemini-$i',
+            usedPercent: 45.9,
+            resetsAt: now + 10000,
+          ),
+        for (var i = 0; i < 7; i++)
+          ModelQuota(
+            model: 'claude-$i',
+            usedPercent: 0,
+            resetsAt: now + 18000,
+            windowLabel: '5h',
+          ),
+      ],
+      now,
+    );
+    expect(windows.map((window) => window.label), ['5h', 'models']);
+    expect(windows.last.usedPercent, closeTo(45.9, 1e-9));
+    expect(windows.last.resetsAt, now + 10000);
+    final quota = ProviderQuota(
+      provider: 'antigravity',
+      displayName: 'Antigravity',
+      account: 'a',
+      asOf: now,
+      windows: windows,
+    );
+    expect(providerHeadroom(quota, now), closeTo(54.1, 0.001));
+    expect(
+      doctorVisibleWindows(quota, now).map((window) => window.label),
+      ['models'],
+    );
+  });
+
+  test('eight Antigravity model rows do not add a models window', () {
+    const now = 1782000000;
+    final windows = antigravityWindowsWithModelCluster(
+      [QuotaWindow(label: '5h', usedPercent: 0, resetsAt: now + 100)],
+      [
+        for (var i = 0; i < 8; i++)
+          ModelQuota(model: 'gemini-$i', usedPercent: 40, resetsAt: now + 100),
+      ],
+      now,
+    );
+    expect(windows.map((window) => window.label), ['5h']);
   });
 }

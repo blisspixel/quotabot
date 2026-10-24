@@ -828,7 +828,7 @@ void main() {
       await tester.pump();
 
       expect(find.textContaining('83% free'), findsOneWidget);
-      expect(find.text('49% last observed'), findsOneWidget);
+      expect(find.text('49% free, last observed'), findsOneWidget);
       expect(find.textContaining('100% free'), findsNothing);
       expect(
         desktopScopedModelEvidenceLabel(quota, expiredFable, now),
@@ -1126,8 +1126,8 @@ void main() {
         );
         expect(find.textContaining('usage left'), findsNothing);
         expect(find.textContaining('run out'), findsNothing);
-        expect(find.text('40% last trusted'), findsOneWidget);
-        expect(find.textContaining('% free'), findsNothing);
+        expect(find.text('40% free, last trusted'), findsOneWidget);
+        expect(find.textContaining(RegExp(r'% free(?!,)')), findsNothing);
         expect(tester.takeException(), isNull);
         semantics.dispose();
       },
@@ -1157,8 +1157,8 @@ void main() {
       find.text('reading needs review - not used for routing'),
       findsOneWidget,
     );
-    expect(find.text('40% unverified'), findsOneWidget);
-    expect(find.textContaining('% free'), findsNothing);
+    expect(find.text('40% free, unverified'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'% free(?!,)')), findsNothing);
     expect(find.textContaining('usage left'), findsNothing);
     expect(find.textContaining('run out before'), findsNothing);
     expect(
@@ -1272,8 +1272,8 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('40% last known'), findsOneWidget);
-    expect(find.textContaining('% free'), findsNothing);
+    expect(find.text('40% free, last known'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'% free(?!,)')), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -1351,13 +1351,13 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('40% last known'), findsOneWidget);
+    expect(find.text('40% free, last known'), findsOneWidget);
     expect(
       find.text('quota above is last known - refresh failed'),
       findsOneWidget,
     );
     expect(
-      tester.getTopLeft(find.text('40% last known')).dy,
+      tester.getTopLeft(find.text('40% free, last known')).dy,
       lessThan(
         tester
             .getTopLeft(find.text('quota above is last known - refresh failed'))
@@ -1393,7 +1393,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('40% last known'), findsOneWidget);
+    expect(find.text('40% free, last known'), findsOneWidget);
     expect(
       find.text('quota check delayed, showing last known'),
       findsOneWidget,
@@ -1427,7 +1427,7 @@ void main() {
       );
       await tester.pump();
 
-      expect(find.text('40% last known'), findsOneWidget);
+      expect(find.text('40% free, last known'), findsOneWidget);
       expect(
         find.text('quota service error, showing last known'),
         findsOneWidget,
@@ -1612,7 +1612,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('20% last known'), findsOneWidget);
+    expect(find.text('20% free, last known'), findsOneWidget);
     expect(find.text('reset passed (last known)'), findsNothing);
     expect(find.text('ready'), findsNothing);
     expect(tester.takeException(), isNull);
