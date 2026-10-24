@@ -674,14 +674,14 @@ check remain separate release-candidate requirements.
 
 ### Baseline release evidence
 
-The current verified baseline is [0.11.17](https://github.com/blisspixel/quotabot/releases/tag/v0.11.17),
-desktop build 72, from `f0ce184bd614503c9027ae5d04d262e685d834e8`. It passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/39681035175),
-[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/39687026307), and
-[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/39694171558).
+The current verified baseline is [0.11.18](https://github.com/blisspixel/quotabot/releases/tag/v0.11.18),
+desktop build 73, from `3f32467dfdfc4c548d7c52ed13f1d2571b823c82`. It passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/40111504334),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/40115290859), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/40120620919).
 The tagged workflow produced an attested handoff. Owner publication verified
 the exact fourteen assets, freshly downloaded every draft asset, checked
 checksum and provenance, and published immutably. Unpinned Latest smoke upgraded
-from 0.11.16 and covered clean install, persistent state, source setup, and
+from 0.11.17 and covered clean install, persistent state, source setup, and
 stable-channel resolution on Windows, macOS, and Linux. Desktop startup is
 checked on Windows/Linux; macOS verifies the installed bundle. Platform signing
 and interactive accessibility remain separate acceptance criteria.

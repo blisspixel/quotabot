@@ -64,12 +64,17 @@ verification, is [CLAUDE.md](CLAUDE.md).
 
 ## Project status
 
-The current verified stable release is 0.11.17. Callers should treat a snapshot
+The current verified stable release is 0.11.18. Callers should treat a snapshot
 with `drift_reason` as non-routable, keep measured percentages visible on
 admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
 explicit-spend evidence. Fresh quota publishes before advisory analytics.
 
+Version 0.11.18 sends `User-Agent: claude-code/2.1` on Claude account usage
+reads, shares a successful Claude capture for 20 minutes by default, and
+shows a remaining percent as N% free. An Antigravity model table can carry
+a tighter models window. The desktop first-run prompt stays dismissed after
+Skip or closing the window. Python 3.15 stays blocked.
 Version 0.11.17 shares one human route line across doctor, suggest, and top,
 reads desktop theme files, and ages a stored Omarchy display before calling
 it live. A rendered Quickshell panel was not run. Python 3.15 stays blocked.
