@@ -596,7 +596,8 @@ stay on the selected row. A large inventory shows eight models and a remainder.
 The footer shows the hidden count and a brief "copy requested" status because
 OSC 52 does not report whether the terminal accepted it.
 To drop a subscription you no longer pay for, `quotabot hide kiro` writes that
-provider off the default view until `quotabot unhide kiro`. `quotabot hidden`
+provider off the default view until `quotabot unhide kiro`. Either command
+without that provider exits 64 and leaves the list unchanged. `quotabot hidden`
 lists the durable set, including leftovers still stored in desktop prefs.
 Desktop hide uses the same list.
 

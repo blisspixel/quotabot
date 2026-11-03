@@ -209,7 +209,7 @@ QuotaProfile? _durableHiddenProfile(QuotaProfile? requested) {
 }
 
 void _runHide(String command, List<String> pos, bool wantsJson) {
-  if (command == 'hidden' || pos.isEmpty) {
+  if (command == 'hidden') {
     final hidden = loadDurableHiddenTargets().toList()..sort();
     if (wantsJson) {
       print(_jsonPretty({
@@ -223,6 +223,11 @@ void _runHide(String command, List<String> pos, bool wantsJson) {
       return;
     }
     stdout.writeln('hidden: ${hidden.join(', ')}');
+    return;
+  }
+  if (pos.isEmpty) {
+    stderr.writeln('usage: quotabot $command <provider>');
+    exitCode = _exitUsage;
     return;
   }
   final raw = pos.first;
@@ -413,6 +418,13 @@ Future<void> _runMain(List<String> rawArgs) async {
       }
       helpTopic = pos.length == 2 ? pos[1] : null;
     } else {
+      if (pos.length > 1) {
+        stderr.writeln(
+          'quotabot: unexpected argument "${pos[1]}" for help',
+        );
+        exitCode = _exitUsage;
+        return;
+      }
       helpTopic = cmd.isEmpty ? null : cmd;
     }
     if (helpTopic != null &&

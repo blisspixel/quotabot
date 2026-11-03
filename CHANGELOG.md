@@ -4,6 +4,11 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- `quotabot hide` and `quotabot unhide` require a provider. With no provider
+  they exit 64 and do not list or change the hidden set. `quotabot hidden`
+  still lists it. Reading that set does not create empty profile or desktop
+  preference directories when the files are absent. `quotabot <command> --help`
+  rejects an extra word, as `quotabot help <command>` already did.
 - `quotabot version` rejects unknown flags and extra arguments. `version --help`
   prints that command's options. Global help names status as the default view,
   gives doctor its own line, and states the watch interval range beside top.

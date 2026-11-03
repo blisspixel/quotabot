@@ -167,19 +167,23 @@ List<ProviderQuota> applyProfile(
 ) =>
     profile.filter(quotas);
 
-Directory profilesDir({Directory? root}) {
+Directory profilesDir({Directory? root, bool create = true}) {
   if (root != null) {
-    if (!root.existsSync()) root.createSync(recursive: true);
+    if (!root.existsSync()) {
+      if (!create) return root;
+      root.createSync(recursive: true);
+    }
     restrictOwnerOnlyDirectory(root);
     return root;
   }
-  return quotabotDir('profiles');
+  return quotabotDir('profiles', create: create);
 }
 
-File profileFile(String name, {Directory? dir}) {
+File profileFile(String name, {Directory? dir, bool create = true}) {
   final normalized = normalizeProfileName(name);
   if (normalized == null) throw ArgumentError.value(name, 'name');
-  return File('${profilesDir(root: dir).path}/$normalized.json');
+  return File(
+      '${profilesDir(root: dir, create: create).path}/$normalized.json');
 }
 
 void saveProfile(QuotaProfile profile, {Directory? dir}) {
@@ -211,7 +215,7 @@ void deleteProfile(String name, {Directory? dir}) {
   final normalized = normalizeProfileName(name);
   if (normalized == null || normalized == defaultProfileName) return;
   try {
-    final file = profileFile(normalized, dir: dir);
+    final file = profileFile(normalized, dir: dir, create: false);
     if (file.existsSync()) file.deleteSync();
   } catch (_) {}
 }
@@ -225,7 +229,7 @@ QuotaProfile? loadProfile(String name, {Directory? dir}) {
   final fallback =
       normalized == defaultProfileName ? QuotaProfile.defaultProfile() : null;
   try {
-    final f = profileFile(normalized, dir: dir);
+    final f = profileFile(normalized, dir: dir, create: false);
     if (!f.existsSync() || f.lengthSync() > _maxProfileBytes) return fallback;
     return QuotaProfile.fromJson(
       jsonDecode(f.readAsStringSync()) as Map<String, dynamic>,
@@ -473,7 +477,7 @@ const _maxDesktopPrefsBytes = 64 * 1024;
 
 Set<String> loadDesktopPrefsHiddenTargets() {
   try {
-    final file = File('${quotabotDir('app').path}/prefs.json');
+    final file = File('${quotabotDir('app', create: false).path}/prefs.json');
     if (!file.existsSync() || file.lengthSync() > _maxDesktopPrefsBytes) {
       return {};
     }
@@ -487,7 +491,7 @@ Set<String> loadDesktopPrefsHiddenTargets() {
 
 void saveDesktopPrefsHiddenTargets(Set<String> hidden) {
   try {
-    final file = File('${quotabotDir('app').path}/prefs.json');
+    final file = File('${quotabotDir('app', create: false).path}/prefs.json');
     if (!file.existsSync() || file.lengthSync() > _maxDesktopPrefsBytes) {
       return;
     }

@@ -306,6 +306,18 @@ void main() {
     expect(listProfiles(dir: temp).map((p) => p.name), ['default']);
   });
 
+  test('reading hidden targets does not create an empty config tree', () {
+    final root = Directory('${temp.path}/absent-home');
+    setQuotabotDirOverrideForTesting(root);
+    try {
+      expect(loadDurableHiddenTargets(), isEmpty);
+      expect(loadProfile(defaultProfileName), isNotNull);
+      expect(root.existsSync(), isFalse);
+    } finally {
+      setQuotabotDirOverrideForTesting(null);
+    }
+  });
+
   test('a corrupt default.json still yields the zero-config default', () {
     // A torn or hand-edited default file must not make the always-available
     // default profile unusable; a non-default corrupt file still returns null.
