@@ -164,13 +164,13 @@ class DependencyPolicyTest(unittest.TestCase):
                 )
 
     def test_agent_rules_reject_dependabot_branches(self) -> None:
-        for name in ("AGENTS.md", "CLAUDE.md"):
-            with self.subTest(file=name):
-                text = (ROOT / name).read_text(encoding="utf-8")
-                self.assertRegex(
-                    text,
-                    r"Never merge, amend, or reuse a\s+Dependabot branch",
-                )
+        text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertRegex(
+            text,
+            r"Never merge, amend, or reuse a\s+Dependabot branch",
+        )
+        claude = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertEqual(claude, "@AGENTS.md\n")
 
     def test_intake_uses_trusted_second_stage(self) -> None:
         text = INTAKE.read_text(encoding="utf-8")

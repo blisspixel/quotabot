@@ -4,6 +4,22 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- A closed stdout pipe exits 0 with no stack trace. Any other stdio write
+  failure prints one stderr line and exits 1. File and network errors still
+  surface as before.
+- `quotabot <command> --help` prints that command's options. `top --help`
+  lists the shipped palettes, sort orders, and keys.
+- The catalog audit reads OpenAI `shutdown_date` values. It exits nonzero
+  when a catalog model is already shut down or shuts down within 30 days.
+  Other providers stay presence-only. Summaries count shutdowns and omit
+  model ids.
+- The capability catalog was refreshed on 2026-11-02. The light Claude model
+  is `claude-haiku-5-5` (1M context, 128K output). Codex standard includes
+  `gpt-6.1-terra`. Antigravity light includes `gemini-3.5-flash-lite`.
+  `gemini-3.1-pro` stays the Antigravity id. The Gemini API id is
+  `gemini-3.1-pro-preview`.
+- Agent editing rules live in `AGENTS.md`. `CLAUDE.md` imports that file.
+
 ## 0.11.18 - 2026-10-24
 
 - Claude account usage reads send `User-Agent: claude-code/2.1` with the

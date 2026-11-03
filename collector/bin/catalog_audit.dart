@@ -25,9 +25,11 @@ void main(List<String> args) async {
     print(formatCatalogAuditReport(report, includeModelIds: !summaryOnly));
   }
 
-  if ((failOnDrift && report.hasDrift) || (failOnError && report.hasErrors)) {
-    exitCode = 1;
-  }
+  exitCode = catalogAuditExitCode(
+    report,
+    failOnDrift: failOnDrift,
+    failOnError: failOnError,
+  );
 }
 
 Set<String> _providerFilter(List<String> args) {

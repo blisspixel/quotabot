@@ -13,7 +13,9 @@ import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/claude_session_projection.dart';
+import 'package:quotabot_collector/cli_command_help.dart';
 import 'package:quotabot_collector/cli_layout.dart';
+import 'package:quotabot_collector/cli_stdio.dart';
 import 'package:quotabot_collector/collect_progress.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
@@ -359,11 +361,40 @@ Future<void> main(List<String> rawArgs) async {
     await runQuotabotMcpServer(['--help', ...rawArgs.skip(2)]);
     return;
   }
-  try {
-    await _runMain(rawArgs);
-  } finally {
-    closeSharedHttpClient();
+  // A closed stdout pipe fails inside the stdio consumer, after writeln has
+  // returned. That error is asynchronous, so the try below cannot see it.
+  // The consumer reports it to the zone that started the write.
+  await runZonedGuarded(() async {
+    try {
+      await _runMain(rawArgs);
+    } on Object catch (error) {
+      if (!_finishStdioWrite(error)) rethrow;
+    } finally {
+      closeSharedHttpClient();
+    }
+  }, (error, stack) {
+    if (_finishStdioWrite(error)) return;
+    // This handler runs in the parent zone. From main that parent is the root
+    // zone, so Zone.current.parent is null and would drop the error. Forward
+    // it through the root zone so the VM still prints the stack and exits 255.
+    Zone.root.handleUncaughtError(error, stack);
+  });
+}
+
+/// Handles one stdio write failure. Returns false when [error] is unrelated,
+/// so the caller can keep the normal uncaught-error path.
+bool _finishStdioWrite(Object error) {
+  final fault = classifyStdioWrite(error);
+  if (fault == null) return false;
+  if (fault.message != null) {
+    try {
+      stderr.writeln(fault.message);
+    } on Object {
+      // The failure report itself could not be written.
+    }
   }
+  exitCode = fault.exitCode;
+  return true;
 }
 
 Future<void> _runMain(List<String> rawArgs) async {
@@ -414,7 +445,7 @@ Future<void> _runMain(List<String> rawArgs) async {
     if (helpTopic != null &&
         helpTopic != 'help' &&
         helpTopic != 'version' &&
-        !_knownCommands.contains(helpTopic)) {
+        !knownCliCommands.contains(helpTopic)) {
       stderr.writeln('quotabot: unknown help topic "$helpTopic"');
       exitCode = _exitUsage;
       return;
@@ -1019,33 +1050,7 @@ String _joinedProviderNames(List<String> providers) {
 }
 
 bool _isKnownCommand(String command) =>
-    command.isEmpty || _knownCommands.contains(command);
-
-const _knownCommands = {
-  'calibration',
-  'check',
-  'claude-status',
-  'doctor',
-  'explain',
-  'hide',
-  'hidden',
-  'json',
-  'login',
-  'logout',
-  'manual',
-  'mcp',
-  'models',
-  'report',
-  'stats',
-  'status',
-  'suggest',
-  'theme',
-  'top',
-  'unhide',
-  'update',
-  'verify',
-  'watch',
-};
+    command.isEmpty || knownCliCommands.contains(command);
 
 bool _usesQuotaRead(String cmd) =>
     cmd.isEmpty || _quotaReadCommands.contains(cmd);
@@ -2785,6 +2790,14 @@ void _printHelp([String? command]) {
       return;
   }
 
+  final focused = focusedCommandHelp(command);
+  if (focused != null) {
+    for (final line in focused) {
+      _helpLine(line);
+    }
+    return;
+  }
+
   String head(String s) => style.bold(s);
   _helpLine(
     '${style.bold('quotabot')} $_version  -  your AI subscription quota, in one place',
@@ -2792,6 +2805,7 @@ void _printHelp([String? command]) {
   _helpLine('');
   _helpLine(head('USAGE'));
   _helpLine('  quotabot <command> [options]');
+  _helpLine('  quotabot help <command>   options for that command');
   _helpLine('');
   _helpLine(head('SEE QUOTA'));
   _helpLine(
