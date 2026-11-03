@@ -4,6 +4,9 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- `quotabot version` rejects unknown flags and extra arguments. `version --help`
+  prints that command's options. Global help names status as the default view,
+  gives doctor its own line, and states the watch interval range beside top.
 - The harness pack prints an OpenCode 2 advisory fragment for changelog
   2.2.5. It uses `mcp.servers.quotabot`, pins protocol `legacy`, turns Code
   Mode off so the advisory tools stay on the native tool list, and denies

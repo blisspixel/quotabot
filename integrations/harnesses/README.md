@@ -194,8 +194,9 @@ Code Mode on and that calling convention is not the native tool list these
 advisory names use. Timeout is omitted: V2 expects an object (`startup`,
 `catalog`, `execution`), and the documented defaults are 30 seconds, 30
 seconds, and 12 hours. HTTP uses `{env:QUOTABOT_MCP_TOKEN}` and `oauth: false`.
-The two lease tools are denied by normalized name in `permissions`. The
-advisory tools stay visible. Keep V1 fragments on V1; a V1 `mcp.quotabot`
+The two lease tools are denied by normalized name in `permissions`. Append
+those two rules to an existing permissions array. Replacing the whole array
+would drop other rules. The advisory tools stay visible. Keep V1 fragments on V1; a V1 `mcp.quotabot`
 object is not valid V2 configuration. This pack does not install OpenCode
 and does not prove which binary a machine has, or that a client loaded the
 fragment.

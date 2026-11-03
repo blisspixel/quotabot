@@ -141,9 +141,47 @@ void main() {
 
     expectExitCode(result, 0);
     expect(result.stderr, isEmpty);
-    expect(result.stdout as String, contains('SEE QUOTA'));
-    expect(result.stdout as String, contains('quotabot <command> [options]'));
+    final output = result.stdout as String;
+    expect(output, contains('SEE QUOTA'));
+    expect(output, contains('quotabot <command> [options]'));
+    expect(output, contains('status              every provider'));
+    expect(output, isNot(contains('status, doctor')));
+    expect(output, contains('watch uses the same rules with 2..86400'));
   });
+
+  test('version prints the CLI version and rejects extra input', () async {
+    final version = await runCli(['version']);
+    expectExitCode(version, 0);
+    expect(version.stderr, isEmpty);
+    expect(version.stdout as String, startsWith('quotabot '));
+
+    final flag = await runCli(['status', '--version']);
+    expectExitCode(flag, 0);
+    expect(flag.stdout, version.stdout);
+
+    final help = await runCli(['version', '--help']);
+    final helpCommand = await runCli(['help', 'version']);
+    expectExitCode(help, 0);
+    expectExitCode(helpCommand, 0);
+    expect(help.stdout, helpCommand.stdout);
+    expect(help.stdout as String, contains('quotabot version'));
+    expect(help.stdout as String, isNot(contains('SEE QUOTA')));
+
+    final unknownFlag = await runCli(['version', '--json']);
+    expectExitCode(unknownFlag, 64);
+    expect(unknownFlag.stdout, isEmpty);
+    expect(unknownFlag.stderr as String,
+        contains('--json is not valid for version'));
+
+    final extra = await runCli(['--version', 'extra']);
+    expectExitCode(extra, 64);
+    expect(extra.stdout, isEmpty);
+    expect(
+      extra.stderr as String,
+      contains('unexpected argument "extra" for version'),
+    );
+    expect(temp.listSync(), isEmpty);
+  }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('unknown help targets fail as usage errors', () async {
     for (final args in [
