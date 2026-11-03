@@ -4,6 +4,12 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- Raise the hash-locked LiteLLM integration's dnspython pin to 2.9.1 and its
+  filelock pin to 4.2.7. Both require Python 3.11 or newer, so the universal
+  lock now resolves from 3.11. LiteLLM stays at the clean 1.102.2 pin.
+- Raise the MCP example lock's body-parser pin to 2.4.0, fast-uri to 3.1.9,
+  ip-address to 10.7.5, and zod to 4.6.7. body-parser 2.4.0 also moves qs to
+  6.17.1. The MCP SDK pin stays 1.32.1.
 - `quotabot hide` and `quotabot unhide` accept a known provider or a saved
   manual entry. Any other name exits 64, prints the known list, and does not
   change the hidden set. `unhide` of a provider that is not hidden says so.
