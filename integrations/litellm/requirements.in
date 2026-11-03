@@ -12,3 +12,4 @@ PyYAML==6.0.3
 # Checked 2026-10-22. Keep litellm at 1.102.2; PyPI removed 1.107.0.
 aiohttp==3.14.5
 certifi==2026.10.19
+dnspython>=2.9.1
