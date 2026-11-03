@@ -18,6 +18,8 @@ prompts, code, or model requests.
   `proxy-addr`.
 - TypeScript snippets require Node.js 24 or later. The lock overrides the MCP
   SDK's transitive Hono package to 4.13.13 and its Node adapter to 2.1.5.
+  It also overrides body-parser to 2.4.0, fast-uri to 3.1.9, ip-address to
+  10.7.5, and zod to 4.6.7.
   Adapter versions below 2.0.5 are affected by the Windows path traversal in
   [GHSA-frvp-7c67-39w9](https://github.com/advisories/GHSA-frvp-7c67-39w9).
   Hono versions below 4.13.11 decode a static path twice

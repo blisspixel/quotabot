@@ -94,10 +94,11 @@ account. Quota advice cannot switch a fixed deployment's credential.
    deliberately when the supported runtime range advances.
 
    Regenerate the universal hash lock, then verify installation on Python 3.11
-   through 3.14:
+   through 3.14. The resolution floor is 3.11 because the patched dnspython
+   and filelock releases require it:
 
    ```bash
-   uv pip compile --universal --generate-hashes --python-version 3.10 \
+   uv pip compile --universal --generate-hashes --python-version 3.11 \
      --no-header -o requirements.txt requirements.in
    ```
 
