@@ -1273,6 +1273,7 @@ List<String> renderTopFrame({
   int hidden = 0,
   String copied = '',
   bool inspectModels = false,
+  Set<String> hiddenTargets = const {},
 }) {
   final w = width < 1 ? 1 : width;
   final paintDepth = !applyPalette && depth == ColorDepth.truecolor
@@ -1466,7 +1467,11 @@ List<String> renderTopFrame({
   // The route line names the pick in the shared glance. A long reason yields
   // at a word boundary instead of clipping at the frame edge. The account tag
   // drops as a whole token when the line cannot keep a reason fragment.
-  final glanceWidth = humanRouteGlance(suggestion, now);
+  final glanceWidth = humanRouteGlance(
+    suggestion,
+    now,
+    hiddenTargets: hiddenTargets,
+  );
   final routeAccountTag = r == null
       ? ''
       : _visibleRouteAccountTag(
@@ -1481,6 +1486,7 @@ List<String> renderTopFrame({
     suggestion,
     now,
     accountLabel: routeAccountTag,
+    hiddenTargets: hiddenTargets,
   );
   final routeHead = <_Cell>[
     const _Cell('  '),

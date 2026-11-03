@@ -597,8 +597,14 @@ The footer shows the hidden count and a brief "copy requested" status because
 OSC 52 does not report whether the terminal accepted it.
 To drop a subscription you no longer pay for, `quotabot hide kiro` writes that
 provider off the default view until `quotabot unhide kiro`. Either command
-without that provider exits 64 and leaves the list unchanged. `quotabot hidden`
+without that provider exits 64 and leaves the list unchanged. A name that is
+not a known provider or a saved manual entry also exits 64 and prints the
+known list. `unhide` of a provider that is not hidden says so and does not
+change the list. `quotabot hidden`
 lists the durable set, including leftovers still stored in desktop prefs.
+An empty fleet's route line names `quotabot login claude` unless that
+provider is hidden, then the next named login, and `<provider>` only when
+every named login is hidden.
 Desktop hide uses the same list.
 
 Claude Fable shows as its own bar under the shared 5h and weekly windows.

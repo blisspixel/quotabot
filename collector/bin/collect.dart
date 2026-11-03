@@ -232,9 +232,24 @@ void _runHide(String command, List<String> pos, bool wantsJson) {
   }
   final raw = pos.first;
   final id = normalizeHiddenTarget(raw);
-  if (id == null) {
-    stderr.writeln('quotabot: unknown provider "$raw"');
-    exitCode = _exitUsage;
+  if (id == null || !_hideTargetIsKnown(id)) {
+    _rejectUnknownHideTarget(raw, wantsJson);
+    return;
+  }
+  if (command == 'unhide' &&
+      !_hideTargetIsStored(id, loadDurableHiddenTargets())) {
+    final hidden = loadDurableHiddenTargets().toList()..sort();
+    if (wantsJson) {
+      print(_jsonPretty({
+        'schema': 'quotabot.hide.v1',
+        'hidden': hidden,
+        'provider': id,
+        'hidden_now': false,
+        'changed': false,
+      }));
+    } else {
+      stdout.writeln('$id is not hidden');
+    }
     return;
   }
   persistHiddenTarget(id, hide: command != 'unhide');
@@ -251,6 +266,46 @@ void _runHide(String command, List<String> pos, bool wantsJson) {
   stdout.writeln(
     command == 'unhide' ? 'showing $id' : 'hiding $id',
   );
+}
+
+List<String> _knownHideProviderIds() {
+  final ids = <String>{
+    for (final entry in kProviderAdapterRegistry) entry.id,
+  };
+  for (final entry in loadManualQuotaEntries(create: false)) {
+    final id = normalizeProviderId(entry.provider);
+    if (id != null) ids.add(id);
+  }
+  return ids.toList()..sort();
+}
+
+bool _hideTargetIsKnown(String id) {
+  final provider = id.contains('|') ? id.split('|').first : id;
+  return _knownHideProviderIds().contains(provider);
+}
+
+bool _hideTargetIsStored(String id, Set<String> hidden) {
+  if (hidden.contains(id)) return true;
+  if (id.contains('|')) return false;
+  final prefix = '$id|';
+  return hidden.any((item) => item.startsWith(prefix));
+}
+
+void _rejectUnknownHideTarget(String raw, bool wantsJson) {
+  final known = _knownHideProviderIds();
+  exitCode = _exitUsage;
+  if (wantsJson) {
+    print(_jsonPretty({
+      'schema': 'quotabot.hide.v1',
+      'ok': false,
+      'error': 'unknown provider',
+      'provider': raw,
+      'known': known,
+    }));
+    return;
+  }
+  stderr.writeln('no provider named "$raw"');
+  stderr.writeln('known: ${known.join(', ')}');
 }
 
 Future<List<ProviderQuota>> _collectProfiled(
@@ -411,7 +466,7 @@ Future<void> _runMain(List<String> rawArgs) async {
     if (cmd == 'help') {
       if (pos.length > 2) {
         stderr.writeln(
-          'quotabot: unexpected argument "${pos[2]}" for help',
+          'quotabot: unexpected argument "${pos[2]}" for help ${pos[1]}',
         );
         exitCode = _exitUsage;
         return;
@@ -419,8 +474,9 @@ Future<void> _runMain(List<String> rawArgs) async {
       helpTopic = pos.length == 2 ? pos[1] : null;
     } else {
       if (pos.length > 1) {
+        final topic = cmd.isEmpty ? 'help' : '$cmd --help';
         stderr.writeln(
-          'quotabot: unexpected argument "${pos[1]}" for help',
+          'quotabot: unexpected argument "${pos[1]}" for $topic',
         );
         exitCode = _exitUsage;
         return;
@@ -663,7 +719,13 @@ Future<void> _runMain(List<String> rawArgs) async {
           routeRequirements: routeReqs.requirements,
           preferenceOrder: preferenceOrder,
         );
-        wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
+        wantsJson
+            ? print(_jsonPretty(s.toJson()))
+            : _printSuggest(
+                s,
+                hiddenTargets:
+                    profile?.hiddenProviders ?? loadDurableHiddenTargets(),
+              );
       }
       return;
     case 'stats':
@@ -2328,6 +2390,10 @@ Future<void> _runTop(
     sort = parsed;
   }
 
+  final durableHidden = <String>{
+    ...(profile?.hiddenProviders ?? loadDurableHiddenTargets()),
+  };
+
   if (!stdout.hasTerminal) {
     final data =
         await _collectProfiled(profile, excludedProviders: excludedProviders);
@@ -2348,6 +2414,7 @@ Future<void> _runTop(
       applyPalette: applyPalette,
       updated: _usingSimulation ? 'SIMULATION' : '',
       sort: sort == TopSort.defaultOrder ? '' : sort.label,
+      hiddenTargets: durableHidden,
     );
     stdout.writeln(lines.join('\n'));
     if (!anyProviderUsable(data, now)) exitCode = _exitUnavailable;
@@ -2421,6 +2488,7 @@ Future<void> _runTop(
         width: _termCols(),
         color: color,
         clock: _clock(),
+        hiddenTargets: {...durableHidden, ...hidden},
         depth: depth,
         palette: palette,
         applyPalette: applyPalette,
@@ -4421,7 +4489,11 @@ void _printDoctor(
     now,
     preferenceOrder: preferenceOrder,
   );
-  final glance = humanRouteGlance(suggestion, now);
+  final glance = humanRouteGlance(
+    suggestion,
+    now,
+    hiddenTargets: hiddenTargets,
+  );
   stdout.writeln('');
   for (final line in glance.lines) {
     _humanLine(line);
@@ -5299,7 +5371,10 @@ bool _modelHasAccountIdentity(ModelEntry e) =>
 
 /// Prints a routing recommendation: where to send the next request and why,
 /// with the ranked alternatives below it.
-void _printSuggest(RouteSuggestion s) {
+void _printSuggest(
+  RouteSuggestion s, {
+  Set<String> hiddenTargets = const {},
+}) {
   _humanLine(
       'quotabot suggest  (which subscription to use next, 0 usage tokens)\n');
   final r = s.recommended;
@@ -5307,6 +5382,7 @@ void _printSuggest(RouteSuggestion s) {
     s,
     s.asOf,
     accountLabel: r == null ? '' : _routeAccountLabel(r),
+    hiddenTargets: hiddenTargets,
   );
   for (final line in glance.lines) {
     _humanLine('  $line');
