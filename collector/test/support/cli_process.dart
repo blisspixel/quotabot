@@ -28,6 +28,26 @@ Future<ProcessResult> runCollectCli(
   );
 }
 
+/// Starts the CLI with inherited pipes so a test can close stdout early.
+Future<Process> startCollectCli(
+  List<String> args, {
+  Map<String, String> environment = const {},
+}) {
+  final env = Map<String, String>.from(Platform.environment)
+    ..addAll(environment)
+    ..putIfAbsent('NO_COLOR', () => '1');
+  return Process.start(
+    Platform.resolvedExecutable,
+    [
+      '--packages=.dart_tool/package_config.json',
+      'bin/collect.dart',
+      ...args,
+    ],
+    workingDirectory: Directory.current.path,
+    environment: env,
+  );
+}
+
 void expectExitCode(ProcessResult result, int code) {
   expect(
     result.exitCode,

@@ -561,7 +561,7 @@ performs a fleet read, not only `top`, which draws its own loading frame.
 
 ```bash
 quotabot top                # adaptive refresh (the default)
-quotabot top --interval=2   # pin a fixed rate instead (minimum 2s)
+quotabot top --interval=2   # pin a fixed rate (2..3600, clamped)
 quotabot top --truecolor    # force 24-bit gradient meters
 quotabot top --sort=headroom  # order providers by a routing metric
 ```
@@ -574,6 +574,8 @@ in force: covered Claude, Codex and Grok usage reads defer independently, while
 other throttled transports retain a fleet-wide backoff. Passive-only or failed
 fleets can use longer intervals. The footer shows the capture time.
 `--interval` pins a fixed rate but does not bypass a covered usage cooldown.
+It must be an integer number of seconds. Values outside 2..3600 are clamped.
+A non-integer exits with usage status 64.
 
 Press `q` (or Ctrl-C) to quit, `r` to refresh immediately, and `s` to cycle the
 ordering: `default` (collection order), `headroom` (most free first), `burn`
@@ -684,7 +686,8 @@ route is named. Stale, failed, drifted, or source-class-invalid evidence does
 not fire an alert.
 
 `--interval` must be an integer number of seconds; malformed values exit with
-usage status 64 instead of silently selecting a different cadence. Continuous
+usage status 64 instead of silently selecting a different cadence. Values
+outside 2..86400 are clamped. Continuous
 watch mode reports one failure edge to standard error, increases its bounded
 retry backoff while collection remains unavailable, and reports one recovery
 edge when collection succeeds again. JSON standard output remains reserved for

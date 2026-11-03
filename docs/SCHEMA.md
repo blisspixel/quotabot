@@ -577,10 +577,20 @@ optional freshness fields `catalog_age_days` and `elapsed_included_quota` (an
 array of `{provider, model, included_until}` for any curated `quotaIncludedUntil`
 window that has already passed). Each provider row carries `provider`,
 `endpoint`, `auth_env`, `ok`, `skipped`, optional `error`, `catalog_models`,
-`endpoint_models`, `missing_from_catalog`, and `catalog_only`. The freshness
-fields are prompts to re-verify the catalog, separate from drift and errors. Its
-process exit codes (0/1 with `--fail-on-drift`/`--fail-on-error`) are the tool's
-own, outside the `quotabot` CLI's documented exit-code contract.
+`endpoint_models`, `missing_from_catalog`, `catalog_only`, and
+`shutdown_dates_checked`. When that source published dates and at least one
+catalog model has a validated `YYYY-MM-DD` shutdown date, the row also carries
+`shutdowns`: `{model, shutdown_date, days_remaining, actionable}`. An empty
+list omits the key. Only the Codex/OpenAI source publishes shutdown dates.
+A missing, null, malformed, or conflicting date is not a finding, and an
+endpoint-only id is not a finding. The freshness fields are prompts to
+re-verify the catalog, separate from drift and errors. The process exits 1
+when any catalog model is already shut down or shuts down within 30 days.
+`--fail-on-drift` and `--fail-on-error` still exit 1 for id drift and transport
+errors. A farther shutdown date is reported and does not change the exit.
+These codes are the tool's own, outside the `quotabot` CLI's documented
+exit-code contract. Summary text counts announced and actionable shutdowns
+and omits model ids.
 
 ## `quotabot.verify.v1`
 

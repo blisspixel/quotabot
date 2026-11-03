@@ -17,7 +17,7 @@ import 'provider_ids.dart';
 
 /// The date the catalog was last refreshed (YYYY-MM-DD). Surfaced so consumers
 /// can see how fresh the capability hints are.
-const String kCatalogUpdated = '2026-10-20';
+const String kCatalogUpdated = '2026-11-02';
 
 /// Providers whose windows are true rolling included-quota plans. Only these
 /// can ever mark a model quota-backed for the no-surprise `--budget=quota`
@@ -65,13 +65,19 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       reasoning: 'adaptive',
       tier: 'standard',
     ),
+    // Current light model. Haiku 4.5 remains Active and is omitted so the
+    // light pick stays unambiguous. Checked 2026-11-02:
+    // https://platform.claude.com/docs/en/models/haiku-5-5/overview
+    // 1M context, 128K max output, adaptive thinking. Retirement not sooner
+    // than October 7, 2027.
     ModelInfo(
-      id: 'claude-haiku-4-5',
-      displayName: 'Claude Haiku 4.5',
-      contextTokens: 200000,
-      maxOutputTokens: 64000,
+      id: 'claude-haiku-5-5',
+      displayName: 'Claude Haiku 5.5',
+      contextTokens: 1000000,
+      maxOutputTokens: 128000,
       tools: true,
       vision: true,
+      reasoning: 'adaptive',
       tier: 'light',
     ),
   ],
@@ -85,6 +91,19 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       vision: true,
       reasoning: 'reasoning',
       tier: 'flagship',
+    ),
+    // Checked 2026-11-02:
+    // https://developers.openai.com/api/docs/models/gpt-6.1-terra
+    // Text and image in, text out, tools, 1,050,000 context, 128,000 output.
+    ModelInfo(
+      id: 'gpt-6.1-terra',
+      displayName: 'GPT-6.1 Terra',
+      contextTokens: 1050000,
+      maxOutputTokens: 128000,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'standard',
     ),
     ModelInfo(
       id: 'gpt-6-astra',
@@ -224,6 +243,23 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       vision: true,
       tier: 'standard',
     ),
+    // Checked 2026-11-02:
+    // https://aistudio.google.com/docs/models/gemini-3.5-flash-lite
+    // Text output. Input limit 1,048,576. Output limit 65,536. Tools, vision,
+    // and thinking.
+    ModelInfo(
+      id: 'gemini-3.5-flash-lite',
+      displayName: 'Gemini 3.5 Flash-Lite',
+      contextTokens: 1048576,
+      maxOutputTokens: 65536,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'light',
+    ),
+    // Antigravity match id. The Gemini API id is gemini-3.1-pro-preview.
+    // Checked 2026-11-02:
+    // https://aistudio.google.com/docs/models/gemini-3.1-pro-preview
     ModelInfo(
       id: 'gemini-3.1-pro',
       displayName: 'Gemini 3.1 Pro',

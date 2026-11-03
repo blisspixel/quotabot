@@ -1012,21 +1012,57 @@ void main() {
     );
   });
 
+  test('light Claude advice selects Haiku 5.5', () {
+    final suggestion = suggestModel(
+      [_cloud(claudeProviderId, 20)],
+      _now,
+      catalog: kModelCatalog,
+      requirements: const ModelRequirements(
+        tierCeiling: 'light',
+        budgetPolicy: ModelBudgetPolicy.quota,
+      ),
+    );
+    final recommended = suggestion.recommended?.model;
+    expect(recommended?.id, 'claude-haiku-5-5');
+    expect(recommended?.contextTokens, 1000000);
+    expect(recommended?.maxOutputTokens, 128000);
+  });
+
+  test('standard Codex advice includes GPT-6.1 Terra', () {
+    final suggestion = suggestModel(
+      [_cloud(codexProviderId, 20)],
+      _now,
+      catalog: kModelCatalog,
+      requirements: const ModelRequirements(
+        tierFloor: 'standard',
+        tierCeiling: 'standard',
+        budgetPolicy: ModelBudgetPolicy.quota,
+      ),
+    );
+    final terra = suggestion.ranked
+        .singleWhere((entry) => entry.model.id == 'gpt-6.1-terra')
+        .model;
+    expect(terra.contextTokens, 1050000);
+    expect(terra.maxOutputTokens, 128000);
+    expect(terra.tier, 'standard');
+  });
+
   test('production catalog matches the dated supported provider lineups', () {
-    expect(kCatalogUpdated, '2026-10-20');
+    expect(kCatalogUpdated, '2026-11-02');
     expect(
       kModelCatalog[claudeProviderId]!.map((model) => model.id),
       [
         'claude-fable-5-1',
         'claude-opus-5-5',
         'claude-sonnet-5-5',
-        'claude-haiku-4-5',
+        'claude-haiku-5-5',
       ],
     );
     expect(
       kModelCatalog[codexProviderId]!.map((model) => model.id),
       [
         'gpt-6.1-sol',
+        'gpt-6.1-terra',
         'gpt-6-astra',
         'gpt-6-sol',
         'gpt-6-luna',
@@ -1047,6 +1083,7 @@ void main() {
         'gemini-3.8-flash',
         'gemini-3.7-flash',
         'gemini-3.6-flash',
+        'gemini-3.5-flash-lite',
         'gemini-3.1-pro',
         'claude-sonnet-4.6-thinking',
         'claude-opus-4.6-thinking',
