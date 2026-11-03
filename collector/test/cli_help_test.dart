@@ -196,7 +196,37 @@ void main() {
         contains('unknown help topic "unknown-command"'),
       );
     }
-  });
+
+    for (final args in [
+      ['top', '--help', 'extra'],
+      ['help', 'top', 'extra'],
+      ['--help', 'top', 'extra'],
+    ]) {
+      final result = await runCli(args);
+      expectExitCode(result, 64);
+      expect(result.stdout, isEmpty);
+      expect(
+        result.stderr as String,
+        contains('unexpected argument "extra" for help'),
+      );
+    }
+
+    for (final args in [
+      ['hide'],
+      ['unhide', '--json'],
+      ['hide', '--no-color'],
+    ]) {
+      final result = await runCli(args);
+      expectExitCode(result, 64);
+      expect(result.stdout, isEmpty);
+      expect(result.stderr as String, contains('usage: quotabot '));
+    }
+
+    final listed = await runCli(['hidden']);
+    expectExitCode(listed, 0);
+    expect(listed.stdout as String, contains('no providers hidden'));
+    expect(temp.listSync(), isEmpty);
+  }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('top, doctor, and status help are focused and side-effect free',
       () async {

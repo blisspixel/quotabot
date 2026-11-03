@@ -44,5 +44,5 @@ void main() {
     expectExitCode(missing, 1);
     expect(missing.stderr, contains('not removed'));
     expect(temp.listSync(), isEmpty);
-  });
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }
