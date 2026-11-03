@@ -4,6 +4,12 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- The harness pack prints an OpenCode 2 advisory fragment for changelog
+  2.2.5. It uses `mcp.servers.quotabot`, pins protocol `legacy`, turns Code
+  Mode off so the advisory tools stay on the native tool list, and denies
+  the two lease tools. OpenCode 1 fragments stay on the V1 shape. The
+  client was not installed, and an installed harness has not loaded the
+  fragment.
 - A closed stdout pipe does not print a stack trace. A command that already
   chose an exit code keeps it, and a command that would have exited 0 still
   exits 0. Any other stdio write failure prints one stderr line and exits 1

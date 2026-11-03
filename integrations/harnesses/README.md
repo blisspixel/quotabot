@@ -5,7 +5,9 @@ a model. These examples do not automatically select a model or route a request.
 They do not read or modify a harness's configuration, credentials, or sessions.
 
 Originally reviewed against quotabot 0.10.3; tool visibility was rechecked on
-2026-09-05 against the pinned upstream commits below. Installed-harness loading
+2026-09-05 against the pinned upstream commits below. OpenCode 2's
+configuration shape was read from the live V2 MCP document on 2026-11-02.
+The other rows stay at the September review. Installed-harness loading
 has not been validated;
 parseable configuration and a working quotabot transport do not prove that a
 particular harness has loaded it.
@@ -17,7 +19,7 @@ particular harness has loaded it.
 | Hermes | 2026.8.31 | Stdio and authenticated loopback HTTP configuration |
 | pi | 0.85.0 | [CLI advisory recipe](pi.md); no built-in MCP client |
 | NemoClaw | 0.0.119 tag | [Host CLI recipe](nemoclaw.md); managed loopback MCP unsupported |
-| OpenCode 2 | Beta documentation | Future and untested; no configuration emitted |
+| OpenCode 2 | 2.2.5 changelog; shape read 2026-11-02 | Stdio and authenticated loopback HTTP configuration; client not installed |
 
 The machine-readable [compatibility record](compatibility.json) contains exact
 source links and support labels. The wider
@@ -34,6 +36,7 @@ existing executable path:
 
 ```text
 python integrations/harnesses/render_config.py opencode-1 --quotabot /absolute/path/to/quotabot
+python integrations/harnesses/render_config.py opencode-2 --quotabot /absolute/path/to/quotabot
 python integrations/harnesses/render_config.py openclaw --quotabot /absolute/path/to/quotabot
 python integrations/harnesses/render_config.py hermes --quotabot /absolute/path/to/quotabot
 ```
@@ -62,6 +65,7 @@ from the repository root:
 
 ```text
 python integrations/harnesses/render_config.py opencode-1
+python integrations/harnesses/render_config.py opencode-2
 python integrations/harnesses/render_config.py openclaw
 python integrations/harnesses/render_config.py hermes
 ```
@@ -123,6 +127,7 @@ Then print a fragment:
 
 ```text
 python integrations/harnesses/render_config.py opencode-1 --transport http
+python integrations/harnesses/render_config.py opencode-2 --transport http
 python integrations/harnesses/render_config.py openclaw --transport http
 python integrations/harnesses/render_config.py hermes --transport http
 ```
@@ -135,7 +140,8 @@ Keep proxy handling appropriate for loopback in the harness's environment.
 
 The quotabot server accepts MCP `2026-07-28` beside legacy `initialize`
 through `2025-11-25` over stdio or authenticated Streamable HTTP. These
-fragments still negotiate `2025-11-25`. Hermes is explicitly set to `legacy`.
+fragments still negotiate `2025-11-25`. Hermes and OpenCode 2 are explicitly
+set to `legacy`.
 A harness that only speaks the older handshake keeps working. Installed
 clients were not retested against `2026-07-28`.
 [quotabot server](../../collector/bin/mcp_server.dart),
@@ -169,7 +175,7 @@ accepts a stdio working directory and separate executable/argument fields.
 [MCP sampling](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp),
 [pinned transport and utility policy](https://github.com/NousResearch/hermes-agent/blob/29112bef099274229cadff79cdff7bf7b99c4b77/tools/mcp_tool.py).
 
-Both recipes expose exactly six advisory tools: `decide_now`, `list_quotas`,
+OpenClaw and Hermes expose exactly six advisory tools: `decide_now`, `list_quotas`,
 `suggest_provider`, `check_provider_availability`, `list_models`, and
 `suggest_model`. Lease operations and resource/prompt helpers remain hidden.
 If you applied an earlier fragment, render a new one and replace only the
@@ -181,12 +187,19 @@ Client tool filters control visibility in that harness. They are not a server
 authorization boundary. Metadata calls can still refresh quotabot's own cache,
 grants, and bounded local state as described in [AGENTS.md](../../AGENTS.md).
 
-OpenCode 2 is explicitly beta, runs as `opencode2`, and uses different config
-fields including `mcp.servers` and `disabled`. Keep the v1 fragments with v1.
-This pack deliberately rejects `opencode-2` as a renderer target until a
-separate versioned example is validated.
-[Beta introduction](https://opencode.ai/v2/docs),
-[beta MCP shape](https://opencode.ai/v2/docs/mcp-servers).
+OpenCode 2 uses `mcp.servers.quotabot`. The published changelog's newest
+release on the 2026-11-02 read was 2.2.5 (2026-10-30). The fragment pins
+`protocol` to `legacy` and sets `codemode` to false, because V2 defaults
+Code Mode on and that calling convention is not the native tool list these
+advisory names use. Timeout is omitted: V2 expects an object (`startup`,
+`catalog`, `execution`), and the documented defaults are 30 seconds, 30
+seconds, and 12 hours. HTTP uses `{env:QUOTABOT_MCP_TOKEN}` and `oauth: false`.
+The two lease tools are denied by normalized name in `permissions`. The
+advisory tools stay visible. Keep V1 fragments on V1; a V1 `mcp.quotabot`
+object is not valid V2 configuration. This pack does not install OpenCode
+and does not prove which binary a machine has, or that a client loaded the
+fragment.
+[V2 MCP](https://opencode.ai/v2/docs/mcp-servers).
 
 ## Read a recommendation
 

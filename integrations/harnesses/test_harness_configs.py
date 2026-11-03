@@ -27,7 +27,7 @@ PACK = Path(__file__).resolve().parent
 def server_for(harness: str, config: dict) -> dict:
     if harness == "opencode-1":
         return config["mcp"]["quotabot"]
-    if harness == "openclaw":
+    if harness in {"openclaw", "opencode-2"}:
         return config["mcp"]["servers"]["quotabot"]
     return config["mcp_servers"]["quotabot"]
 
@@ -139,7 +139,7 @@ class HarnessConfigurationTests(unittest.TestCase):
                     self.assertEqual(server["url"], "http://127.0.0.1:8722/mcp")
                     substitution = (
                         "{env:QUOTABOT_MCP_TOKEN}"
-                        if harness == "opencode-1"
+                        if harness in {"opencode-1", "opencode-2"}
                         else "${QUOTABOT_MCP_TOKEN}"
                     )
                     self.assertEqual(
@@ -160,6 +160,48 @@ class HarnessConfigurationTests(unittest.TestCase):
         self.assertFalse(server["oauth"])
         self.assertFalse(config["tools"]["quotabot_reserve_provider"])
         self.assertFalse(config["tools"]["quotabot_release_provider"])
+
+    def test_opencode_two_pins_legacy_direct_tools_and_denies_leases(self) -> None:
+        http = render_config("opencode-2", "http")
+        self.assertEqual(http["$schema"], "https://opencode.ai/config.json")
+        self.assertEqual(list(http["mcp"]), ["servers"])
+        server = server_for("opencode-2", http)
+        self.assertEqual(server["type"], "remote")
+        self.assertEqual(server["protocol"], "legacy")
+        self.assertFalse(server["codemode"])
+        self.assertFalse(server["oauth"])
+        self.assertNotIn("enabled", server)
+        self.assertNotIn("disabled", server)
+        self.assertNotIn("timeout", server)
+        self.assertNotIn("tools", http)
+        denials = [
+            {
+                "action": "quotabot_reserve_provider",
+                "resource": "*",
+                "effect": "deny",
+            },
+            {
+                "action": "quotabot_release_provider",
+                "resource": "*",
+                "effect": "deny",
+            },
+        ]
+        self.assertEqual(http["permissions"], denials)
+        stdio = render_config(
+            "opencode-2",
+            "stdio",
+            collector=self.collector,
+            dart=str(self.dart),
+        )
+        local = server_for("opencode-2", stdio)
+        self.assertEqual(local["type"], "local")
+        self.assertIsInstance(local["command"], list)
+        self.assertEqual(local["protocol"], "legacy")
+        self.assertFalse(local["codemode"])
+        self.assertNotIn("enabled", local)
+        self.assertNotIn("oauth", local)
+        self.assertNotIn("timeout", local)
+        self.assertEqual(stdio["permissions"], denials)
 
     def test_openclaw_explicitly_selects_streamable_http(self) -> None:
         server = server_for("openclaw", render_config("openclaw", "http"))
@@ -239,7 +281,7 @@ class HarnessConfigurationTests(unittest.TestCase):
     def test_unknown_harness_and_transport_fail_closed(self) -> None:
         for harness, transport in (
             ("pi", "http"),
-            ("opencode-2", "http"),
+            ("opencode-3", "http"),
             ("hermes", "sse"),
         ):
             with self.subTest(harness=harness, transport=transport):
@@ -319,7 +361,14 @@ class HarnessConfigurationTests(unittest.TestCase):
             self.assertTrue(harnesses[harness]["sources"])
         self.assertEqual(harnesses["nemoclaw"]["managed_loopback_mcp"], "unsupported")
         self.assertEqual(harnesses["pi"]["transports"], ["cli"])
-        self.assertEqual(harnesses["opencode-2"]["support"], "future_untested")
+        opencode_2 = harnesses["opencode-2"]
+        self.assertEqual(opencode_2["support"], "documented_configuration")
+        self.assertEqual(opencode_2["version_reviewed"], "2.2.5")
+        self.assertEqual(opencode_2["shape_read_on"], "2026-11-02")
+        self.assertEqual(opencode_2["configuration_root"], "mcp.servers.quotabot")
+        self.assertEqual(
+            opencode_2["transports"], ["stdio", "streamable_http_loopback"]
+        )
 
     def test_default_collector_has_the_actual_mcp_entrypoint(self) -> None:
         self.assertTrue((ROOT / "collector" / "bin" / "mcp_server.dart").is_file())

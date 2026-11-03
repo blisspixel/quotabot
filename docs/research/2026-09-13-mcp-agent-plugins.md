@@ -154,6 +154,11 @@ configuration versions or proof of an installed loader.
 | NemoClaw | [v0.0.123 source commit](https://github.com/NVIDIA/NemoClaw/commit/f75f722bb4a1ec9642c8df36c8924e24500d78f0), committed September 11 | No GitHub latest-release record was found. [Managed MCP](https://docs.nvidia.com/nemoclaw/user-guide/openclaw/manage-sandboxes/mcp-servers/about-managed-mcp-servers) uses canonical HTTPS endpoints, without a host stdio bridge. Retain host CLI advice. |
 | OpenCode 2 | [Current V2 configuration](https://opencode.ai/v2/docs/mcp-servers) | Uses `mcp.servers.<name>` and `disabled`. Establish an exact release before adding support; V1 configuration is not V2 evidence. |
 
+Superseded for that OpenCode 2 row on 2026-11-02: the published changelog's
+newest release was 2.2.5 (2026-10-30), and the advisory pack now emits a
+documented V2 fragment. V1 configuration is still not V2 evidence.
+Installed-client proof remains open. The row above stays the September record.
+
 Hermes's [current negotiation code](https://github.com/NousResearch/hermes-agent/blob/v2026.9.11/tools/mcp_tool_transport.py)
 defaults to legacy-first auto negotiation. A passing default smoke against a
 dual-era server can miss the modern path entirely. OpenClaw and OpenCode 1 still

@@ -10,7 +10,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-HARNESS_IDS = ("opencode-1", "openclaw", "hermes")
+HARNESS_IDS = ("opencode-1", "opencode-2", "openclaw", "hermes")
+OPENCODE_IDS = frozenset({"opencode-1", "opencode-2"})
 ADVISORY_TOOLS = (
     "decide_now",
     "list_quotas",
@@ -21,6 +22,30 @@ ADVISORY_TOOLS = (
 )
 MCP_URL = "http://127.0.0.1:8722/mcp"
 TOKEN_ENV = "QUOTABOT_MCP_TOKEN"
+
+
+def _fold_command(server: dict[str, object]) -> None:
+    command = server["command"]
+    arguments = server.pop("args")
+    if not isinstance(command, str) or not isinstance(arguments, list):
+        raise ValueError("A native launch requires a command and arguments")
+    server["command"] = [command, *arguments]
+
+
+def _lease_denials() -> list[dict[str, str]]:
+    """OpenCode 2 denies tools by normalized ``<server>_<tool>`` name."""
+    return [
+        {
+            "action": "quotabot_reserve_provider",
+            "resource": "*",
+            "effect": "deny",
+        },
+        {
+            "action": "quotabot_release_provider",
+            "resource": "*",
+            "effect": "deny",
+        },
+    ]
 
 
 def existing_file(value: str | Path, label: str) -> Path:
@@ -73,7 +98,7 @@ def render_config(
     if transport == "http":
         substitution = (
             "{env:" + TOKEN_ENV + "}"
-            if harness == "opencode-1"
+            if harness in OPENCODE_IDS
             else "${" + TOKEN_ENV + "}"
         )
         server: dict[str, object] = {
@@ -102,11 +127,7 @@ def render_config(
         server["enabled"] = True
         server["timeout"] = 30000
         if transport == "stdio":
-            command = server["command"]
-            arguments = server.pop("args")
-            if not isinstance(command, str) or not isinstance(arguments, list):
-                raise ValueError("A native launch requires a command and arguments")
-            server["command"] = [command, *arguments]
+            _fold_command(server)
         else:
             server["oauth"] = False
         return {
@@ -116,6 +137,24 @@ def render_config(
                 "quotabot_reserve_provider": False,
                 "quotabot_release_provider": False,
             },
+        }
+
+    if harness == "opencode-2":
+        # Live V2 document (read 2026-11-02): names live under mcp.servers,
+        # timeout is an object, and Code Mode defaults on. Pin legacy so this
+        # fragment does not probe 2026-07-28. Leave timeout unset so a V1
+        # number is not written into the object field.
+        server["type"] = "local" if transport == "stdio" else "remote"
+        server["protocol"] = "legacy"
+        server["codemode"] = False
+        if transport == "stdio":
+            _fold_command(server)
+        else:
+            server["oauth"] = False
+        return {
+            "$schema": "https://opencode.ai/config.json",
+            "mcp": {"servers": {"quotabot": server}},
+            "permissions": _lease_denials(),
         }
 
     if harness == "openclaw":
