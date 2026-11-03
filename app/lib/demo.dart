@@ -196,7 +196,7 @@ RoutedRequestSummary demoRoutedRequestSummary() {
     LiteLlmRouteMetric(
       at: now - 4200,
       requestedModel: 'frontier-coder',
-      servedModel: 'codex/gpt-5.2',
+      servedModel: 'codex/gpt-6-sol',
       spend: litellmSpendQuotaPlan,
       promptTokens: 18400,
       completionTokens: 3200,
@@ -205,7 +205,7 @@ RoutedRequestSummary demoRoutedRequestSummary() {
     LiteLlmRouteMetric(
       at: now - 2600,
       requestedModel: 'frontier-coder',
-      servedModel: 'antigravity/gemini-3-pro',
+      servedModel: 'antigravity/gemini-4-argon',
       spend: litellmSpendQuotaPlan,
       promptTokens: 9100,
       completionTokens: 1800,

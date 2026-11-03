@@ -4,6 +4,11 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- The LiteLLM example points its paid deployments at openai/gpt-6-sol,
+  anthropic/claude-sonnet-5-5, and xai/grok-4.7. The local deployment name
+  stays grok-code, and the Ollama example stays qwen3-coder. Demo route
+  labels use codex/gpt-6-sol and antigravity/gemini-4-argon. Model ids
+  checked 2026-11-03.
 - Raise the hash-locked LiteLLM integration's dnspython pin to 2.9.1 and its
   filelock pin to 4.2.7. Both require Python 3.11 or newer, so the universal
   lock now resolves from 3.11. LiteLLM stays at the clean 1.102.2 pin.
