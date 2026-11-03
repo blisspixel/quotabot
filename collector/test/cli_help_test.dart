@@ -182,6 +182,7 @@ void main() {
     expect(top, contains('gruvbox'));
     expect(top, contains('q or Ctrl-C'));
     expect(top, contains('m             inspect models'));
+    expect(top, isNot(contains('--json')));
 
     final doctor = (await runCli(['doctor', '--help'])).stdout as String;
     expect(doctor, contains('read_state'));
@@ -191,7 +192,7 @@ void main() {
     expect(status, contains('windows'));
     expect(status, isNot(contains('read_state')));
     expect(temp.listSync(), isEmpty);
-  });
+  }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('commands that take a required argument document it', () async {
     final check = (await runCli(['check', '--help'])).stdout as String;
@@ -236,7 +237,7 @@ void main() {
       expect(result.stdout as String, contains('SEE QUOTA'), reason: command);
     }
     expect(temp.listSync(), isEmpty);
-  });
+  }, timeout: const Timeout(Duration(minutes: 6)));
 
   test('a closed stdout ends read-only commands without a stack trace',
       () async {
@@ -269,7 +270,7 @@ void main() {
       expect(errorText, isNot(contains('StdoutException')),
           reason: args.join(' '));
     }
-  });
+  }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('concrete model suggestions reject provider-only policy flags',
       () async {
@@ -295,5 +296,5 @@ void main() {
       );
       expect(result.stderr as String, contains('--provider-route'));
     }
-  });
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }

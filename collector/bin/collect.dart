@@ -362,39 +362,12 @@ Future<void> main(List<String> rawArgs) async {
     return;
   }
   // A closed stdout pipe fails inside the stdio consumer, after writeln has
-  // returned. That error is asynchronous, so the try below cannot see it.
-  // The consumer reports it to the zone that started the write.
-  await runZonedGuarded(() async {
-    try {
-      await _runMain(rawArgs);
-    } on Object catch (error) {
-      if (!_finishStdioWrite(error)) rethrow;
-    } finally {
-      closeSharedHttpClient();
-    }
-  }, (error, stack) {
-    if (_finishStdioWrite(error)) return;
-    // This handler runs in the parent zone. From main that parent is the root
-    // zone, so Zone.current.parent is null and would drop the error. Forward
-    // it through the root zone so the VM still prints the stack and exits 255.
-    Zone.root.handleUncaughtError(error, stack);
-  });
-}
-
-/// Handles one stdio write failure. Returns false when [error] is unrelated,
-/// so the caller can keep the normal uncaught-error path.
-bool _finishStdioWrite(Object error) {
-  final fault = classifyStdioWrite(error);
-  if (fault == null) return false;
-  if (fault.message != null) {
-    try {
-      stderr.writeln(fault.message);
-    } on Object {
-      // The failure report itself could not be written.
-    }
-  }
-  exitCode = fault.exitCode;
-  return true;
+  // returned. That error is asynchronous, so a try around the command cannot
+  // see it. The consumer reports it to the zone that started the write.
+  await runCliBody(
+    () => _runMain(rawArgs),
+    onFinally: closeSharedHttpClient,
+  );
 }
 
 Future<void> _runMain(List<String> rawArgs) async {
@@ -707,6 +680,12 @@ Future<void> _runMain(List<String> rawArgs) async {
       );
       return;
     case 'top':
+      final topUsage = _topUsageError(flags);
+      if (topUsage != null) {
+        stderr.writeln('quotabot: $topUsage');
+        exitCode = _exitUsage;
+        return;
+      }
       if (_simulationNoticePending) {
         if (stdout.hasTerminal) {
           _simulationNoticePending = false;
@@ -2211,17 +2190,6 @@ class WatchLoopHealth {
 String watchWebhookDeliverySummary(String? webhook) =>
     webhook == null ? '' : ' with webhook delivery enabled';
 
-/// Reads an `--name=int` option from [flags], or [dflt] when absent or invalid.
-int _intOption(Iterable<String> flags, String name, int dflt) {
-  final prefix = '--$name=';
-  for (final f in flags) {
-    if (f.startsWith(prefix)) {
-      return int.tryParse(f.substring(prefix.length)) ?? dflt;
-    }
-  }
-  return dflt;
-}
-
 int _termCols() {
   try {
     return stdout.terminalColumns;
@@ -2245,6 +2213,23 @@ String _agoLabel(int lastCollect, int now) {
   return 'updated ${(s / 60).round()}m ago';
 }
 
+/// Usage errors for `top` that must be reported before any snapshot text.
+String? _topUsageError(Set<String> flags) {
+  final intervalRaw = _stringOption(flags, 'interval', null);
+  if (intervalRaw != null && int.tryParse(intervalRaw) == null) {
+    return '--interval must be an integer number of seconds';
+  }
+  final sortSpec =
+      _stringOption(flags, 'sort', Platform.environment['QUOTABOT_SORT']);
+  if (sortSpec != null &&
+      sortSpec.isNotEmpty &&
+      TopSort.parse(sortSpec) == null) {
+    final names = TopSort.values.map((mode) => mode.cliName).join(', ');
+    return 'unknown --sort value "$sortSpec" (use $names)';
+  }
+  return null;
+}
+
 /// `top`: a live, htop-style dashboard that redraws in place.
 ///
 /// On a real terminal it enters the alternate screen, hides the cursor, reads
@@ -2258,6 +2243,18 @@ Future<void> _runTop(
   QuotaProfile? profile,
   Set<String> excludedProviders,
 ) async {
+  // The command switch reports this before any snapshot text. Repeat it here
+  // so a direct call cannot turn a bad interval into the adaptive cadence.
+  final topUsage = _topUsageError(flags);
+  if (topUsage != null) {
+    stderr.writeln('quotabot: $topUsage');
+    exitCode = _exitUsage;
+    return;
+  }
+  final intervalRaw = _stringOption(flags, 'interval', null);
+  final parsedInterval = intervalRaw == null ? null : int.tryParse(intervalRaw);
+  // A fixed cadence only when --interval is given; otherwise adapt like the app.
+  final fixedInterval = parsedInterval?.clamp(2, 3600);
   final preferenceOrder = profile?.preferenceOrder ?? const <String>[];
   final color = _useColor(flags);
   final detected = flags.contains('--truecolor')
@@ -2277,10 +2274,6 @@ Future<void> _runTop(
   if (choice.notice != null) {
     stderr.writeln('quotabot: ${choice.notice}');
   }
-  // A fixed cadence only when --interval is given; otherwise adapt like the app.
-  final fixedInterval = flags.any((f) => f.startsWith('--interval='))
-      ? _intOption(flags, 'interval', 10).clamp(2, 3600)
-      : null;
 
   // Initial ordering: --sort=NAME (or QUOTABOT_SORT); the `s` key cycles it live.
   var sort = TopSort.defaultOrder;
@@ -2291,7 +2284,7 @@ Future<void> _runTop(
     if (parsed == null) {
       stderr.writeln('quotabot: unknown --sort value "$sortSpec" (use '
           '${TopSort.values.map((m) => m.cliName).join(', ')})');
-      exitCode = 64;
+      exitCode = _exitUsage;
       return;
     }
     sort = parsed;
@@ -2918,7 +2911,8 @@ void _printHelp([String? command]) {
     '  --color, --no-color force or disable color (also honors NO_COLOR)',
   );
   _helpLine(
-    '  --interval=N        top: fixed seconds between refreshes (default: adaptive)',
+    '  --interval=N        top: seconds between refreshes (2..3600, clamped; '
+    'a non-integer is a usage error; default: adaptive)',
   );
   _helpLine(
     '  --sort=NAME         top: initial order (${TopSort.values.map((m) => m.cliName).join(', ')}); '
@@ -2929,7 +2923,7 @@ void _printHelp([String? command]) {
   );
   _helpLine(
     '  --theme=NAME        top: 24-bit palette (${paletteNames.join(', ')}, '
-    'or custom:HEX-HEX-HEX-HEX). No theme follows the terminal. Also QUOTABOT_THEME',
+    'or custom:HEX-HEX-HEX-HEX[-HEX]). No theme follows the terminal. Also QUOTABOT_THEME',
   );
   _helpLine(
     '  --risk=Z            suggest: risk aversion (0 = mean, higher avoids '

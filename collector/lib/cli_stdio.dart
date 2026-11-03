@@ -5,6 +5,7 @@
 /// and a nonzero exit. File and network errors are not stdio writes.
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 /// Decision for one stdio write failure.
@@ -86,4 +87,52 @@ String _oneLine(String value) {
   if (collapsed.isEmpty) return 'output write failed';
   const max = 200;
   return collapsed.length <= max ? collapsed : collapsed.substring(0, max);
+}
+
+/// The exit code to keep after [fault].
+///
+/// A closed pipe means the reader left. It must not replace an exit code the
+/// command already chose, and a successful command stays 0. Any other stdio
+/// write failure becomes 1 only when the command had not already failed.
+int applyStdioWriteFault(int currentExitCode, StdioWriteFault fault) {
+  if (fault.closed || currentExitCode != 0) return currentExitCode;
+  return fault.exitCode;
+}
+
+/// Records one stdio write failure. Returns false when [error] is unrelated.
+bool finishCliStdioWrite(Object error) {
+  final fault = classifyStdioWrite(error);
+  if (fault == null) return false;
+  if (fault.message != null) {
+    try {
+      stderr.writeln(fault.message);
+    } on Object {
+      // The failure report itself could not be written.
+    }
+  }
+  exitCode = applyStdioWriteFault(exitCode, fault);
+  return true;
+}
+
+/// Runs [body] so a closed pipe stays quiet and any other error still reaches
+/// the root zone. [onFinally] runs even when [body] fails.
+Future<void> runCliBody(
+  Future<void> Function() body, {
+  FutureOr<void> Function()? onFinally,
+}) async {
+  await runZonedGuarded(() async {
+    try {
+      await body();
+    } on Object catch (error) {
+      if (!finishCliStdioWrite(error)) rethrow;
+    } finally {
+      final done = onFinally;
+      if (done != null) await done();
+    }
+  }, (error, stack) {
+    if (finishCliStdioWrite(error)) return;
+    // This handler runs in the parent zone. From main that parent is the root
+    // zone, so Zone.current.parent is null and would drop the error.
+    Zone.root.handleUncaughtError(error, stack);
+  });
 }

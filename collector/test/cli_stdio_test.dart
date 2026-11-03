@@ -68,6 +68,59 @@ void main() {
     );
   });
 
+  test('a closed pipe keeps an exit code the command already chose', () {
+    const closed = FileSystemException(
+      'writeFrom failed',
+      '',
+      OSError('The pipe is being closed', 232),
+    );
+    const full = FileSystemException(
+      'writeFrom failed',
+      '',
+      OSError('No space left on device', 28),
+    );
+    final closedFault = fault(closed);
+    final fullFault = fault(full);
+
+    expect(applyStdioWriteFault(0, closedFault), 0);
+    expect(applyStdioWriteFault(69, closedFault), 69);
+    expect(applyStdioWriteFault(65, closedFault), 65);
+    expect(applyStdioWriteFault(0, fullFault), 1);
+    expect(applyStdioWriteFault(69, fullFault), 69);
+    expect(applyStdioWriteFault(64, fullFault), 64);
+  });
+
+  test('finishCliStdioWrite uses that exit-code rule', () {
+    const closed = FileSystemException(
+      'writeFrom failed',
+      '',
+      OSError('The pipe is being closed', 232),
+    );
+    final prior = exitCode;
+    try {
+      exitCode = 69;
+      expect(finishCliStdioWrite(closed), isTrue);
+      expect(exitCode, 69);
+      exitCode = 0;
+      expect(finishCliStdioWrite(closed), isTrue);
+      expect(exitCode, 0);
+
+      const full = FileSystemException(
+        'writeFrom failed',
+        '',
+        OSError('No space left on device', 28),
+      );
+      exitCode = 0;
+      expect(finishCliStdioWrite(full), isTrue);
+      expect(exitCode, 1);
+      exitCode = 74;
+      expect(finishCliStdioWrite(full), isTrue);
+      expect(exitCode, 74);
+    } finally {
+      exitCode = prior;
+    }
+  });
+
   test('file and program errors are not stdio write failures', () {
     expect(
       classifyStdioWrite(

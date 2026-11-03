@@ -4,11 +4,17 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-- A closed stdout pipe exits 0 with no stack trace. Any other stdio write
-  failure prints one stderr line and exits 1. File and network errors still
+- A closed stdout pipe does not print a stack trace. A command that already
+  chose an exit code keeps it, and a command that would have exited 0 still
+  exits 0. Any other stdio write failure prints one stderr line and exits 1
+  when the command had not already failed. File and network errors still
   surface as before.
 - `quotabot <command> --help` prints that command's options. `top --help`
-  lists the shipped palettes, sort orders, and keys.
+  lists the shipped palettes, sort orders, and keys. It does not list
+  `--json`, which `top` rejects. `top --interval` rejects a non-integer.
+  Values outside 2..3600 stay clamped, and the default cadence stays
+  adaptive. An unknown `--sort` or a non-integer `--interval` exits 64
+  before any snapshot text.
 - The catalog audit reads OpenAI `shutdown_date` values. It exits nonzero
   when a catalog model is already shut down or shuts down within 30 days.
   Other providers stay presence-only. Summaries count shutdowns and omit
