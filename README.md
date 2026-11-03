@@ -199,9 +199,10 @@ tool and schema contract is in [AGENTS.md](AGENTS.md). See the
 [LiteLLM integration](integrations/litellm/) and
 [minimal MCP clients](integrations/mcp_clients/) for working examples. The
 [harness setup pack](integrations/harnesses/) prints versioned advisory
-configuration for OpenClaw, Hermes, and OpenCode 1, with CLI recipes for pi and
-NemoClaw. It checks configuration and the quotabot entrypoint; installed-harness
-loading remains a separate compatibility check. The
+configuration for OpenClaw, Hermes, and OpenCode 1 and 2, with CLI recipes for
+pi and NemoClaw. OpenCode 2 follows the published V2 document. It checks
+configuration and the quotabot entrypoint; installed-harness loading remains a
+separate compatibility check. The
 [September harness review](docs/research/2026-09-harnesses.md) records the
 versioned OpenClaw, NemoClaw, pi, Hermes, and OpenCode integration plan and its
 current limits. Exposing MCP advice does not automatically switch a harness's

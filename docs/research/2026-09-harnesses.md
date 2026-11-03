@@ -128,6 +128,14 @@ existing session.
 [V2 MCP](https://opencode.ai/v2/docs/mcp-servers),
 [V2 plugins](https://opencode.ai/v2/docs/build/plugins).
 
+Superseded for configuration emission on 2026-11-02: the published changelog's
+newest release was OpenCode 2.2.5 (2026-10-30), and the live V2 MCP document
+still uses `mcp.servers`. The advisory pack emits that shape as documented
+configuration, pins `protocol` to `legacy`, and turns Code Mode off. The
+September text above remains the beta-period record. No installed OpenCode
+client was run, the `opencode2` binary name was not rechecked, and the
+experimental selector later in this note was not built.
+
 Local compatibility also requires exact model IDs and capabilities. Stable
 OpenCode documents OpenAI-compatible Ollama configuration. V2 discovers Ollama
 and vLLM, but deliberately does not infer vLLM tool support from discovery when

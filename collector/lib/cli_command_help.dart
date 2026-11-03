@@ -33,6 +33,7 @@ const knownCliCommands = <String>{
   'unhide',
   'update',
   'verify',
+  'version',
   'watch',
 };
 
@@ -54,6 +55,7 @@ List<String>? focusedCommandHelp(String? command) {
     'json' => _json(states),
     'check' => _check(states),
     'verify' => _verify(states),
+    'version' => _version(),
     'login' => _login(),
     'logout' => _logout(),
     'hide' => _hide(),
@@ -161,6 +163,20 @@ List<String> _check(String states) => [
       'OPTIONS',
       '  --account=VALUE    exact returned account',
       ..._quotaOptions(states),
+    ];
+
+List<String> _version() => [
+      'quotabot version',
+      '',
+      'Print the CLI version and exit. This does not read quota.',
+      '',
+      'USAGE',
+      '  quotabot version',
+      '  quotabot --version',
+      '  quotabot -v',
+      '',
+      'Unknown flags and extra arguments are a usage error.',
+      '--version and -v also print the version when they are the only flags.',
     ];
 
 List<String> _verify(String states) => [

@@ -80,12 +80,14 @@
     },
     {
       "id": "opencode-2",
-      "version_reviewed": "beta_documentation_only",
-      "support": "future_untested",
-      "transports": [],
+      "version_reviewed": "2.2.5",
+      "shape_read_on": "2026-11-02",
+      "support": "documented_configuration",
+      "transports": ["stdio", "streamable_http_loopback"],
+      "configuration_root": "mcp.servers.quotabot",
       "sources": [
-        "https://opencode.ai/v2/docs",
-        "https://opencode.ai/v2/docs/mcp-servers"
+        "https://opencode.ai/v2/docs/mcp-servers",
+        "https://github.com/anomalyco/opencode/blob/dev/CHANGELOG.md"
       ]
     }
   ]

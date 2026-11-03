@@ -417,7 +417,6 @@ Future<void> _runMain(List<String> rawArgs) async {
     }
     if (helpTopic != null &&
         helpTopic != 'help' &&
-        helpTopic != 'version' &&
         !knownCliCommands.contains(helpTopic)) {
       stderr.writeln('quotabot: unknown help topic "$helpTopic"');
       exitCode = _exitUsage;
@@ -427,6 +426,12 @@ Future<void> _runMain(List<String> rawArgs) async {
     return;
   }
   if (cmd == 'version' || flags.contains('--version') || flags.contains('-v')) {
+    final versionUsage = _versionUsageError(cmd, pos, flags);
+    if (versionUsage != null) {
+      stderr.writeln('quotabot: $versionUsage');
+      exitCode = _exitUsage;
+      return;
+    }
     stdout.writeln('quotabot $_version');
     return;
   }
@@ -2213,6 +2218,27 @@ String _agoLabel(int lastCollect, int now) {
   return 'updated ${(s / 60).round()}m ago';
 }
 
+/// Usage errors for `version`. `--version` and `-v` stay valid on their own.
+String? _versionUsageError(String cmd, List<String> pos, Set<String> flags) {
+  for (final flag in flags) {
+    if (flag == '--version' || flag == '-v') continue;
+    if (flag.startsWith('--version=')) return '--version does not take a value';
+    final name = _optionName(flag);
+    final shown = flag.startsWith('--') ? '--$name' : flag;
+    return '$shown is not valid for version';
+  }
+  if (pos.length > 1) {
+    return 'unexpected argument "${pos[1]}" for version';
+  }
+  if (cmd.isNotEmpty &&
+      cmd != 'version' &&
+      cmd != 'help' &&
+      !knownCliCommands.contains(cmd)) {
+    return 'unexpected argument "$cmd" for version';
+  }
+  return null;
+}
+
 /// Usage errors for `top` that must be reported before any snapshot text.
 String? _topUsageError(Set<String> flags) {
   final intervalRaw = _stringOption(flags, 'interval', null);
@@ -2802,7 +2828,10 @@ void _printHelp([String? command]) {
   _helpLine('');
   _helpLine(head('SEE QUOTA'));
   _helpLine(
-    '  status, doctor      every provider, its windows and resets (default)',
+    '  status              every provider, its windows and resets (default)',
+  );
+  _helpLine(
+    '  doctor              same human view; JSON adds read_state and next_step',
   );
   _helpLine(
     '  claude-status       project a Claude Code status line into local evidence',
@@ -2912,7 +2941,8 @@ void _printHelp([String? command]) {
   );
   _helpLine(
     '  --interval=N        top: seconds between refreshes (2..3600, clamped; '
-    'a non-integer is a usage error; default: adaptive)',
+    'a non-integer is a usage error; default: adaptive). '
+    'watch uses the same rules with 2..86400',
   );
   _helpLine(
     '  --sort=NAME         top: initial order (${TopSort.values.map((m) => m.cliName).join(', ')}); '

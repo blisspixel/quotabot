@@ -71,9 +71,10 @@ and [Setup](SETUP.md).
 ## Build and extend
 
 - [Agent harness setup](../integrations/harnesses/README.md) prints reviewed
-  OpenClaw, Hermes, and OpenCode 1 configuration without opening a host config
-  or reading a credential. It includes pi and NemoClaw CLI recipes and explicit
-  version and transport limits.
+  OpenClaw, Hermes, and OpenCode 1 and 2 configuration without opening a host
+  config or reading a credential. OpenCode 2 follows the published V2 document.
+  It includes pi and NemoClaw CLI recipes and explicit version and transport
+  limits. Installed harness clients were not loaded.
 - [Omarchy bar widget](../integrations/omarchy/README.md) maps quotabot JSON
   into a redacted Omarchy 4.0.4 panel. It does not write stock agent usage
   records. Unit fixtures are not an installed-shell proof.

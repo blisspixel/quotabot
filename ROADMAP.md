@@ -353,7 +353,10 @@ pin `2024-11-05` through `2025-11-25`.
    harness. The server now also accepts the published `2026-07-28` revision for
    stdio and authenticated loopback HTTP, including discovery, tools, private
    cache scope, independent subscriptions, version errors, and header mismatches.
-   Installed-client proof for that revision remains open. A stable SDK path is
+   Installed-client proof for that revision remains open. OpenCode 2's
+   published V2 document now has a documented advisory fragment that pins
+   legacy negotiation and denies the lease tools. An installed OpenCode
+   client has not loaded that fragment. A stable SDK path is
    in use at 2.4.2; do not treat a later SDK release as behavior-neutral.
    Package the same advice in the portable
    [Agent Plugins format](integrations/agent_plugin/) where a client supports
