@@ -13,4 +13,4 @@ PyYAML==6.0.3
 aiohttp==3.14.5
 certifi==2026.10.19
 dnspython==2.9.1
-filelock>=4.2.1
+filelock==4.2.7
