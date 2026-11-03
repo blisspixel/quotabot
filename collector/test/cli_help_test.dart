@@ -207,7 +207,11 @@ void main() {
       expect(result.stdout, isEmpty);
       expect(
         result.stderr as String,
-        contains('unexpected argument "extra" for help'),
+        contains(
+          args.first == 'help'
+              ? 'unexpected argument "extra" for help top'
+              : 'unexpected argument "extra" for top --help',
+        ),
       );
     }
 
@@ -365,4 +369,147 @@ void main() {
       expect(result.stderr as String, contains('--provider-route'));
     }
   }, timeout: const Timeout(Duration(minutes: 2)));
+
+  test('hide rejects an unknown name and unhide reports a miss', () async {
+    final unknown = await runCli(['hide', 'nope']);
+    expectExitCode(unknown, 64);
+    expect(unknown.stdout, isEmpty);
+    expect(unknown.stderr as String, contains('no provider named "nope"'));
+    expect(unknown.stderr as String, contains('known: '));
+    expect(unknown.stderr as String, contains('claude'));
+    expect(temp.listSync(), isEmpty);
+
+    final json = await runCli(['hide', 'kior', '--json']);
+    expectExitCode(json, 64);
+    final body = jsonDecode(json.stdout as String) as Map<String, dynamic>;
+    expect(body['ok'], isFalse);
+    expect(body['error'], 'unknown provider');
+    expect(body['provider'], 'kior');
+    expect(body['known'], contains('kiro'));
+    expect(temp.listSync(), isEmpty);
+
+    final missing = await runCli(['unhide', 'claude']);
+    expectExitCode(missing, 0);
+    expect(missing.stdout as String, contains('claude is not hidden'));
+    expect(temp.listSync(), isEmpty);
+
+    final hidden = await runCli(['hide', 'claude']);
+    expectExitCode(hidden, 0);
+    expect(hidden.stdout as String, contains('hiding claude'));
+    final again = await runCli(['unhide', 'claude']);
+    expectExitCode(again, 0);
+    expect(again.stdout as String, contains('showing claude'));
+    final second = await runCli(['unhide', 'claude', '--json']);
+    expectExitCode(second, 0);
+    final unchanged =
+        jsonDecode(second.stdout as String) as Map<String, dynamic>;
+    expect(unchanged['changed'], isFalse);
+    expect(unchanged['provider'], 'claude');
+
+    final open = await runCli([
+      'suggest',
+      '--mock-provider=claude',
+      '--state=healthy',
+      '--exclude=claude',
+    ]);
+    expectExitCode(open, 0);
+    expect(
+      open.stdout as String,
+      contains('no quota read yet; quotabot login claude'),
+    );
+
+    final account = await runCli([
+      'hide',
+      'claude|someone@example.com',
+    ]);
+    expectExitCode(account, 0);
+    expect(
+      account.stdout as String,
+      contains('hiding claude|someone@example.com'),
+    );
+    final otherAccount = await runCli([
+      'unhide',
+      'claude|other@example.com',
+    ]);
+    expectExitCode(otherAccount, 0);
+    expect(
+      otherAccount.stdout as String,
+      contains('claude|other@example.com is not hidden'),
+    );
+    final stillAccount = await runCli(['hidden']);
+    expect(
+        stillAccount.stdout as String, contains('claude|someone@example.com'));
+    final accountFleet = await runCli([
+      'suggest',
+      '--mock-provider=claude',
+      '--state=healthy',
+      '--exclude=claude',
+    ]);
+    expect(
+      accountFleet.stdout as String,
+      contains('no quota read yet; quotabot login claude'),
+    );
+    final clearAccount = await runCli(['unhide', 'claude']);
+    expectExitCode(clearAccount, 0);
+    expect(clearAccount.stdout as String, contains('showing claude'));
+
+    final manual = await runCli([
+      'manual',
+      'set',
+      'custom-ai',
+      '--display-name',
+      'Custom AI',
+      '--account',
+      'work',
+      '--window',
+      'monthly',
+      '--used',
+      '3',
+      '--limit',
+      '10',
+      '--reset',
+      '${DateTime.now().toUtc().add(const Duration(days: 30)).millisecondsSinceEpoch ~/ 1000}',
+    ]);
+    expectExitCode(manual, 0);
+    final manualHide = await runCli(['hide', 'custom-ai']);
+    expectExitCode(manualHide, 0);
+    expect(manualHide.stdout as String, contains('hiding custom-ai'));
+    final stillUnknown = await runCli(['hide', 'nope']);
+    expectExitCode(stillUnknown, 64);
+    expect(stillUnknown.stderr as String, contains('custom-ai'));
+
+    await runCli(['hide', 'claude']);
+    for (final command in ['suggest', 'doctor', 'top']) {
+      final skipped = await runCli([
+        command,
+        '--mock-provider=claude',
+        '--state=healthy',
+      ]);
+      expect(
+        skipped.stdout as String,
+        contains('no quota read yet; quotabot login codex'),
+        reason: command,
+      );
+      expect(
+        skipped.stdout as String,
+        isNot(contains('quotabot login claude')),
+        reason: command,
+      );
+    }
+
+    for (final provider in ['codex', 'grok', 'antigravity']) {
+      final hiddenLogin = await runCli(['hide', provider]);
+      expectExitCode(hiddenLogin, 0);
+    }
+    final generic = await runCli([
+      'suggest',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+    expectExitCode(generic, 0);
+    expect(
+      generic.stdout as String,
+      contains('no quota read yet; quotabot login <provider>'),
+    );
+  }, timeout: const Timeout(Duration(minutes: 5)));
 }

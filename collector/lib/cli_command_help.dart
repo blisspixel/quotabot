@@ -230,6 +230,8 @@ List<String> _hide() => [
       'quotabot hide',
       '',
       'Keep a provider off the default view until unhide. The list is local.',
+      'The name must be a known provider or a saved manual entry. An unknown',
+      'name exits 64 and prints the known list.',
       '',
       'USAGE',
       '  quotabot hide <provider>',
@@ -242,7 +244,8 @@ List<String> _hide() => [
 List<String> _unhide() => [
       'quotabot unhide',
       '',
-      'Show a previously hidden provider again.',
+      'Show a previously hidden provider again. A known provider that is not',
+      'hidden is left unchanged.',
       '',
       'USAGE',
       '  quotabot unhide <provider>',

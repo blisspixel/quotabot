@@ -4,6 +4,12 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- `quotabot hide` and `quotabot unhide` accept a known provider or a saved
+  manual entry. Any other name exits 64, prints the known list, and does not
+  change the hidden set. `unhide` of a provider that is not hidden says so.
+  An empty fleet route line skips a hidden login, starting with Claude, and
+  uses `quotabot login <provider>` only when every named login is hidden.
+  `quotabot <command> --help extra` names that command in the usage error.
 - `quotabot hide` and `quotabot unhide` require a provider. With no provider
   they exit 64 and do not list or change the hidden set. `quotabot hidden`
   still lists it. Reading that set does not create empty profile or desktop

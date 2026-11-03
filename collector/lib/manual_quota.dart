@@ -111,20 +111,26 @@ class ManualQuotaEntry {
   }
 }
 
-Directory manualQuotaDir({Directory? root}) {
-  final dir = root ?? quotabotDir('manual');
-  if (!dir.existsSync()) dir.createSync(recursive: true);
+Directory manualQuotaDir({Directory? root, bool create = true}) {
+  final dir = root ?? quotabotDir('manual', create: create);
+  if (!dir.existsSync()) {
+    if (!create) return dir;
+    dir.createSync(recursive: true);
+  }
   restrictOwnerOnlyDirectory(dir);
   return dir;
 }
 
-File manualQuotaFile({Directory? dir}) => File(
-      '${manualQuotaDir(root: dir).path}/$manualQuotaFileName',
+File manualQuotaFile({Directory? dir, bool create = true}) => File(
+      '${manualQuotaDir(root: dir, create: create).path}/$manualQuotaFileName',
     );
 
-List<ManualQuotaEntry> loadManualQuotaEntries({Directory? dir}) {
+List<ManualQuotaEntry> loadManualQuotaEntries({
+  Directory? dir,
+  bool create = true,
+}) {
   try {
-    final file = manualQuotaFile(dir: dir);
+    final file = manualQuotaFile(dir: dir, create: create);
     if (!file.existsSync() || file.lengthSync() > _maxManualQuotaBytes) {
       return const [];
     }

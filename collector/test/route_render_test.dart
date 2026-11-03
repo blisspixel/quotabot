@@ -206,6 +206,50 @@ void main() {
     expect(glance.lines, hasLength(1));
   });
 
+  test('an empty fleet skips a hidden login and stays generic when all are',
+      () {
+    const suggestion = RouteSuggestion(
+      recommended: null,
+      ranked: [],
+      reason: 'No quota read yet.',
+      decisionCode: RouteDecisionCode.noData,
+      usingLocalFallback: false,
+      fallback: RouteFallback(
+        kind: RouteFallbackKind.passthrough,
+        reason: 'use the requested provider',
+      ),
+      asOf: 1000,
+      riskZ: 0,
+    );
+    final hiddenClaude = humanRouteGlance(
+      suggestion,
+      1000,
+      hiddenTargets: {'claude'},
+    );
+    expect(
+      hiddenClaude.signature,
+      'next  your usual model (no quota read yet; quotabot login codex)',
+    );
+    final accountOnly = humanRouteGlance(
+      suggestion,
+      1000,
+      hiddenTargets: {'claude|someone@example.com'},
+    );
+    expect(
+      accountOnly.signature,
+      'next  your usual model (no quota read yet; quotabot login claude)',
+    );
+    final allHidden = humanRouteGlance(
+      suggestion,
+      1000,
+      hiddenTargets: {'claude', 'codex', 'grok', 'antigravity'},
+    );
+    expect(
+      allHidden.signature,
+      'next  your usual model (no quota read yet; quotabot login <provider>)',
+    );
+  });
+
   test('cached evidence names the provider instead of a login prompt', () {
     final glance = humanRouteGlance(
       RouteSuggestion(

@@ -120,10 +120,39 @@ class HumanRouteGlance {
       ];
 }
 
+/// Login hint when the fleet has no quota read.
+///
+/// Claude is the usual first name. A provider hidden as a whole is skipped.
+/// An account-only target does not hide the provider. When every named login
+/// is hidden, the hint stays generic.
+String noQuotaReadLoginDetail(Iterable<String> hiddenTargets) {
+  const order = <String>[
+    claudeProviderId,
+    codexProviderId,
+    grokProviderId,
+    antigravityProviderId,
+  ];
+  final hidden = <String>{
+    for (final target in hiddenTargets)
+      if (_providerWideHiddenTarget(target) case final id?) id,
+  };
+  for (final id in order) {
+    if (!hidden.contains(id)) return 'no quota read yet; quotabot login $id';
+  }
+  return 'no quota read yet; quotabot login <provider>';
+}
+
+String? _providerWideHiddenTarget(String target) {
+  final value = target.trim().toLowerCase();
+  if (value.isEmpty || value.contains('|')) return null;
+  return value;
+}
+
 HumanRouteGlance humanRouteGlance(
   RouteSuggestion suggestion,
   int now, {
   String accountLabel = '',
+  Set<String> hiddenTargets = const {},
 }) {
   final recommended = suggestion.recommended;
   if (recommended == null) {
@@ -151,10 +180,10 @@ HumanRouteGlance humanRouteGlance(
         reasonTail: suggestion.reason,
       );
     }
-    return const HumanRouteGlance(
+    return HumanRouteGlance(
       providerLabel: 'your usual model',
       accountLabel: '',
-      detail: 'no quota read yet; quotabot login claude',
+      detail: noQuotaReadLoginDetail(hiddenTargets),
       reasonTail: '',
     );
   }
