@@ -2,8 +2,9 @@
 
 Thanks for your interest. quotabot is a small, local-first tool, and
 contributions that keep it simple and correct are very welcome. Agents editing
-this repository follow [CLAUDE.md](CLAUDE.md). The MCP and CLI contract for
-agents using quotabot is [AGENTS.md](AGENTS.md).
+this repository follow the repository rules in [AGENTS.md](AGENTS.md). The MCP
+and CLI contract for agents using quotabot is in that same file.
+[CLAUDE.md](CLAUDE.md) imports it.
 
 ## Ways to help
 

@@ -1251,6 +1251,40 @@ void main() {
     );
   });
 
+  test('top rejects json and a non-integer interval before collecting',
+      () async {
+    final json = await runCli(['top', '--json']);
+    expectExitCode(json, 64);
+    expect(json.stdout, isEmpty);
+    expect(
+      json.stderr as String,
+      contains('--json is not valid for top'),
+    );
+
+    final interval = await runCli([
+      'top',
+      '--interval=nope',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+    expectExitCode(interval, 64);
+    expect(interval.stdout, isEmpty);
+    expect(
+      interval.stderr as String,
+      contains('--interval must be an integer number of seconds'),
+    );
+
+    final sort = await runCli([
+      'top',
+      '--sort=sideways',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+    expectExitCode(sort, 64);
+    expect(sort.stdout, isEmpty);
+    expect(sort.stderr as String, contains('unknown --sort value "sideways"'));
+  }, timeout: const Timeout(Duration(minutes: 2)));
+
   test('watch rejects a malformed fixed interval before collecting', () async {
     final result = await runCli([
       'watch',

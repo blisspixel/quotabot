@@ -27,6 +27,10 @@ class ModelListSource {
   final ModelFilter includeModel;
   final int maxPages;
 
+  /// True when this endpoint publishes OpenAI-style `shutdown_date` values.
+  /// Other model lists stay presence-only. A missing field is not a date.
+  final bool publishesShutdownDates;
+
   const ModelListSource({
     required this.provider,
     required this.endpoint,
@@ -34,6 +38,7 @@ class ModelListSource {
     this.headers = _noHeaders,
     this.includeModel = _includeAllModels,
     this.maxPages = 20,
+    this.publishesShutdownDates = false,
   });
 
   String? secretFrom(Map<String, String> environment) {
@@ -76,6 +81,12 @@ class ProviderCatalogAudit {
   final List<String> missingFromCatalog;
   final List<String> catalogOnly;
 
+  /// True when this source publishes shutdown dates and the read succeeded.
+  final bool shutdownDatesChecked;
+
+  /// Catalog models on this source that announced a shutdown date.
+  final List<CatalogShutdown> shutdowns;
+
   const ProviderCatalogAudit({
     required this.provider,
     required this.endpoint,
@@ -87,9 +98,14 @@ class ProviderCatalogAudit {
     required this.endpointModelIds,
     required this.missingFromCatalog,
     required this.catalogOnly,
+    this.shutdownDatesChecked = false,
+    this.shutdowns = const [],
   });
 
   bool get hasDrift => missingFromCatalog.isNotEmpty || catalogOnly.isNotEmpty;
+
+  bool get hasActionableShutdown =>
+      shutdowns.any((shutdown) => shutdown.actionable);
 
   Map<String, dynamic> toJson() => {
         'provider': provider,
@@ -102,7 +118,45 @@ class ProviderCatalogAudit {
         'endpoint_models': endpointModelIds,
         'missing_from_catalog': missingFromCatalog,
         'catalog_only': catalogOnly,
+        'shutdown_dates_checked': shutdownDatesChecked,
+        if (shutdowns.isNotEmpty)
+          'shutdowns': shutdowns.map((shutdown) => shutdown.toJson()).toList(),
       };
+}
+
+/// Days from the audit date, including today, that make an announced shutdown
+/// fail the audit. Farther dates stay in the report and do not change the exit.
+const int kCatalogShutdownNoticeDays = 30;
+
+/// One catalog model with a provider-announced shutdown date.
+class CatalogShutdown {
+  final String modelId;
+  final String shutdownDate;
+  final int daysRemaining;
+  final bool actionable;
+
+  const CatalogShutdown({
+    required this.modelId,
+    required this.shutdownDate,
+    required this.daysRemaining,
+    required this.actionable,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'model': modelId,
+        'shutdown_date': shutdownDate,
+        'days_remaining': daysRemaining,
+        'actionable': actionable,
+      };
+}
+
+/// A model id from a list endpoint, with a validated shutdown date when the
+/// payload announced one.
+class ListedModel {
+  final String id;
+  final String? shutdownDate;
+
+  const ListedModel(this.id, this.shutdownDate);
 }
 
 /// A curated `quotaIncludedUntil` date-fact that has elapsed: the model is past
@@ -151,6 +205,11 @@ class CatalogAuditReport {
   /// True when at least one curated included-quota window has elapsed. A prompt
   /// to re-verify the catalog, surfaced separately from drift and errors.
   bool get hasElapsedIncludedQuota => elapsedIncludedQuota.isNotEmpty;
+
+  /// True when a catalog model is already shut down or shuts down inside
+  /// [kCatalogShutdownNoticeDays].
+  bool get hasActionableShutdown =>
+      providers.any((provider) => provider.hasActionableShutdown);
 
   /// Whole days between the catalog's `kCatalogUpdated` date and when the audit
   /// ran, or null when the date does not parse. A dev/CI freshness signal: the
@@ -222,7 +281,11 @@ String formatCatalogAuditReport(
     final status = provider.skipped
         ? 'skipped'
         : provider.ok
-            ? (provider.hasDrift ? 'drift' : 'clean')
+            ? (provider.hasDrift
+                ? 'drift'
+                : provider.hasActionableShutdown
+                    ? 'shutdown'
+                    : 'clean')
             : 'error';
     lines.add('${provider.provider}: $status');
     if (provider.error != null) {
@@ -247,6 +310,29 @@ String formatCatalogAuditReport(
           includeModelIds: includeModelIds,
         ));
       }
+      lines.add(
+        provider.shutdownDatesChecked
+            ? '  shutdown dates: checked'
+            : '  shutdown dates: not published by this source',
+      );
+      if (provider.shutdowns.isNotEmpty) {
+        if (includeModelIds) {
+          for (final shutdown in provider.shutdowns) {
+            lines.add(
+              '  shutdown ${shutdown.modelId} on ${shutdown.shutdownDate} '
+              '(${_shutdownWhen(shutdown.daysRemaining)})',
+            );
+          }
+        } else {
+          final actionable = provider.shutdowns
+              .where((shutdown) => shutdown.actionable)
+              .length;
+          lines.add('  announced shutdowns: ${provider.shutdowns.length}');
+          lines.add('  actionable shutdowns: $actionable');
+        }
+      }
+    } else {
+      lines.add('  shutdown dates: not checked');
     }
   }
   if (report.elapsedIncludedQuota.isNotEmpty) {
@@ -267,7 +353,34 @@ String formatCatalogAuditReport(
         'details.');
   }
   lines.add('Use --fail-on-drift or --fail-on-error when wiring this into CI.');
+  lines.add(
+    'Shutdown dates are read only from sources that publish them. '
+    'A catalog model that is already shut down, or shuts down within '
+    '$kCatalogShutdownNoticeDays days, exits nonzero.',
+  );
   return lines.join('\n');
+}
+
+String _shutdownWhen(int daysRemaining) {
+  if (daysRemaining < 0) {
+    final days = -daysRemaining;
+    return '$days day${days == 1 ? '' : 's'} past shutdown';
+  }
+  if (daysRemaining == 0) return 'shuts down today';
+  return 'shuts down in $daysRemaining day${daysRemaining == 1 ? '' : 's'}';
+}
+
+/// Exit code for the catalog audit tool. An actionable shutdown fails on its
+/// own. Id drift and transport errors still require their flags.
+int catalogAuditExitCode(
+  CatalogAuditReport report, {
+  required bool failOnDrift,
+  required bool failOnError,
+}) {
+  if (report.hasActionableShutdown) return 1;
+  if (failOnDrift && report.hasDrift) return 1;
+  if (failOnError && report.hasErrors) return 1;
+  return 0;
 }
 
 String _auditDiffLine({
@@ -306,6 +419,7 @@ Future<CatalogAuditReport> auditModelCatalog({
         environment: environment,
         client: httpClient,
         timeout: timeout,
+        now: now,
       ));
     }
     return CatalogAuditReport(
@@ -325,6 +439,7 @@ Future<ProviderCatalogAudit> _auditProvider({
   required Map<String, String> environment,
   required http.Client client,
   required Duration timeout,
+  required int now,
 }) async {
   final secret = source.secretFrom(environment);
   if (source.requiredEnv.isNotEmpty && secret == null) {
@@ -335,12 +450,14 @@ Future<ProviderCatalogAudit> _auditProvider({
       ok: false,
       skipped: true,
       error: 'missing ${source.authLabel}',
+      now: now,
     );
   }
 
   try {
     var uri = source.endpoint;
     final endpointIds = <String>{};
+    final listed = <ListedModel>[];
     for (var page = 0; page < source.maxPages; page++) {
       final response = await client
           .get(uri, headers: source.headers(secret))
@@ -353,12 +470,14 @@ Future<ProviderCatalogAudit> _auditProvider({
           ok: false,
           skipped: false,
           error: 'HTTP ${response.statusCode}',
+          now: now,
         );
       }
       final decoded = jsonDecode(response.body);
-      endpointIds.addAll(
-        parseModelList(decoded, includeModel: source.includeModel),
-      );
+      final pageModels =
+          parseListedModels(decoded, includeModel: source.includeModel);
+      listed.addAll(pageModels);
+      endpointIds.addAll(pageModels.map((model) => model.id));
       final next = _nextPageUri(uri, decoded);
       if (next == null) {
         return _providerAudit(
@@ -368,6 +487,8 @@ Future<ProviderCatalogAudit> _auditProvider({
           ok: true,
           skipped: false,
           error: null,
+          listed: listed,
+          now: now,
         );
       }
       uri = next;
@@ -379,6 +500,7 @@ Future<ProviderCatalogAudit> _auditProvider({
       ok: false,
       skipped: false,
       error: 'pagination exceeded ${source.maxPages} pages',
+      now: now,
     );
   } on TimeoutException {
     return _providerAudit(
@@ -388,6 +510,7 @@ Future<ProviderCatalogAudit> _auditProvider({
       ok: false,
       skipped: false,
       error: 'timeout',
+      now: now,
     );
   } on FormatException {
     return _providerAudit(
@@ -397,6 +520,7 @@ Future<ProviderCatalogAudit> _auditProvider({
       ok: false,
       skipped: false,
       error: 'invalid JSON',
+      now: now,
     );
   } on Object catch (error) {
     return _providerAudit(
@@ -406,6 +530,7 @@ Future<ProviderCatalogAudit> _auditProvider({
       ok: false,
       skipped: false,
       error: error.runtimeType.toString(),
+      now: now,
     );
   }
 }
@@ -437,11 +562,14 @@ ProviderCatalogAudit _providerAudit({
   required bool ok,
   required bool skipped,
   required String? error,
+  List<ListedModel> listed = const [],
+  required int now,
 }) {
   final catalogSet = catalogIds.toSet();
   final endpointSet = endpointIds.toSet();
   final missing = endpointSet.difference(catalogSet).toList()..sort();
   final catalogOnly = catalogSet.difference(endpointSet).toList()..sort();
+  final shutdownDatesChecked = source.publishesShutdownDates && ok;
   return ProviderCatalogAudit(
     provider: source.provider,
     endpoint: source.safeEndpoint,
@@ -453,6 +581,13 @@ ProviderCatalogAudit _providerAudit({
     endpointModelIds: endpointIds,
     missingFromCatalog: ok ? missing : const [],
     catalogOnly: ok ? catalogOnly : const [],
+    shutdownDatesChecked: shutdownDatesChecked,
+    shutdowns: catalogShutdownFindings(
+      catalogIds: catalogIds,
+      shutdownDates: shutdownDatesById(listed),
+      now: now,
+      checked: shutdownDatesChecked,
+    ),
   );
 }
 
@@ -464,12 +599,28 @@ List<String> parseModelList(
   ModelFilter includeModel = _includeAllModels,
 }) {
   final ids = <String>{};
+  for (final model in parseListedModels(decoded, includeModel: includeModel)) {
+    ids.add(model.id);
+  }
+  return ids.toList()..sort();
+}
+
+/// Every accepted model in [decoded], including repeats so a later page can
+/// confirm or contradict a shutdown date.
+List<ListedModel> parseListedModels(
+  Object? decoded, {
+  ModelFilter includeModel = _includeAllModels,
+}) {
+  final listed = <ListedModel>[];
 
   void add(String? rawId, Map<String, dynamic>? raw) {
     if (rawId == null) return;
     final id = _normalizeModelId(rawId);
     if (id.isEmpty || !includeModel(id, raw)) return;
-    ids.add(id);
+    listed.add(ListedModel(
+      id,
+      raw == null ? null : parseShutdownDate(raw['shutdown_date']),
+    ));
   }
 
   if (decoded is Map) {
@@ -511,7 +662,88 @@ List<String> parseModelList(
     }
   }
 
-  return ids.toList()..sort();
+  return listed;
+}
+
+final _shutdownDatePattern = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$');
+
+/// A provider `shutdown_date`, or null when the value is absent, null, or
+/// not a real UTC calendar date. `2026-02-31` is rejected rather than rolled
+/// into March.
+String? parseShutdownDate(Object? value) {
+  if (value is! String) return null;
+  final match = _shutdownDatePattern.firstMatch(value);
+  if (match == null) return null;
+  final year = int.parse(match.group(1)!);
+  final month = int.parse(match.group(2)!);
+  final day = int.parse(match.group(3)!);
+  final date = DateTime.utc(year, month, day);
+  if (date.year != year || date.month != month || date.day != day) {
+    return null;
+  }
+  return value;
+}
+
+/// One date per id. The first real date sticks. A later null does not erase
+/// it, and a null followed by a date adopts that date. Two different dates
+/// drop the finding, and a later page cannot put a date back.
+Map<String, String?> shutdownDatesById(Iterable<ListedModel> models) {
+  final dates = <String, String?>{};
+  final conflicts = <String>{};
+  for (final model in models) {
+    if (conflicts.contains(model.id)) {
+      dates[model.id] = null;
+      continue;
+    }
+    final next = model.shutdownDate;
+    if (!dates.containsKey(model.id)) {
+      dates[model.id] = next;
+      continue;
+    }
+    final current = dates[model.id];
+    if (current == null) {
+      if (next != null) dates[model.id] = next;
+      continue;
+    }
+    if (next == null || next == current) continue;
+    conflicts.add(model.id);
+    dates[model.id] = null;
+  }
+  return dates;
+}
+
+/// Shutdown findings for catalog ids only. Endpoint-only ids, missing dates,
+/// and an unchecked source contribute nothing.
+List<CatalogShutdown> catalogShutdownFindings({
+  required Iterable<String> catalogIds,
+  required Map<String, String?> shutdownDates,
+  required int now,
+  required bool checked,
+}) {
+  if (!checked) return const [];
+  final instant = DateTime.fromMillisecondsSinceEpoch(now * 1000, isUtc: true);
+  final today = DateTime.utc(instant.year, instant.month, instant.day);
+  final findings = <CatalogShutdown>[];
+  for (final id in catalogIds) {
+    final date = shutdownDates[id];
+    if (date == null) continue;
+    final parts = date.split('-');
+    if (parts.length != 3) continue;
+    final shutdown = DateTime.utc(
+      int.parse(parts[0]),
+      int.parse(parts[1]),
+      int.parse(parts[2]),
+    );
+    final days = shutdown.difference(today).inDays;
+    findings.add(CatalogShutdown(
+      modelId: id,
+      shutdownDate: date,
+      daysRemaining: days,
+      actionable: days <= kCatalogShutdownNoticeDays,
+    ));
+  }
+  findings.sort((a, b) => a.modelId.compareTo(b.modelId));
+  return findings;
 }
 
 String? _firstString(Map<String, dynamic> raw, List<String> keys) {
@@ -536,6 +768,7 @@ List<ModelListSource> defaultModelListSources() => [
         requiredEnv: const ['OPENAI_API_KEY'],
         headers: (secret) => {'Authorization': 'Bearer $secret'},
         includeModel: _includeOpenAiModel,
+        publishesShutdownDates: true,
       ),
       ModelListSource(
         provider: 'claude',

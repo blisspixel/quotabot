@@ -925,7 +925,15 @@ catalog against provider-owned model-list endpoints:
   `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
 
 The audit follows provider pagination tokens and reports model-id drift:
-`missing_from_catalog` and `catalog_only`. It also reports two freshness signals,
+`missing_from_catalog` and `catalog_only`. The OpenAI list also publishes an
+optional `shutdown_date` (`YYYY-MM-DD` or null), checked 2026-11-02 at
+<https://developers.openai.com/api/reference/resources/models/methods/list/>.
+The Codex source is the only default source that reads it. A missing, null,
+malformed, or conflicting date is not a finding, and findings stay limited to
+catalog ids. A catalog model that is already shut down, or shuts down within
+30 days, makes the audit exit nonzero. Farther dates stay in the report.
+Summaries count announced and actionable shutdowns and omit model ids. Other
+providers stay presence-only. It also reports two freshness signals,
 kept separate from drift and errors: `catalog_age_days` (how long since the
 curated `kCatalogUpdated` date) and `elapsed_included_quota` (any per-model
 `quotaIncludedUntil` window that has already passed, so a stale included-quota

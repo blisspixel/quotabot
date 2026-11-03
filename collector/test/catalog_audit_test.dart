@@ -363,17 +363,23 @@ void main() {
       sources.firstWhere((s) => s.provider == 'antigravity').headers('token'),
       containsPair('x-goog-api-key', 'token'),
     );
+    expect(
+      sources.map((source) => source.publishesShutdownDates),
+      [true, false, false, false],
+    );
     final grok = sources.firstWhere((s) => s.provider == 'grok').includeModel;
     expect(grok('grok-4.3', null), isTrue);
     expect(grok('grok-imagine-image', null), isFalse);
   });
 
-  test('Haiku 4.5 output cap matches the current provider spec', () {
+  test('Haiku 5.5 output cap matches the current provider spec', () {
     final haiku =
-        kModelCatalog['claude']!.firstWhere((m) => m.id == 'claude-haiku-4-5');
-    // Regression guard: the catalog previously hardcoded a stale 32000 cap.
-    expect(haiku.maxOutputTokens, 64000);
-    expect(haiku.contextTokens, 200000);
+        kModelCatalog['claude']!.firstWhere((m) => m.id == 'claude-haiku-5-5');
+    // Regression guard: Haiku 4.5 was 64k output and 200k context. Haiku 5.5
+    // is 128k output and 1M context. Checked 2026-11-02.
+    expect(haiku.maxOutputTokens, 128000);
+    expect(haiku.contextTokens, 1000000);
+    expect(haiku.tier, 'light');
   });
 
   test('reports catalog age in whole days', () {
@@ -429,5 +435,302 @@ void main() {
     expect(text, contains('stale included-quota facts'));
     expect(text, contains('claude-fable-5'));
     expect(text, contains('2026-07-07'));
+  });
+
+  test('parses shutdown dates and rejects malformed calendar days', () {
+    final listed = parseListedModels({
+      'data': [
+        {'id': 'gpt-dated', 'shutdown_date': '2026-11-20'},
+        {'id': 'gpt-null', 'shutdown_date': null},
+        {'id': 'gpt-missing'},
+        {'id': 'gpt-invalid', 'shutdown_date': '2026-02-31'},
+        {'id': 'gpt-text', 'shutdown_date': 'next month'},
+        'gpt-string',
+      ],
+    });
+
+    expect(
+      listed.map((model) => (model.id, model.shutdownDate)),
+      [
+        ('gpt-dated', '2026-11-20'),
+        ('gpt-null', null),
+        ('gpt-missing', null),
+        ('gpt-invalid', null),
+        ('gpt-text', null),
+        ('gpt-string', null),
+      ],
+    );
+    expect(parseShutdownDate('2024-02-29'), '2024-02-29');
+    expect(parseShutdownDate('2026-02-29'), isNull);
+  });
+
+  test('conflicting shutdown dates stay unset after a later repeat', () {
+    final dates = shutdownDatesById(const [
+      ListedModel('gpt-keep', '2026-12-03'),
+      ListedModel('gpt-keep', null),
+      ListedModel('gpt-fill', null),
+      ListedModel('gpt-fill', '2027-01-01'),
+      ListedModel('gpt-clash', '2026-10-01'),
+      ListedModel('gpt-clash', '2027-01-01'),
+      ListedModel('gpt-clash', '2026-10-01'),
+    ]);
+
+    expect(dates['gpt-keep'], '2026-12-03');
+    expect(dates['gpt-fill'], '2027-01-01');
+    expect(dates['gpt-clash'], isNull);
+  });
+
+  test('OpenAI shutdown dates fail only inside the notice window', () async {
+    final now = _epochUtc(2026, 11, 2);
+    final source = ModelListSource(
+      provider: 'codex',
+      endpoint: Uri.parse('https://example.test/models'),
+      publishesShutdownDates: true,
+    );
+    final client = MockClient((request) async {
+      if (request.url.queryParameters['after_id'] == 'page-1') {
+        return http.Response(
+          jsonEncode({
+            'data': [
+              {'id': 'gpt-near', 'shutdown_date': '2026-11-20'},
+              {'id': 'gpt-clash', 'shutdown_date': '2027-06-01'},
+              {'id': 'gpt-fill', 'shutdown_date': '2027-06-01'},
+            ],
+            'has_more': false,
+          }),
+          200,
+        );
+      }
+      return http.Response(
+        jsonEncode({
+          'data': [
+            {'id': 'gpt-past', 'shutdown_date': '2026-10-01'},
+            {'id': 'gpt-today', 'shutdown_date': '2026-11-02'},
+            {'id': 'gpt-boundary', 'shutdown_date': '2026-12-02'},
+            {'id': 'gpt-far', 'shutdown_date': '2026-12-03'},
+            {'id': 'gpt-invalid', 'shutdown_date': '2026-02-31'},
+            {'id': 'gpt-missing'},
+            {'id': 'gpt-endpoint-only', 'shutdown_date': '2020-01-01'},
+            {'id': 'gpt-clash', 'shutdown_date': '2026-10-01'},
+            {'id': 'gpt-fill'},
+            {'id': 'gpt-keep', 'shutdown_date': '2027-08-01'},
+          ],
+          'has_more': true,
+          'last_id': 'page-1',
+        }),
+        200,
+      );
+    });
+
+    final report = await auditModelCatalog(
+      now: now,
+      catalog: const {
+        'codex': [
+          ModelInfo(id: 'gpt-past'),
+          ModelInfo(id: 'gpt-today'),
+          ModelInfo(id: 'gpt-boundary'),
+          ModelInfo(id: 'gpt-near'),
+          ModelInfo(id: 'gpt-far'),
+          ModelInfo(id: 'gpt-invalid'),
+          ModelInfo(id: 'gpt-missing'),
+          ModelInfo(id: 'gpt-clash'),
+          ModelInfo(id: 'gpt-fill'),
+          ModelInfo(id: 'gpt-keep'),
+        ],
+      },
+      sources: [source],
+      client: client,
+    );
+
+    final audit = report.providers.single;
+    expect(audit.ok, isTrue);
+    expect(audit.shutdownDatesChecked, isTrue);
+    expect(audit.hasDrift, isTrue);
+    expect(
+      audit.shutdowns.map((shutdown) => shutdown.modelId),
+      [
+        'gpt-boundary',
+        'gpt-far',
+        'gpt-fill',
+        'gpt-keep',
+        'gpt-near',
+        'gpt-past',
+        'gpt-today'
+      ],
+    );
+    CatalogShutdown finding(String id) =>
+        audit.shutdowns.singleWhere((shutdown) => shutdown.modelId == id);
+    expect(finding('gpt-past').daysRemaining, -32);
+    expect(finding('gpt-past').actionable, isTrue);
+    expect(finding('gpt-today').daysRemaining, 0);
+    expect(finding('gpt-today').actionable, isTrue);
+    expect(finding('gpt-boundary').daysRemaining, 30);
+    expect(finding('gpt-boundary').actionable, isTrue);
+    expect(finding('gpt-near').daysRemaining, 18);
+    expect(finding('gpt-near').actionable, isTrue);
+    expect(finding('gpt-far').daysRemaining, 31);
+    expect(finding('gpt-far').actionable, isFalse);
+    expect(finding('gpt-fill').shutdownDate, '2027-06-01');
+    expect(finding('gpt-keep').shutdownDate, '2027-08-01');
+    expect(
+      audit.shutdowns.map((shutdown) => shutdown.modelId),
+      isNot(contains('gpt-endpoint-only')),
+    );
+    expect(
+      audit.shutdowns.map((shutdown) => shutdown.modelId),
+      isNot(contains('gpt-clash')),
+    );
+
+    final json = audit.toJson();
+    expect(json['shutdown_dates_checked'], isTrue);
+    final encoded = json['shutdowns'] as List<dynamic>;
+    expect(encoded.first, {
+      'model': 'gpt-boundary',
+      'shutdown_date': '2026-12-02',
+      'days_remaining': 30,
+      'actionable': true,
+    });
+    expect(formatCatalogAuditReport(report), contains('codex: drift'));
+    expect(
+      catalogAuditExitCode(report, failOnDrift: false, failOnError: false),
+      1,
+    );
+  });
+
+  test('a source that does not publish shutdown dates ignores the field',
+      () async {
+    final source = ModelListSource(
+      provider: 'claude',
+      endpoint: Uri.parse('https://example.test/models'),
+    );
+    final report = await auditModelCatalog(
+      now: _epochUtc(2026, 11, 2),
+      catalog: const {
+        'claude': [ModelInfo(id: 'claude-old')]
+      },
+      sources: [source],
+      client: MockClient((_) async => http.Response(
+            jsonEncode({
+              'data': [
+                {'id': 'claude-old', 'shutdown_date': '2020-01-01'},
+              ],
+            }),
+            200,
+          )),
+    );
+
+    final audit = report.providers.single;
+    expect(audit.shutdownDatesChecked, isFalse);
+    expect(audit.shutdowns, isEmpty);
+    expect(audit.toJson().containsKey('shutdowns'), isFalse);
+    expect(audit.toJson()['shutdown_dates_checked'], isFalse);
+    expect(
+      formatCatalogAuditReport(report),
+      contains('shutdown dates: not published by this source'),
+    );
+    expect(
+      catalogAuditExitCode(report, failOnDrift: false, failOnError: false),
+      0,
+    );
+  });
+
+  test('a failed shutdown-capable read does not check dates', () async {
+    final report = await auditModelCatalog(
+      now: _epochUtc(2026, 11, 2),
+      catalog: const {
+        'codex': [ModelInfo(id: 'gpt-current')]
+      },
+      sources: [
+        ModelListSource(
+          provider: 'codex',
+          endpoint: Uri.parse('https://example.test/models'),
+          publishesShutdownDates: true,
+        ),
+      ],
+      client: MockClient((_) async => http.Response('{}', 503)),
+    );
+
+    final audit = report.providers.single;
+    expect(audit.shutdownDatesChecked, isFalse);
+    expect(audit.shutdowns, isEmpty);
+    expect(formatCatalogAuditReport(report),
+        contains('shutdown dates: not checked'));
+  });
+
+  test('summary shutdown lines count models and omit their ids', () {
+    const soon = CatalogShutdown(
+      modelId: 'gpt-secret-soon',
+      shutdownDate: '2026-11-10',
+      daysRemaining: 8,
+      actionable: true,
+    );
+    const later = CatalogShutdown(
+      modelId: 'gpt-secret-later',
+      shutdownDate: '2027-06-01',
+      daysRemaining: 200,
+      actionable: false,
+    );
+    const report = CatalogAuditReport(
+      generatedAt: _now,
+      catalogUpdated: '2026-11-02',
+      providers: [
+        ProviderCatalogAudit(
+          provider: 'codex',
+          endpoint: 'https://api.openai.com/v1/models',
+          authEnv: 'OPENAI_API_KEY',
+          ok: true,
+          skipped: false,
+          error: null,
+          catalogModelIds: ['gpt-secret-soon', 'gpt-secret-later'],
+          endpointModelIds: ['gpt-secret-soon', 'gpt-secret-later'],
+          missingFromCatalog: [],
+          catalogOnly: [],
+          shutdownDatesChecked: true,
+          shutdowns: [soon, later],
+        ),
+      ],
+    );
+
+    final summary = formatCatalogAuditReport(report, includeModelIds: false);
+    expect(summary, contains('codex: shutdown'));
+    expect(summary, contains('announced shutdowns: 2'));
+    expect(summary, contains('actionable shutdowns: 1'));
+    expect(summary, isNot(contains('gpt-secret-soon')));
+    expect(summary, isNot(contains('gpt-secret-later')));
+
+    final detailed = formatCatalogAuditReport(report);
+    expect(detailed, contains('gpt-secret-soon'));
+    expect(detailed, contains('shuts down in 8 days'));
+    expect(detailed, contains('exits nonzero'));
+    expect(
+      catalogAuditExitCode(report, failOnDrift: false, failOnError: false),
+      1,
+    );
+
+    const farOnly = CatalogAuditReport(
+      generatedAt: _now,
+      catalogUpdated: '2026-11-02',
+      providers: [
+        ProviderCatalogAudit(
+          provider: 'codex',
+          endpoint: 'https://api.openai.com/v1/models',
+          authEnv: 'OPENAI_API_KEY',
+          ok: true,
+          skipped: false,
+          error: null,
+          catalogModelIds: ['gpt-secret-later'],
+          endpointModelIds: ['gpt-secret-later'],
+          missingFromCatalog: [],
+          catalogOnly: [],
+          shutdownDatesChecked: true,
+          shutdowns: [later],
+        ),
+      ],
+    );
+    expect(formatCatalogAuditReport(farOnly), contains('codex: clean'));
+    expect(
+      catalogAuditExitCode(farOnly, failOnDrift: false, failOnError: false),
+      0,
+    );
   });
 }
