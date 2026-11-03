@@ -17,7 +17,9 @@
     "@hono/node-server": "2.1.5",
     "hono": "4.13.13",
     "body-parser": "2.4.0",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "fast-uri": "3.1.9",
+    "ip-address": "10.7.4"
   },
   "devDependencies": {
     "@types/node": "26.1.1",
