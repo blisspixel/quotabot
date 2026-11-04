@@ -104,6 +104,29 @@ class RouterTests(unittest.TestCase):
         self.assertIn("Authorization: Bearer $LITELLM_MASTER_KEY", readme)
         self.assertNotIn("\n   litellm --config config.yaml\n", readme)
 
+    def test_shipped_proxy_example_uses_current_provider_model_ids(self):
+        root = Path(__file__).resolve().parent
+        config = (root / "config.example.yaml").read_text(encoding="utf-8")
+        routing = (root / "quotabot-routing.example.yaml").read_text(encoding="utf-8")
+
+        model_lines = [
+            line.strip()
+            for line in config.splitlines()
+            if line.strip().startswith("model:")
+        ]
+        self.assertEqual(
+            model_lines,
+            [
+                "model: anthropic/claude-sonnet-5-5",
+                "model: openai/gpt-6-sol",
+                "model: xai/grok-4.7",
+                "model: ollama/qwen3-coder",
+            ],
+        )
+        self.assertIn("model_name: grok-code", config)
+        self.assertIn("deployment: grok-code", routing)
+        self.assertNotIn("model: xai/grok-code", config)
+
     def test_key_alias_wins_over_client_metadata(self):
         data = {"metadata": {"agent": "spoofed-agent"}}
         self.assertEqual(QuotabotRouter._agent_id(data, _Key()), "trusted-agent")

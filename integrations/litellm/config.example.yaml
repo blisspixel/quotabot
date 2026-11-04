@@ -14,21 +14,26 @@
 # `allow_paid_api: true`. Mark a deployment `spend: quota_plan` only when it is
 # backed by a real included quota plan, and set `overages_disabled: true` or
 # `overages: disabled` in the routing policy.
+#
+# Model ids checked 2026-11-03. OpenAI's deprecations page replaces
+# gpt-5.3-codex with gpt-6-sol (shutdown 2027-04-01). Anthropic's current
+# Sonnet id is claude-sonnet-5-5. xAI's models page names grok-4.7 for code.
+# grok-code below is the local deployment name, not an xAI model id.
 
 model_list:
   - model_name: claude-sonnet
     litellm_params:
-      model: anthropic/claude-sonnet-4-6
+      model: anthropic/claude-sonnet-5-5
       api_key: os.environ/ANTHROPIC_API_KEY
 
   - model_name: codex-gpt
     litellm_params:
-      model: openai/gpt-5.3-codex
+      model: openai/gpt-6-sol
       api_key: os.environ/OPENAI_API_KEY
 
   - model_name: grok-code
     litellm_params:
-      model: xai/grok-code
+      model: xai/grok-4.7
       api_key: os.environ/XAI_API_KEY
 
   # Configured Ollama fallback. The router does not preflight this backend when

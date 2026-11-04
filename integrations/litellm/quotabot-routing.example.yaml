@@ -53,7 +53,7 @@ models:
       - deployment: codex-gpt
         provider: codex
         spend: paid_api
-      - deployment: grok-code
+      - deployment: grok-code        # local name; config.example.yaml uses xai/grok-4.7
         provider: grok
         spend: paid_api             # skipped unless allow_paid_api: true
       - deployment: ollama-qwen     # configured local fallback; backend checks reachability
