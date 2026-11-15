@@ -376,7 +376,7 @@ void main() {
     final haiku =
         kModelCatalog['claude']!.firstWhere((m) => m.id == 'claude-haiku-5-5');
     // Regression guard: Haiku 4.5 was 64k output and 200k context. Haiku 5.5
-    // is 128k output and 1M context. Checked 2026-11-02.
+    // is 128k output and 1M context. Checked 2026-11-15.
     expect(haiku.maxOutputTokens, 128000);
     expect(haiku.contextTokens, 1000000);
     expect(haiku.tier, 'light');

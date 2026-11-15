@@ -55,7 +55,7 @@ valid for stdio. Omitting all three keeps the source launch below as the default
 
 ## Print a stdio configuration
 
-Python 3.10 or later is sufficient to print configuration. No Python packages
+Python 3.11 or later is sufficient to print configuration. No Python packages
 are required. The default source path is this checkout's `collector/` directory;
 the renderer checks that the actual MCP entry point and package file exist.
 It resolves Dart on PATH or accepts its existing executable path with `--dart`.

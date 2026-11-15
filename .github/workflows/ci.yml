@@ -26,7 +26,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.14'
+          python-version: '3.15.2'
       - name: Release notes and publication guardrails
         run: python -m unittest tools.test_release_handoff
       - name: Strict Python boundary helpers
@@ -94,13 +94,17 @@ jobs:
 
       # Pin Python so `python` resolves on every runner (macOS ships only
       # python3), for the coverage gate and the LiteLLM router tests.
+      # Install Node in the job so npm ci does not use a runner image runtime.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.14'
+          python-version: '3.15.2'
           cache: 'pip'
           cache-dependency-path: |
             integrations/litellm/requirements.in
             integrations/litellm/requirements.txt
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.13.1'
 
       - name: Set up pinned Flutter SDK
         shell: pwsh
@@ -358,8 +362,8 @@ jobs:
       - name: Omarchy display snapshot tests
         run: python -m unittest discover -s integrations/omarchy -p 'test_*.py'
 
-  # Linux-only LiteLLM version matrix. The main test job stays on Python 3.14
-  # across operating systems and is not multiplied by this matrix.
+  # Linux-only LiteLLM version matrix. The main test job stays on Python
+  # 3.15.2 across operating systems and is not multiplied by this matrix.
   litellm-python:
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
@@ -367,7 +371,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13', '3.14']
+        python-version: ['3.11', '3.12', '3.13', '3.14', '3.15.2']
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:

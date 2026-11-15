@@ -252,7 +252,8 @@ Version [0.11.18](https://github.com/blisspixel/quotabot/releases/tag/v0.11.18) 
 successful Claude capture for 20 minutes by default, and shows a remaining
 percent as N% free. An Antigravity model table can carry a tighter models
 window. The desktop first-run prompt stays dismissed after Skip or closing
-the window. CI defaults to Python 3.14. Python 3.15 stays blocked. The
+the window. CI defaults to Python 3.15.2. LiteLLM is tested on Python 3.11
+through 3.15.2. The
 0.11.17 route line, theme files, and aged Omarchy display remain. The
 0.11.16 hand-extracted desktop notice remains: that copy stays in place, and
 the desktop dialog uses the installed CLI version. Managed desktop updates

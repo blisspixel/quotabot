@@ -23,8 +23,8 @@ For security issues, do not open a public issue; see [SECURITY.md](SECURITY.md).
 ## Development setup
 
 Use Flutter 3.44.6 with Dart 3.12.2, matching CI and release builds. Python
-3.14 is the default. Python 3.11 through 3.14 are tested, and Python 3.15 is
-blocked by litellm's Requires-Python. Confirm that
+3.15.2 is the default. Python 3.11 through 3.15.2 are tested for LiteLLM.
+Confirm that
 `flutter`, `dart`, and a supported `python` resolve in the current shell before
 running gates. See [Building from source](docs/BUILDING.md).
 
@@ -43,7 +43,7 @@ pwsh tools/check.ps1
 On macOS and Linux, `tools/setup.sh` and the desktop packagers remap a Flutter
 or Dart SDK whose path contains spaces before native-asset commands run.
 
-The Windows gate checks Flutter 3.44.6, Dart 3.12.2, and Python 3.14 before
+The Windows gate checks Flutter 3.44.6, Dart 3.12.2, and Python 3.15 before
 running checks, and installs the hash-locked development tools into the selected
 Python environment. A virtual environment is recommended.
 
@@ -122,7 +122,7 @@ npm ci
 npm run typecheck
 python -m unittest test_mcp_client_snippets.py
 
-# LiteLLM router, with Python 3.11 through 3.14
+# LiteLLM router, with Python 3.11 through 3.15.2
 cd ../litellm
 python -m pip install --require-hashes -r requirements.txt
 QUOTABOT_RUN_LITELLM_PROXY_TEST=1 python -m unittest \
@@ -148,7 +148,7 @@ The strict Python gate covers the six maintained metadata/config modules in
 other tooling, and tests are not yet in that scope. Expand it with precise
 boundary types and regression evidence. Ruff success does not prove type safety.
 To regenerate development tools, use
-`uv pip compile --universal --generate-hashes --python-version 3.10 --no-header -o tools/requirements-dev.txt tools/requirements-dev.in`.
+`uv pip compile --universal --generate-hashes --python-version 3.11 --no-header -o tools/requirements-dev.txt tools/requirements-dev.in`.
 
 - Keep changes focused and the diff small. One concern per pull request.
 - Put logic in pure functions (parsing, analysis) with unit tests; keep adapters
