@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-expected_developer_dir='/Applications/Xcode_16.4.app/Contents/Developer'
-expected_version=$'Xcode 16.4\nBuild version 16F6'
+expected_developer_dir='/Applications/Xcode_26.6.app/Contents/Developer'
+expected_version=$'Xcode 26.6\nBuild version 17F113'
 
 [[ "$(/usr/bin/uname -s)" == Darwin ]] || {
   echo 'The pinned Apple toolchain requires macOS.' >&2
@@ -36,4 +36,4 @@ for tool in notarytool stapler; do
   }
 done
 
-printf 'Pinned Apple toolchain: Xcode 16.4 build 16F6 on arm64.\n'
+printf 'Pinned Apple toolchain: Xcode 26.6 build 17F113 on arm64.\n'

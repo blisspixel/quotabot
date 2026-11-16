@@ -58,11 +58,10 @@ class DesktopAnalyticsData {
 
 enum DesktopAnalyticsState { pending, ready, unavailable }
 
-typedef DesktopAnalyticsReader =
-    Future<DesktopAnalyticsData> Function(
-      DesktopAnalyticsRequest request,
-      Future<void> Function() checkpoint,
-    );
+typedef DesktopAnalyticsReader = Future<DesktopAnalyticsData> Function(
+  DesktopAnalyticsRequest request,
+  Future<void> Function() checkpoint,
+);
 
 /// Runs only in the analytics isolate. Each reader finishes its own file guards
 /// before the next cancellation checkpoint; cancellation never interrupts a
@@ -263,15 +262,15 @@ class IsolateDesktopAnalyticsJob implements DesktopAnalyticsJob {
   }
 }
 
-typedef DesktopAnalyticsJobStarter =
-    DesktopAnalyticsJob Function(DesktopAnalyticsRequest request);
+typedef DesktopAnalyticsJobStarter = DesktopAnalyticsJob Function(
+  DesktopAnalyticsRequest request,
+);
 
-typedef DesktopAnalyticsUpdate =
-    void Function(
-      DesktopAnalyticsRequest request,
-      DesktopAnalyticsState state,
-      DesktopAnalyticsData? data,
-    );
+typedef DesktopAnalyticsUpdate = void Function(
+  DesktopAnalyticsRequest request,
+  DesktopAnalyticsState state,
+  DesktopAnalyticsData? data,
+);
 
 /// One running job plus one replaceable pending request. Timing out only stops
 /// admission of its result; it never frees a worker slot before confirmed exit.

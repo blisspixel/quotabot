@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/models.dart';
@@ -57,10 +57,8 @@ class _LocalModelDetailsButtonState extends State<LocalModelDetailsButton> {
         minimumSize: const Size(28, 28),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
-          fontSize: AppType.caption,
-          fontWeight: FontWeight.w600,
-        ),
+        textStyle: Theme.of(context).textTheme.labelLarge
+            ?.copyWith(fontSize: AppType.caption, fontWeight: FontWeight.w600),
       ),
     ),
   );

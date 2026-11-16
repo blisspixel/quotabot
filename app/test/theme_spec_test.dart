@@ -1,5 +1,5 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/builtin_themes.dart';
 import 'package:quotabot_collector/user_theme.dart';

@@ -1,13 +1,15 @@
 import 'dart:ui' show SemanticsAction, Tristate;
 
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot/fleet.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
+
+import 'support/tooltip_finder.dart';
 
 ProviderQuota _q(
   String id,
@@ -117,9 +119,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: const TextScaler.linear(2)),
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(2)),
           child: child!,
         ),
         home: FleetScreen(
@@ -695,8 +696,8 @@ void main() {
     // The header, back button, and close button belong to the dashboard; the
     // analytics body brings only its range tabs and cards.
     expect(find.text('Quota Analytics'), findsNothing);
-    expect(find.byTooltip('Back to quotas'), findsNothing);
-    expect(find.byTooltip('Close'), findsNothing);
+    expect(find.byMaterialTooltip('Back to quotas'), findsNothing);
+    expect(find.byMaterialTooltip('Close'), findsNothing);
     expect(find.text('Now'), findsOneWidget);
     expect(find.text('7d'), findsOneWidget);
     expect(find.text('90d'), findsOneWidget);

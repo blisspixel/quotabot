@@ -499,7 +499,7 @@ quotabot is a local advisor, not a proxy: a Dart collector plus an optional
 Flutter desktop app that share one code path. It reports remaining AI coding
 quota and recommends a route. It has no quotabot account, telemetry, or
 inference. The stack is Dart and Flutter, pinned in CI and
-[docs/BUILDING.md](docs/BUILDING.md) to Flutter 3.44.6 with Dart 3.12.2. Do not
+[docs/BUILDING.md](docs/BUILDING.md) to Flutter 3.50.0 with Dart 3.14.0. Do not
 upgrade that toolchain, or reopen the language choice, as a drive-by.
 
 How to call the shipped CLI and MCP surface is the product guide above,

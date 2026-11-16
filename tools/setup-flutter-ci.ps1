@@ -1,10 +1,10 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$FlutterVersion = '3.44.6',
+    [string]$FlutterVersion = '3.50.0',
 
     [ValidatePattern('^[0-9a-f]{40}$')]
-    [string]$ExpectedCommit = 'ee80f08bbf97172ec030b8751ceab557177a34a6'
+    [string]$ExpectedCommit = 'ab2912035e160d9cad6306df307576da6128ebdb'
 )
 
 Set-StrictMode -Version Latest

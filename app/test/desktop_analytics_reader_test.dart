@@ -124,101 +124,95 @@ void main() {
         readRoutedRequests: () => loadRoutedRequestSummary(file: metrics),
       );
 
-  test(
-    'real storage keeps account displays, fallback policy, and local history distinct',
-    () async {
-      final cache = cacheDir();
-      final work = _cloud('codex', 'synthetic-work', 20);
-      final home = _cloud('codex', 'synthetic-home', 60);
-      final single = _cloud('claude', 'synthetic-single', 30);
-      final local = ProviderQuota(
-        provider: 'ollama',
-        displayName: 'Ollama',
-        account: 'default',
-        asOf: _now,
-        kind: ProviderQuotaKind.local,
-      );
-      _writeHistory(cache, 'codex', [work], account: work.account);
-      _writeHistory(cache, 'codex', [work, home]);
-      _writeHistory(cache, 'claude', [single], account: single.account);
-      _writeHistory(cache, 'ollama', [local]);
-      _writeBuckets(cache, 'codex', [80, 70], account: work.account);
-      _writeBuckets(cache, 'codex', [40, 10]);
-      _writeBuckets(cache, 'claude', [90, 80]);
-      // A local bucket file must not turn local history into cloud analytics.
-      _writeBuckets(cache, 'ollama', [50, 40]);
+  test('real storage keeps account displays, fallback policy, and local history distinct', () async {
+    final cache = cacheDir();
+    final work = _cloud('codex', 'synthetic-work', 20);
+    final home = _cloud('codex', 'synthetic-home', 60);
+    final single = _cloud('claude', 'synthetic-single', 30);
+    final local = ProviderQuota(
+      provider: 'ollama',
+      displayName: 'Ollama',
+      account: 'default',
+      asOf: _now,
+      kind: ProviderQuotaKind.local,
+    );
+    _writeHistory(cache, 'codex', [work], account: work.account);
+    _writeHistory(cache, 'codex', [work, home]);
+    _writeHistory(cache, 'claude', [single], account: single.account);
+    _writeHistory(cache, 'ollama', [local]);
+    _writeBuckets(cache, 'codex', [80, 70], account: work.account);
+    _writeBuckets(cache, 'codex', [40, 10]);
+    _writeBuckets(cache, 'claude', [90, 80]);
+    // A local bucket file must not turn local history into cloud analytics.
+    _writeBuckets(cache, 'ollama', [50, 40]);
 
-      final data = await read([
-        _target(work, 'work display'),
-        _target(home, 'home display'),
-        _target(single, 'single display', fallbackToProvider: true),
-        _target(local, 'local display'),
-      ]);
+    final data = await read([
+      _target(work, 'work display'),
+      _target(home, 'home display'),
+      _target(single, 'single display', fallbackToProvider: true),
+      _target(local, 'local display'),
+    ]);
 
-      expect(data.complete, isTrue);
-      expect(data.inventory.complete, isTrue);
-      expect(data.notices, isEmpty);
-      expect(
-        data.history.keys,
-        unorderedEquals([
-          'work display',
-          'home display',
-          'single display',
-          'local display',
-        ]),
-      );
-      expect(data.history['work display']!.single.account, work.account);
-      expect(data.history['home display']!.single.account, home.account);
-      expect(
-        data.history['home display']!.single.windows.single.usedPercent,
-        60,
-      );
-      expect(
-        data.history['local display'],
-        isEmpty,
-        reason: 'Runtime metadata is not subscription-quota history',
-      );
-      expect(
-        data.buckets.keys,
-        unorderedEquals(['work display', 'home display', 'single display']),
-      );
-      expect(
-        data.buckets['home display'],
-        isEmpty,
-        reason: 'A second account must not inherit provider-only buckets',
-      );
-      expect(data.insights['work display']!.mean, 75);
-      expect(data.insights['home display']!.samples, 0);
-      expect(data.insights['single display']!.mean, 85);
-      expect(data.insights, isNot(contains('local display')));
-      expect(data.heatmaps, isNot(contains('local display')));
-      expect(
-        data.heatmaps['home display']!.expand((day) => day).whereType<double>(),
-        isEmpty,
-      );
-      expect(
-        data.insights['work display']!.bestTimeWindows.first.hour,
-        13,
-        reason: 'The request timezone must be applied to hourly analytics',
-      );
-      expect(
-        data.burnStats[quotaIdentityKeyFor(work)]!.perHour,
-        closeTo(10, 0.001),
-      );
-      expect(data.burnStats[quotaIdentityKeyFor(home)]!.perHour, isNull);
-      expect(
-        data.burnStats[quotaIdentityKeyFor(single)]!.perHour,
-        closeTo(10, 0.001),
-      );
-      expect(data.burnStats, isNot(contains(quotaIdentityKeyFor(local))));
-      expect(data.routedRequests.totalRequests, 3);
-      expect(data.routedRequests.routedRequests, 3);
-      expect(data.routedRequests.localRequests, 1);
-      expect(data.routedRequests.quotaPlanRequests, 1);
-      expect(data.routedRequests.paidApiRequests, 1);
-      expect(data.routedRequests.paidApiCost, 0.12);
-    },
-  );
+    expect(data.complete, isTrue);
+    expect(data.inventory.complete, isTrue);
+    expect(data.notices, isEmpty);
+    expect(
+      data.history.keys,
+      unorderedEquals([
+        'work display',
+        'home display',
+        'single display',
+        'local display',
+      ]),
+    );
+    expect(data.history['work display']!.single.account, work.account);
+    expect(data.history['home display']!.single.account, home.account);
+    expect(data.history['home display']!.single.windows.single.usedPercent, 60);
+    expect(
+      data.history['local display'],
+      isEmpty,
+      reason: 'Runtime metadata is not subscription-quota history',
+    );
+    expect(
+      data.buckets.keys,
+      unorderedEquals(['work display', 'home display', 'single display']),
+    );
+    expect(
+      data.buckets['home display'],
+      isEmpty,
+      reason: 'A second account must not inherit provider-only buckets',
+    );
+    expect(data.insights['work display']!.mean, 75);
+    expect(data.insights['home display']!.samples, 0);
+    expect(data.insights['single display']!.mean, 85);
+    expect(data.insights, isNot(contains('local display')));
+    expect(data.heatmaps, isNot(contains('local display')));
+    expect(
+      data.heatmaps['home display']!.expand((day) => day).whereType<double>(),
+      isEmpty,
+    );
+    expect(
+      data.insights['work display']!.bestTimeWindows.first.hour,
+      13,
+      reason: 'The request timezone must be applied to hourly analytics',
+    );
+    expect(
+      data.burnStats[quotaIdentityKeyFor(work)]!.perHour,
+      closeTo(10, 0.001),
+    );
+    expect(data.burnStats[quotaIdentityKeyFor(home)]!.perHour, isNull);
+    expect(
+      data.burnStats[quotaIdentityKeyFor(single)]!.perHour,
+      closeTo(10, 0.001),
+    );
+    expect(data.burnStats, isNot(contains(quotaIdentityKeyFor(local))));
+    expect(data.routedRequests.totalRequests, 3);
+    expect(data.routedRequests.routedRequests, 3);
+    expect(data.routedRequests.localRequests, 1);
+    expect(data.routedRequests.quotaPlanRequests, 1);
+    expect(data.routedRequests.paidApiRequests, 1);
+    expect(data.routedRequests.paidApiCost, 0.12);
+  });
 
   test(
     'malformed incident storage stays partial while healthy history survives',

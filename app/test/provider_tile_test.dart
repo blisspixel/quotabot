@@ -1,13 +1,15 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot/local_model_details.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
+
+import 'support/tooltip_finder.dart';
 
 ProviderQuota _q(double usedPercent, {int? resetsAt}) => ProviderQuota(
   provider: claudeProviderId,
@@ -686,9 +688,8 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           builder: (context, child) => MediaQuery(
-            data: MediaQuery.of(
-              context,
-            ).copyWith(textScaler: const TextScaler.linear(2)),
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: const TextScaler.linear(2)),
             child: child!,
           ),
           home: Scaffold(
@@ -701,7 +702,7 @@ void main() {
       );
       await tester.pump();
 
-      expect(find.byTooltip(modelLabel), findsOneWidget);
+      expect(find.byMaterialTooltip(modelLabel), findsOneWidget);
       expect(find.bySemanticsLabel(modelLabel), findsOneWidget);
       expect(find.text(windowLabel), findsNothing);
       final modelText = tester.widget<Text>(find.text(modelLabel));
@@ -739,9 +740,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: const TextScaler.linear(2)),
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(2)),
           child: child!,
         ),
         home: Scaffold(
@@ -759,7 +759,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('team premium'), findsOneWidget);
-    expect(find.byTooltip('Plan: Team Premium'), findsOneWidget);
+    expect(find.byMaterialTooltip('Plan: Team Premium'), findsOneWidget);
     expect(find.bySemanticsLabel('Plan: Team Premium'), findsOneWidget);
     expect(tester.takeException(), isNull);
     semantics.dispose();
@@ -1138,9 +1138,8 @@ void main() {
     tester,
   ) async {
     final semantics = tester.ensureSemantics();
-    final suspect = _q(
-      60,
-    ).withSuspect('weekly usage changed unexpectedly without a reset');
+    final suspect = _q(60)
+        .withSuspect('weekly usage changed unexpectedly without a reset');
 
     await tester.pumpWidget(
       _wrap(
@@ -1983,9 +1982,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: const TextScaler.linear(2)),
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(2)),
           child: child!,
         ),
         home: Scaffold(
@@ -2055,9 +2053,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: const TextScaler.linear(2)),
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(2)),
           child: child!,
         ),
         home: Scaffold(

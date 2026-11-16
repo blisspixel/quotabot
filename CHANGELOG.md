@@ -4,6 +4,21 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- CI, release, and the macOS signing rehearsal use the macos-26 arm64 runner
+  and Xcode 26.6 build 17F113. The macOS 26 arm64 runner image readme
+  20261102.0473.1, checked 2026-11-16, lists that Xcode build as the default.
+  Flutter is 3.50.0 (`ab2912035e160d9cad6306df307576da6128ebdb`) and Dart is
+  3.14.0.
+- The desktop app depends on material_ui 1.11.1. Flutter 3.50 deprecates
+  `package:flutter/material.dart`, and `flutter analyze` reports that import.
+  The app imports `package:material_ui/material_ui.dart` instead. Widget
+  tests find those tooltips on the material_ui widget. Flutter's tooltip
+  finder still recognizes only the deprecated material library, and chrome
+  tooltips set `excludeFromSemantics`.
+- Antigravity overlapped account reads are awaited inside their discovery
+  catch. A failure after those reads start stays an error row. Dart 3.14
+  warns when a try block returns that future without awaiting it.
+
 ## 0.11.19 - 2026-11-16
 
 - Linux desktop builds on Ubuntu 26.04 still compile tray_manager 0.5.3.

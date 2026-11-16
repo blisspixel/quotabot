@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot_collector/palette.dart';
 
 /// Desktop headroom color on the same scale used by the terminal palette.

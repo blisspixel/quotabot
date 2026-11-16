@@ -304,10 +304,8 @@ String desktopProviderTrustDetail(ProviderQuota quota, int now) {
   final scope = switch (quota.sourceClass) {
     ProviderSourceClass.authoritativeLive =>
       'Account-wide quota read from provider metadata.',
-    ProviderSourceClass.thisMachineFallback =>
-      'Fallback quota evidence from this machine only; other devices may not be included.',
-    ProviderSourceClass.passiveLocalEvidence =>
-      'Passive quota evidence from this machine only; other devices may not be included.',
+    ProviderSourceClass.thisMachineFallback => 'Fallback quota evidence from this machine only; other devices may not be included.',
+    ProviderSourceClass.passiveLocalEvidence => 'Passive quota evidence from this machine only; other devices may not be included.',
     ProviderSourceClass.localRuntime =>
       'Local runtime availability observed on this machine.',
     ProviderSourceClass.statusOnly =>

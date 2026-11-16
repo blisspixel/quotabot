@@ -1,5 +1,5 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot/first_run.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/collector.dart';
@@ -102,14 +102,12 @@ void main() {
     (
       status: 200,
       label: 'invalid model metadata',
-      hint:
-          'The local server returned invalid model metadata. Check its version and settings.',
+      hint: 'The local server returned invalid model metadata. Check its version and settings.',
     ),
     (
       status: 503,
       label: 'metadata unavailable',
-      hint:
-          'The local server\'s model metadata is unavailable. Check its status and settings.',
+      hint: 'The local server\'s model metadata is unavailable. Check its status and settings.',
     ),
   ]) {
     test('reached local HTTP ${failure.status} does not suggest startup', () {

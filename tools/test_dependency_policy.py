@@ -312,7 +312,7 @@ class DependencyPolicyTest(unittest.TestCase):
             " # v7.1.0",
             jobs["test"],
         )
-        self.assertIn("os: [ubuntu-latest, macos-15, windows-latest]", jobs["test"])
+        self.assertIn("os: [ubuntu-latest, macos-26, windows-latest]", jobs["test"])
         self.assertNotIn("python-version: ['3.11'", jobs["test"])
         litellm = jobs["litellm-python"]
         self.assertIn("runs-on: ubuntu-latest", litellm)
@@ -499,8 +499,8 @@ class DependencyPolicyTest(unittest.TestCase):
                     self.assertIn(command, text)
 
     def test_ci_and_release_toolchains_are_reproducible(self) -> None:
-        flutter_version = "3.44.6"
-        flutter_commit = "ee80f08bbf97172ec030b8751ceab557177a34a6"
+        flutter_version = "3.50.0"
+        flutter_commit = "ab2912035e160d9cad6306df307576da6128ebdb"
         flutter_workflows = (
             "ci.yml",
             "currency.yml",
@@ -530,7 +530,7 @@ class DependencyPolicyTest(unittest.TestCase):
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("sdk: '3.12.2'", release)
+        self.assertIn("sdk: '3.14.0'", release)
         setup_python = (
             "uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
             " # v7.0.0"

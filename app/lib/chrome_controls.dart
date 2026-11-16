@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Compact icon button used by the frameless desktop chrome.
 class AppChromeIconButton extends StatelessWidget {

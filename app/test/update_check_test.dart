@@ -229,36 +229,30 @@ void main() {
     },
   );
 
-  test(
-    'CLI identity drains a fast real subprocess',
-    () async {
-      final root = Directory.systemTemp.createTempSync(
-        'quotabot_cli_identity_',
-      );
-      try {
-        final executable = File('${root.path}/quotabot')
-          ..writeAsStringSync(
-            '#!/bin/sh\nprintf "quotabot 0.12.0\\n"\nprintf "fixture diagnostic\\n" >&2\n',
-          );
-        expect(
-          (await Process.run('chmod', ['700', executable.path])).exitCode,
-          0,
+  test('CLI identity drains a fast real subprocess', () async {
+    final root = Directory.systemTemp.createTempSync('quotabot_cli_identity_');
+    try {
+      final executable = File('${root.path}/quotabot')
+        ..writeAsStringSync(
+          '#!/bin/sh\nprintf "quotabot 0.12.0\\n"\nprintf "fixture diagnostic\\n" >&2\n',
         );
-        for (var attempt = 0; attempt < 3; attempt++) {
-          expect(
-            await readInstalledQuotabotCliVersion(
-              executable: executable.path,
-              timeout: const Duration(seconds: 1),
-            ).timeout(const Duration(seconds: 3)),
-            '0.12.0',
-          );
-        }
-      } finally {
-        root.deleteSync(recursive: true);
+      expect(
+        (await Process.run('chmod', ['700', executable.path])).exitCode,
+        0,
+      );
+      for (var attempt = 0; attempt < 3; attempt++) {
+        expect(
+          await readInstalledQuotabotCliVersion(
+            executable: executable.path,
+            timeout: const Duration(seconds: 1),
+          ).timeout(const Duration(seconds: 3)),
+          '0.12.0',
+        );
       }
-    },
-    skip: Platform.isWindows ? 'Uses a real POSIX shell fixture' : false,
-  );
+    } finally {
+      root.deleteSync(recursive: true);
+    }
+  }, skip: Platform.isWindows ? 'Uses a real POSIX shell fixture' : false);
 
   test(
     'CLI deadline includes output handles retained after process exit',

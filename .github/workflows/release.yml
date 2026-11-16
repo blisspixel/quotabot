@@ -246,7 +246,7 @@ jobs:
           python-version: '3.15.2'
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
         with:
-          sdk: '3.12.2'
+          sdk: '3.14.0'
       - name: Resolve collector dependencies
         working-directory: collector
         run: dart pub get --enforce-lockfile
@@ -270,9 +270,9 @@ jobs:
 
   build-macos-cli-unsigned:
     needs: create-release
-    runs-on: macos-15
+    runs-on: macos-26
     env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     timeout-minutes: 45
     permissions:
       contents: read
@@ -287,7 +287,7 @@ jobs:
           python-version: '3.15.2'
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
         with:
-          sdk: '3.12.2'
+          sdk: '3.14.0'
       - name: Resolve collector dependencies
         working-directory: collector
         run: dart pub get --enforce-lockfile
@@ -323,9 +323,9 @@ jobs:
   sign-macos-cli:
     needs: [create-release, build-macos-cli-unsigned]
     if: needs.create-release.outputs.macos_signing_mode == 'developer-id'
-    runs-on: macos-15
+    runs-on: macos-26
     env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     environment: release-signing-macos
     timeout-minutes: 30
     permissions:
@@ -493,9 +493,9 @@ jobs:
             needs.sign-macos-cli.result == 'skipped') ||
            (needs.create-release.outputs.macos_signing_mode == 'developer-id' &&
             needs.sign-macos-cli.result == 'success')) }}
-    runs-on: macos-15
+    runs-on: macos-26
     env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     timeout-minutes: 20
     permissions:
       contents: read
@@ -619,7 +619,7 @@ jobs:
           python-version: '3.15.2'
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
         with:
-          sdk: '3.12.2'
+          sdk: '3.14.0'
       - name: Resolve collector dependencies
         working-directory: collector
         run: dart pub get --enforce-lockfile
@@ -900,7 +900,7 @@ jobs:
         include:
           - os: windows-latest
             archive: quotabot-windows-x64.zip
-          - os: macos-15
+          - os: macos-26
             archive: quotabot-darwin-arm64.tar.gz
           - os: ubuntu-latest
             archive: quotabot-linux-x64.tar.gz
@@ -920,7 +920,7 @@ jobs:
       - name: Require the pinned Apple toolchain
         if: runner.os == 'macOS'
         env:
-          DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
         run: |
           bash tools/require-macos-toolchain.sh
           echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
@@ -1069,9 +1069,9 @@ jobs:
 
   build-macos-desktop-unsigned:
     needs: create-release
-    runs-on: macos-15
+    runs-on: macos-26
     env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     timeout-minutes: 60
     permissions:
       contents: read
@@ -1088,8 +1088,8 @@ jobs:
         shell: pwsh
         run: >
           ./tools/setup-flutter-ci.ps1
-          -FlutterVersion '3.44.6'
-          -ExpectedCommit 'ee80f08bbf97172ec030b8751ceab557177a34a6'
+          -FlutterVersion '3.50.0'
+          -ExpectedCommit 'ab2912035e160d9cad6306df307576da6128ebdb'
       - name: Resolve desktop dependencies
         working-directory: app
         run: flutter pub get --enforce-lockfile
@@ -1125,9 +1125,9 @@ jobs:
   sign-macos-desktop:
     needs: [create-release, build-macos-desktop-unsigned]
     if: needs.create-release.outputs.macos_signing_mode == 'developer-id'
-    runs-on: macos-15
+    runs-on: macos-26
     env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     environment: release-signing-macos
     timeout-minutes: 30
     permissions:
@@ -1305,9 +1305,9 @@ jobs:
             needs.sign-macos-desktop.result == 'skipped') ||
            (needs.create-release.outputs.macos_signing_mode == 'developer-id' &&
             needs.sign-macos-desktop.result == 'success')) }}
-    runs-on: macos-15
+    runs-on: macos-26
     env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     timeout-minutes: 20
     permissions:
       contents: read
@@ -1445,8 +1445,8 @@ jobs:
         shell: pwsh
         run: >
           ./tools/setup-flutter-ci.ps1
-          -FlutterVersion '3.44.6'
-          -ExpectedCommit 'ee80f08bbf97172ec030b8751ceab557177a34a6'
+          -FlutterVersion '3.50.0'
+          -ExpectedCommit 'ab2912035e160d9cad6306df307576da6128ebdb'
       - name: Install Linux desktop build prerequisites
         if: runner.os == 'Linux'
         run: >
@@ -1491,8 +1491,8 @@ jobs:
         shell: pwsh
         run: >
           ./tools/setup-flutter-ci.ps1
-          -FlutterVersion '3.44.6'
-          -ExpectedCommit 'ee80f08bbf97172ec030b8751ceab557177a34a6'
+          -FlutterVersion '3.50.0'
+          -ExpectedCommit 'ab2912035e160d9cad6306df307576da6128ebdb'
       - name: Build and inventory the unsigned Windows desktop candidate
         shell: pwsh
         run: |
@@ -1770,7 +1770,7 @@ jobs:
         include:
           - os: windows-latest
             archive: quotabot-windows-x64-desktop.zip
-          - os: macos-15
+          - os: macos-26
             archive: quotabot-darwin-arm64-desktop.zip
           - os: ubuntu-latest
             archive: quotabot-linux-x64-desktop.tar.gz
@@ -1786,7 +1786,7 @@ jobs:
       - name: Require the pinned Apple toolchain
         if: runner.os == 'macOS'
         env:
-          DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
         run: |
           bash tools/require-macos-toolchain.sh
           echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"

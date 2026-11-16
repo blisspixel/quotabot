@@ -8,8 +8,10 @@ import 'package:quotabot_collector/models.dart';
 
 /// A reader and its data must be sendable to a worker isolate. Production uses
 /// the collector directly; test readers use synthetic metadata only.
-typedef DesktopCollectionReader =
-    Future<List<ProviderQuota>> Function(int generation, Object? data);
+typedef DesktopCollectionReader = Future<List<ProviderQuota>> Function(
+  int generation,
+  Object? data,
+);
 
 Future<List<ProviderQuota>> _readQuota(int generation, Object? data) =>
     collectAll();

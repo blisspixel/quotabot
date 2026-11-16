@@ -1,9 +1,10 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot/settings_dialog.dart';
 
 import 'support/settings_navigation.dart';
+import 'support/tooltip_finder.dart';
 
 Widget _dialog({double scale = 1, VoidCallback? onClose}) => MaterialApp(
   theme: ThemeData(platform: TargetPlatform.windows),
@@ -101,7 +102,7 @@ void main() {
       expect(find.text('Update controls'), findsOneWidget);
       expect(find.byType(Scrollbar), findsOneWidget);
       expect(closed, 0);
-      await tester.tap(find.byTooltip('Close settings'));
+      await tester.tap(find.byMaterialTooltip('Close settings'));
       expect(closed, 1);
     },
   );
@@ -127,7 +128,7 @@ void main() {
       await tester.pumpAndSettle();
       await selectSettingsCategory(tester, SettingsCategory.alerts);
       expect(find.text('Alert preferences'), findsOneWidget);
-      await tester.tap(find.byTooltip('Close settings'));
+      await tester.tap(find.byMaterialTooltip('Close settings'));
       expect(closed, isTrue);
       expect(tester.takeException(), isNull);
     });

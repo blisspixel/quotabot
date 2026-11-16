@@ -1,6 +1,6 @@
 # Building from source
 
-Prerequisites: Flutter 3.44.6 with Dart 3.12.2, the exact toolchain pinned in CI
+Prerequisites: Flutter 3.50.0 with Dart 3.14.0, the exact toolchain pinned in CI
 and release builds. Install it from the
 [Flutter SDK archive](https://docs.flutter.dev/install/archive); Flutter includes
 Dart. Per-OS build tools: Visual Studio with "Desktop development
@@ -389,10 +389,12 @@ retained for 14 days. The workflow is implemented but has not completed
 successfully because owner identities and the required environment values and
 secrets are still absent.
 
-Every macOS CI, release, and rehearsal job selects the explicit `macos-15` arm64
-runner and `/Applications/Xcode_16.4.app/Contents/Developer`. The
-`tools/require-macos-toolchain.sh` gate requires Xcode 16.4 build 16F6 and the
-expected Apple security tools. Credential-free CI also compiles minimal arm64
+Every macOS CI, release, and rehearsal job selects the explicit `macos-26` arm64
+runner and `/Applications/Xcode_26.6.app/Contents/Developer`. The
+`tools/require-macos-toolchain.sh` gate requires Xcode 26.6 build 17F113 and the
+expected Apple security tools. The macOS 26 arm64 runner image readme
+20261102.0473.1, checked 2026-11-16, lists that Xcode build as the default.
+Credential-free CI also compiles minimal arm64
 CLI and app fixtures, signs them ad hoc with hardened runtime in the generated
 inside-out order, and exercises real `codesign` entitlement and code-directory
 output parsing. Developer ID identity, secure timestamp, notarization,

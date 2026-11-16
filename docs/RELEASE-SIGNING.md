@@ -465,7 +465,7 @@ job independently download the original unsigned handoff and repeat that
 comparison before evidence or a signed package can be accepted.
 
 All macOS build, signing, packaging, verification, and rehearsal jobs use the
-explicit `macos-15` arm64 image and Xcode 16.4 build 16F6. Ordinary CI compiles
+explicit `macos-26` arm64 image and Xcode 26.6 build 17F113. Ordinary CI compiles
 minimal arm64 CLI and app fixtures, applies hardened ad hoc signatures in the
 generated inside-out order, and exercises real Apple entitlement, architecture,
 and code-directory output. That credential-free test does not replace the

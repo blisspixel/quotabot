@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot_collector/collector.dart';
 
 import 'prefs.dart';
@@ -378,9 +378,9 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
       actions: [
         if (!_creating && _selection != defaultProfileName)
           TextButton(
-            onPressed: () => Navigator.of(
-              context,
-            ).pop(ProfileEditorResult.delete(_selection)),
+            onPressed: () =>
+                Navigator.of(context)
+                    .pop(ProfileEditorResult.delete(_selection)),
             child: const Text('Delete'),
           ),
         TextButton(

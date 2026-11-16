@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:developer';
 import 'dart:io';
 import 'dart:isolate';
+// JIT-only inspection of private Stdin fields. dart:mirrors is deprecated
+// and has no replacement for that read.
+// ignore: deprecated_member_use
 import 'dart:mirrors';
 
 import 'package:quotabot_collector/src/io/windows_pipe_input.dart';

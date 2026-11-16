@@ -5,8 +5,10 @@ import 'dart:io';
 import 'package:quotabot_collector/profiles.dart';
 import 'package:quotabot_collector/util.dart';
 
-typedef PrefsDirectoryHardener =
-    Future<void> Function(Directory directory, Duration timeout);
+typedef PrefsDirectoryHardener = Future<void> Function(
+  Directory directory,
+  Duration timeout,
+);
 typedef PrefsFileHardener = Future<void> Function(File file, Duration timeout);
 
 Future<void> _defaultPrefsDirectoryHardener(
