@@ -176,10 +176,20 @@ foreach ($release in @('0.11.15', '0.11.15-rc.1')) {
             shutil.copyfile(sleep, other)
             target.chmod(0o755)
             other.chmod(0o755)
+
+            def start_named_sleeper(executable: Path) -> subprocess.Popen[bytes]:
+                # Ubuntu 26.04 ships uutils sleep as a multicall binary. A
+                # copy named quotabot exits with "unknown program". argv0
+                # sleep selects the applet while the file name stays
+                # quotabot. Checked 2026-11-16.
+                return subprocess.Popen(
+                    [bash, "-c", 'exec -a sleep "$1" 60', "start", str(executable)]
+                )
+
             for operating_system in ("Linux", "Darwin"):
                 with self.subTest(operating_system=operating_system):
-                    managed = subprocess.Popen([str(target), "60"])
-                    unrelated = subprocess.Popen([str(other), "60"])
+                    managed = start_named_sleeper(target)
+                    unrelated = start_named_sleeper(other)
                     try:
                         result = subprocess.run(
                             [
