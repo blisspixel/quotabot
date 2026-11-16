@@ -21,6 +21,11 @@ Notable changes to quotabot. Newest first.
 - Antigravity overlapped account reads are awaited inside their discovery
   catch. A failure after those reads start stays an error row. Dart 3.14
   warns when a try block returns that future without awaiting it.
+- Linux CLI bundles rename `libdartaotcollect.so` to `libdartaotquotabot.so`
+  when they rename the launcher to `bin/quotabot`. Dart 3.14 loads
+  `lib/libdartaot<name>.so` from that executable name. The collected library
+  name makes the installed command run as the bare Dart runtime. macOS and
+  Windows still keep the program inside the executable.
 
 ## 0.11.19 - 2026-11-16
 

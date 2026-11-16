@@ -138,7 +138,12 @@ Notes:
   repackage that bundle as an AppImage (`appimagetool`) or deb/rpm.
 - **CLI release archives** for the one-command installers are built with
   `tools/package-cli.ps1` (Windows) or `tools/package-cli.sh` (macOS/Linux), each
-  writing a `dart build cli` bundle archive plus a `.sha256` sidecar. PowerShell
+  writing a `dart build cli` bundle archive plus a `.sha256` sidecar. On Linux,
+  Dart 3.14 names the AOT program `lib/libdartaotcollect.so` and the shared
+  launcher loads `lib/libdartaot<executable>.so`. `package-cli.sh` renames that
+  library to `libdartaotquotabot.so` when it renames the launcher to
+  `bin/quotabot`. macOS and Windows still keep the program inside the
+  executable. PowerShell
   `-NoArchive` and shell `--no-archive` stop after producing the normalized
   `bin/quotabot` bundle. `-PackageOnly` and `--package-only` archive that existing
   bundle without resolving Dart or rebuilding it. Build-only and package-only

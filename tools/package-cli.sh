@@ -75,6 +75,16 @@ if [ "$package_only" -eq 0 ]; then
     exit 1
   fi
   mv "$bundle/bin/collect" "$packaged_executable"
+  # Dart 3.14 on Linux ships one shared launcher. It loads
+  # lib/libdartaot<executable-name>.so. The collected name would make
+  # bin/quotabot run as the bare Dart runtime.
+  built_library="$packaged_lib/libdartaotcollect.so"
+  if [ -f "$built_library" ]; then
+    mv "$built_library" "$packaged_lib/libdartaotquotabot.so"
+  elif [ "$os" = "linux" ]; then
+    echo "CLI build did not produce $built_library" >&2
+    exit 1
+  fi
   trap - EXIT
   quotabot_restore_space_safe_dart
 fi
