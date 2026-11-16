@@ -25,8 +25,11 @@ Notable changes to quotabot. Newest first.
 - CI and the local gate default to Python 3.15.2. LiteLLM is tested on
   3.11 through 3.15.2. The CI test job installs Node 26.13.1 before npm
   ci. Python 3.10 and Node 20 are not supported.
-- Raise the MCP example lock's hono override to 4.13.16 and
-  @hono/node-server to 2.1.6. The MCP SDK pin stays 1.32.1.
+- Raise the MCP example lock's hono override to 4.13.18 and
+  @hono/node-server to 2.1.8. Hono 4.13.18 completes the validator
+  content-type fix from 4.13.16 and corrects that release's mount path
+  regression. The Node adapter 2.1.8 includes the 2.1.7 static-path fix.
+  The MCP SDK pin stays 1.32.1.
 - Raise the MCP example lock's body-parser pin to 2.4.0, fast-uri to 3.1.9,
   ip-address to 10.7.5, and zod to 4.6.7. body-parser 2.4.0 also moves qs to
   6.17.1. The MCP SDK pin stays 1.32.1.
