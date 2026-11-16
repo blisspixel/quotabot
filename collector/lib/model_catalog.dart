@@ -17,7 +17,7 @@ import 'provider_ids.dart';
 
 /// The date the catalog was last refreshed (YYYY-MM-DD). Surfaced so consumers
 /// can see how fresh the capability hints are.
-const String kCatalogUpdated = '2026-11-02';
+const String kCatalogUpdated = '2026-11-15';
 
 /// Providers whose windows are true rolling included-quota plans. Only these
 /// can ever mark a model quota-backed for the no-surprise `--budget=quota`
@@ -35,9 +35,12 @@ const Set<String> kQuotaPlanProviders = {
 /// current flagships per provider; the refresh tool can widen this.
 const Map<String, List<ModelInfo>> kModelCatalog = {
   claudeProviderId: [
+    // Checked 2026-11-15:
+    // https://platform.claude.com/docs/en/models/fable-5-2/overview
+    // 1M context, 128K max output, tools, vision, and adaptive thinking.
     ModelInfo(
-      id: 'claude-fable-5-1',
-      displayName: 'Claude Fable 5.1',
+      id: 'claude-fable-5-2',
+      displayName: 'Claude Fable 5.2',
       contextTokens: 1000000,
       maxOutputTokens: 128000,
       tools: true,
@@ -66,7 +69,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tier: 'standard',
     ),
     // Current light model. Haiku 4.5 remains Active and is omitted so the
-    // light pick stays unambiguous. Checked 2026-11-02:
+    // light pick stays unambiguous. Checked 2026-11-15:
     // https://platform.claude.com/docs/en/models/haiku-5-5/overview
     // 1M context, 128K max output, adaptive thinking. Retirement not sooner
     // than October 7, 2027.
@@ -92,7 +95,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       reasoning: 'reasoning',
       tier: 'flagship',
     ),
-    // Checked 2026-11-02:
+    // Checked 2026-11-15:
     // https://developers.openai.com/api/docs/models/gpt-6.1-terra
     // Text and image in, text out, tools, 1,050,000 context, 128,000 output.
     ModelInfo(
@@ -106,26 +109,6 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tier: 'standard',
     ),
     ModelInfo(
-      id: 'gpt-6-astra',
-      displayName: 'GPT-6 Astra',
-      contextTokens: 1050000,
-      maxOutputTokens: 128000,
-      tools: true,
-      vision: true,
-      reasoning: 'reasoning',
-      tier: 'flagship',
-    ),
-    ModelInfo(
-      id: 'gpt-6-sol',
-      displayName: 'GPT-6 Sol',
-      contextTokens: 1050000,
-      maxOutputTokens: 128000,
-      tools: true,
-      vision: true,
-      reasoning: 'reasoning',
-      tier: 'flagship',
-    ),
-    ModelInfo(
       id: 'gpt-6-luna',
       displayName: 'GPT-6 Luna',
       contextTokens: 1050000,
@@ -136,39 +119,10 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tier: 'light',
     ),
     ModelInfo(
-      id: 'gpt-5.6-sol',
-      displayName: 'GPT-5.6 Sol',
+      id: 'gpt-6-astra',
+      displayName: 'GPT-6 Astra',
       contextTokens: 1050000,
       maxOutputTokens: 128000,
-      tools: true,
-      vision: true,
-      reasoning: 'reasoning',
-      tier: 'flagship',
-    ),
-    ModelInfo(
-      id: 'gpt-5.6-terra',
-      displayName: 'GPT-5.6 Terra',
-      contextTokens: 1050000,
-      maxOutputTokens: 128000,
-      tools: true,
-      vision: true,
-      reasoning: 'reasoning',
-      tier: 'standard',
-    ),
-    ModelInfo(
-      id: 'gpt-5.6-luna',
-      displayName: 'GPT-5.6 Luna',
-      contextTokens: 1050000,
-      maxOutputTokens: 128000,
-      tools: true,
-      vision: true,
-      reasoning: 'reasoning',
-      tier: 'light',
-    ),
-    ModelInfo(
-      id: 'gpt-5.5',
-      displayName: 'GPT-5.5',
-      contextTokens: 1000000,
       tools: true,
       vision: true,
       reasoning: 'reasoning',
@@ -176,6 +130,9 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
     ),
   ],
   'grok': [
+    // Checked 2026-11-15:
+    // https://docs.x.ai/developers/models/grok-4.7
+    // 500,000 context, tools, vision, and reasoning.
     ModelInfo(
       id: 'grok-4.7',
       displayName: 'Grok 4.7',
@@ -185,33 +142,15 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       reasoning: 'reasoning',
       tier: 'flagship',
     ),
-    ModelInfo(
-      id: 'grok-4.6',
-      displayName: 'Grok 4.6',
-      contextTokens: 500000,
-      tools: true,
-      vision: true,
-      reasoning: 'reasoning',
-      tier: 'flagship',
-    ),
-    ModelInfo(
-      id: 'grok-4.5',
-      displayName: 'Grok 4.5',
-      contextTokens: 500000,
-      tools: true,
-      vision: true,
-      reasoning: 'reasoning',
-      tier: 'standard',
-    ),
   ],
   'antigravity': [
-    // Gemini API model id, checked 2026-10-20:
-    // https://ai.google.dev/gemini-api/docs/models/gemini-4-argon
-    // 1,048,576 unified context, default sync max output 65,536, tools,
+    // Checked 2026-11-15:
+    // https://aistudio.google.com/docs/models/gemini-4-carbon
+    // Unified context 1,048,576. Default sync max output 65,536. Tools,
     // vision, and thinking. The catalog has no price fields.
     ModelInfo(
-      id: 'gemini-4-argon',
-      displayName: 'Gemini 4 Argon',
+      id: 'gemini-4-carbon',
+      displayName: 'Gemini 4 Carbon',
       contextTokens: 1048576,
       maxOutputTokens: 65536,
       tools: true,
@@ -219,31 +158,21 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       reasoning: 'reasoning',
       tier: 'flagship',
     ),
+    // Checked 2026-11-15:
+    // https://aistudio.google.com/docs/models/gemini-3.8-flash
+    // Text, image, video, audio, and PDF in. Text out. Input 1,048,576.
+    // Output 65,536. Function calling and thinking.
     ModelInfo(
       id: 'gemini-3.8-flash',
       displayName: 'Gemini 3.8 Flash',
+      contextTokens: 1048576,
+      maxOutputTokens: 65536,
       tools: true,
       vision: true,
       reasoning: 'reasoning',
       tier: 'standard',
     ),
-    // Reported alias of gemini-3.8-flash. Kept so a 3.7 read still matches.
-    ModelInfo(
-      id: 'gemini-3.7-flash',
-      displayName: 'Gemini 3.7 Flash',
-      tools: true,
-      vision: true,
-      tier: 'standard',
-    ),
-    // gemini-3.5-flash is a reported alias of this id. Kept so a 3.6 read still matches.
-    ModelInfo(
-      id: 'gemini-3.6-flash',
-      displayName: 'Gemini 3.6 Flash',
-      tools: true,
-      vision: true,
-      tier: 'standard',
-    ),
-    // Checked 2026-11-02:
+    // Checked 2026-11-15:
     // https://aistudio.google.com/docs/models/gemini-3.5-flash-lite
     // Text output. Input limit 1,048,576. Output limit 65,536. Tools, vision,
     // and thinking.
@@ -256,19 +185,6 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       vision: true,
       reasoning: 'reasoning',
       tier: 'light',
-    ),
-    // Antigravity match id. The Gemini API id is gemini-3.1-pro-preview.
-    // Checked 2026-11-02:
-    // https://aistudio.google.com/docs/models/gemini-3.1-pro-preview
-    ModelInfo(
-      id: 'gemini-3.1-pro',
-      displayName: 'Gemini 3.1 Pro',
-      contextTokens: 1000000,
-      maxOutputTokens: 64000,
-      tools: true,
-      vision: true,
-      reasoning: 'reasoning',
-      tier: 'flagship',
     ),
     ModelInfo(
       id: 'claude-sonnet-4.6-thinking',

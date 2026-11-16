@@ -2,8 +2,9 @@
 name = "quotabot-litellm-integration"
 version = "0.0.0"
 description = "LiteLLM routing integration and policy tests for quotabot"
-# Cap is litellm's own Requires-Python. 1.102.2 and upstream 1.108.0 both declare <3.15, checked 2026-10-22. PyPI removed 1.107.0.
-requires-python = ">=3.11,<3.15"
+# litellm 1.109.1 declares Requires-Python >=3.10,<3.16. Checked 2026-11-15.
+# This integration floor stays 3.11 because dnspython 2.9.2 and filelock 4.2.7 require it.
+requires-python = ">=3.11"
 
 # Runtime dependency pins and hashes remain in requirements.in and
 # requirements.txt so this example can be installed without packaging it.

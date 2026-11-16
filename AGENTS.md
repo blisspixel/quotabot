@@ -43,10 +43,10 @@ Version 0.11.18 sends `User-Agent: claude-code/2.1` on Claude account usage
 reads, shares a successful Claude capture for 20 minutes by default, and
 shows a remaining percent as N% free. An Antigravity model table can carry
 a tighter models window. The desktop first-run prompt stays dismissed after
-Skip or closing the window. Python 3.15 stays blocked.
+Skip or closing the window. Source CI defaults to Python 3.15.2.
 Version 0.11.17 shares one human route line across doctor, suggest, and top,
 reads desktop theme files, and ages a stored Omarchy display before calling
-it live. A rendered Quickshell panel was not run. Python 3.15 stays blocked.
+it live. A rendered Quickshell panel was not run.
 Version 0.11.16 names a hand-extracted desktop bundle whose embedded version
 differs from the CLI and leaves that copy in place. The desktop dialog uses the
 installed CLI version.
@@ -623,9 +623,10 @@ contains spaces. That script is what CI's format, analyze, test, coverage, and
 integration steps correspond to. Workflow lint, native packaging, signing,
 installed-client checks, and hosted CI remain separate. Do not treat a subset
 as the ship gate.
-Confirm the pinned Flutter/Dart versions and Python 3.14 (the default; 3.11
-through 3.14 are tested, and 3.15 is blocked by litellm's Requires-Python)
-resolve in this shell first, matching the repository tooling in CI. The LiteLLM
+Confirm the pinned Flutter/Dart versions and Python 3.15.2 (the default;
+LiteLLM is tested on 3.11 through 3.15.2) resolve in this shell first,
+matching the repository tooling in CI. Node 26.13.1 is installed in the CI
+test job before `npm ci`. The LiteLLM
 integration's supported runtime range is a separate contract. A successful SDK
 lookup is not a version check. Keep dependency resolution locked as the
 contributor gate does.
