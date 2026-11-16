@@ -105,6 +105,75 @@ def _job_blocks(text: str) -> dict[str, str]:
     }
 
 
+# Literal tokens only. An expression can evaluate true, and GitHub's default
+# queue of single cancels the pending middle run. Checked 2026-11-16.
+_CONCURRENCY_KEY = re.compile(r"^(?P<indent>[ \t]*)concurrency:[ \t]*(?P<rest>.*)$")
+_CANCEL_ANY = re.compile(r"^[ \t]*cancel-in-progress[ \t]*:")
+_CANCEL_OK = re.compile(r"^[ \t]*cancel-in-progress:[ \t]*false[ \t]*(?:#.*)?$")
+_QUEUE_ANY = re.compile(r"^[ \t]*queue[ \t]*:")
+_QUEUE_OK = re.compile(r"^[ \t]*queue:[ \t]*max[ \t]*(?:#.*)?$")
+_ACTIONLINT_QUEUE_IGNORE = 'unexpected key "queue" for "concurrency" section'
+
+
+def _line_indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" \t"))
+
+
+def concurrency_blocks(text: str) -> list[tuple[int, list[str]]]:
+    """Return each concurrency block as a 1-based line and its body lines."""
+    lines = text.splitlines()
+    blocks: list[tuple[int, list[str]]] = []
+    index = 0
+    while index < len(lines):
+        match = _CONCURRENCY_KEY.match(lines[index])
+        if match is None:
+            index += 1
+            continue
+        line_no = index + 1
+        rest = match.group("rest").strip()
+        if rest and not rest.startswith("#"):
+            blocks.append((line_no, [rest]))
+            index += 1
+            continue
+        base = len(match.group("indent"))
+        body: list[str] = []
+        index += 1
+        while index < len(lines):
+            line = lines[index]
+            if line.strip() and _line_indent(line) <= base:
+                break
+            body.append(line)
+            index += 1
+        blocks.append((line_no, body))
+    return blocks
+
+
+def _content_lines(body: list[str]) -> list[str]:
+    return [line for line in body if line.strip() and not line.strip().startswith("#")]
+
+
+def concurrency_problems(text: str, source: str = "<workflow>") -> list[str]:
+    """Problems when a workflow can cancel a run or drop a pending one."""
+    problems: list[str] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if _CANCEL_ANY.match(line) and _CANCEL_OK.match(line) is None:
+            problems.append(
+                f"{source}:{line_no}: cancel-in-progress must be the literal false"
+            )
+    for line_no, body in concurrency_blocks(text):
+        content = _content_lines(body)
+        where = f"{source}:{line_no}"
+        cancel_any = [line for line in content if _CANCEL_ANY.match(line)]
+        cancel_ok = [line for line in content if _CANCEL_OK.match(line)]
+        queue_any = [line for line in content if _QUEUE_ANY.match(line)]
+        queue_ok = [line for line in content if _QUEUE_OK.match(line)]
+        if len(cancel_any) != 1 or len(cancel_ok) != 1:
+            problems.append(f"{where}: cancel-in-progress must be the literal false")
+        if len(queue_any) != 1 or len(queue_ok) != 1:
+            problems.append(f"{where}: queue must be the literal max")
+    return problems
+
+
 def _checkout_blocks(text: str) -> list[str]:
     lines = text.splitlines()
     blocks: list[str] = []
@@ -497,6 +566,108 @@ class DependencyPolicyTest(unittest.TestCase):
             static_job,
         )
         self.assertIn("sha256sum --check --strict", static_job)
+        self.assertNotIn("-ignore", static_job)
+        self.assertNotIn("actionlint.yaml", static_job)
+
+    def test_workflows_queue_pending_runs_without_cancelling(self) -> None:
+        paths = sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml"))
+        self.assertGreaterEqual(len(paths), 7)
+        counts: dict[str, int] = {}
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            problems = concurrency_problems(text, path.name)
+            self.assertEqual([], problems, path.name)
+            counts[path.name] = len(concurrency_blocks(text))
+        self.assertEqual(
+            {
+                "currency.yml": 1,
+                "dependency-advisory-intake.yml": 1,
+                "install-smoke.yml": 1,
+                "macos-signing-rehearsal.yml": 1,
+                "release.yml": 1,
+                "windows-signing-rehearsal.yml": 1,
+            },
+            {name: count for name, count in counts.items() if count},
+        )
+        self.assertEqual(0, counts["ci.yml"])
+        self.assertNotIn(
+            "codeql.yml", {name for name, count in counts.items() if count}
+        )
+
+    def test_concurrency_policy_rejects_cancellable_or_single_queues(self) -> None:
+        samples = {
+            "true": (
+                "concurrency:\n  group: g\n  cancel-in-progress: true\n  queue: max\n"
+            ),
+            "expression": (
+                "concurrency:\n"
+                "  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}\n"
+                "  queue: max\n"
+            ),
+            "quoted false": (
+                'concurrency:\n  cancel-in-progress: "false"\n  queue: max\n'
+            ),
+            "missing queue": (
+                "concurrency:\n  group: g\n  cancel-in-progress: false\n"
+            ),
+            "queue single": (
+                "concurrency:\n  cancel-in-progress: false\n  queue: single\n"
+            ),
+            "one line": "concurrency: ci-${{ github.ref }}\n",
+            "job level true": (
+                "jobs:\n"
+                "  test:\n"
+                "    concurrency:\n"
+                "      cancel-in-progress: true\n"
+                "      queue: max\n"
+            ),
+            "duplicate cancel": (
+                "concurrency:\n"
+                "  cancel-in-progress: false\n"
+                "  cancel-in-progress: true\n"
+                "  queue: max\n"
+            ),
+        }
+        for name, text in samples.items():
+            with self.subTest(name=name):
+                self.assertNotEqual([], concurrency_problems(text, name))
+
+    def test_concurrency_policy_accepts_a_literal_queue(self) -> None:
+        text = (
+            "name: Example\n"
+            "concurrency:\n"
+            "  group: g # shared release\n"
+            "  cancel-in-progress: false\n"
+            "  queue: max\n"
+            "jobs:\n"
+            "  publish:\n"
+            "    concurrency:\n"
+            "      group: inner\n"
+            "      cancel-in-progress: false # keep the running job\n"
+            "      queue: max\n"
+        )
+        self.assertEqual([], concurrency_problems(text, "ok"))
+        self.assertEqual([], concurrency_problems("name: CI\non: push\n", "plain"))
+
+    def test_actionlint_ignore_is_only_the_unknown_queue_key(self) -> None:
+        config_path = ROOT / ".github" / "actionlint.yaml"
+        config = config_path.read_text(encoding="utf-8")
+        ignores = re.findall(r"(?m)^      - '([^']*)'$", config)
+        self.assertEqual([_ACTIONLINT_QUEUE_IGNORE, _ACTIONLINT_QUEUE_IGNORE], ignores)
+        self.assertIn(".github/workflows/**/*.yml:", config)
+        self.assertIn(".github/workflows/**/*.yaml:", config)
+        pattern = re.compile(_ACTIONLINT_QUEUE_IGNORE)
+        self.assertIsNotNone(
+            pattern.search(
+                'unexpected key "queue" for "concurrency" section. '
+                'expected one of "cancel-in-progress", "group"'
+            )
+        )
+        self.assertIsNone(
+            pattern.search('unexpected key "not-a-key" for "concurrency" section')
+        )
+        self.assertNotIn(".*", config)
+        self.assertNotIn("self-hosted-runner:", config)
 
 
 if __name__ == "__main__":

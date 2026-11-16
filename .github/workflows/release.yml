@@ -13,6 +13,7 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 
 # Least privilege by default; jobs widen only what they need. Actions are
 # pinned to commit SHAs (version in the trailing comment) so a repointed tag

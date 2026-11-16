@@ -13,6 +13,7 @@ permissions:
 concurrency:
   group: currency-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   audit:

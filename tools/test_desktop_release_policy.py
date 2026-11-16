@@ -54,6 +54,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("concurrency:", header)
         self.assertIn("group: ${{ github.workflow }}-${{ github.ref }}", header)
         self.assertIn("cancel-in-progress: false", header)
+        self.assertIn("queue: max", header)
 
     def test_release_waits_for_every_desktop_asset(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(

@@ -4,6 +4,11 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- Workflow runs are not cancelled. Every concurrency group keeps
+  `cancel-in-progress: false` and sets `queue: max`, so a newer run waits
+  instead of replacing a pending one. `ci.yml` has no concurrency group.
+  A policy test fails the build if either setting regresses. Pinned
+  actionlint 1.7.7 ignores only the unknown `queue` key.
 - The LiteLLM example points its paid deployments at openai/gpt-6-sol,
   anthropic/claude-sonnet-5-5, and xai/grok-4.7. The local deployment name
   stays grok-code, and the Ollama example stays qwen3-coder. Demo route

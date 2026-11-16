@@ -16,6 +16,7 @@ permissions:
 concurrency:
   group: dependency-advisory-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   archive:
