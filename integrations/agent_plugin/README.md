@@ -66,7 +66,7 @@ network namespace, and environment.
 [Current path implementation](https://github.com/blisspixel/quotabot/blob/main/collector/lib/util.dart),
 [environment contract](https://agent-plugins.org/specification#9-environment-variables-and-placeholder-expansion).
 
-For a client that strips profile paths, `prepare_mcp.py` uses Python 3.10 or
+For a client that strips profile paths, `prepare_mcp.py` uses Python 3.11 or
 later to print a personal configuration from the directory paths you explicitly
 supply. It reads no environment variables, credential files, or host
 configuration and writes no files. Paths must already exist. For example, in

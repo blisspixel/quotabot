@@ -17,7 +17,7 @@ prompts, code, or model requests.
   the maintained v1 release `1.32.1` with patched OAuth client handling and
   `proxy-addr`.
 - TypeScript snippets require Node.js 24 or later. The lock overrides the MCP
-  SDK's transitive Hono package to 4.13.13 and its Node adapter to 2.1.5.
+  SDK's transitive Hono package to 4.13.18 and its Node adapter to 2.1.8.
   It also overrides body-parser to 2.4.0, fast-uri to 3.1.9, ip-address to
   10.7.5, and zod to 4.6.7.
   Adapter versions below 2.0.5 are affected by the Windows path traversal in
@@ -25,6 +25,15 @@ prompts, code, or model requests.
   Hono versions below 4.13.11 decode a static path twice
   ([GHSA-5r4p-p66f-jhc7](https://github.com/advisories/GHSA-5r4p-p66f-jhc7)).
   The same static-path fix is in the Node adapter from 2.1.3.
+  Hono 4.13.18 completes the validator content-type fix that 4.13.16 left
+  open
+  ([GHSA-92p4-j3wq-jmqx](https://github.com/advisories/GHSA-92p4-j3wq-jmqx))
+  and corrects the mount path regression in 4.13.16
+  ([GHSA-h25j-2p75-qj33](https://github.com/advisories/GHSA-h25j-2p75-qj33)).
+  Node adapter 2.1.8 includes the 2.1.7 fix for a second static-path decode
+  when `allowPercentInPath` is set
+  ([GHSA-fj57-4f93-cfw6](https://github.com/advisories/GHSA-fj57-4f93-cfw6)).
+  Checked 2026-11-15.
 - Prefer stdio when the MCP client can spawn quotabot directly. Use Streamable
   HTTP when a host requires HTTP, keeping the endpoint on loopback and enabling
   bearer auth for long-lived processes.

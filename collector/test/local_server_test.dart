@@ -2088,7 +2088,8 @@ void main() {
           10,
           modelQuotas: const [
             ModelQuota(model: 'gemini', usedPercent: 100),
-            ModelQuota(model: 'Gemini 3.7 Flash', usedPercent: 0),
+            // Light tier stays under the default standard reasoning floor.
+            ModelQuota(model: 'Gemini 3.5 Flash-Lite', usedPercent: 0),
           ],
         ),
       ],

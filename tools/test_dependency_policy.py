@@ -295,17 +295,23 @@ class DependencyPolicyTest(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        self.assertEqual(">=3.11,<3.15", metadata["project"]["requires-python"])
+        self.assertEqual(">=3.11", metadata["project"]["requires-python"])
 
         runtime = (ROOT / "integrations" / "litellm" / ".python-version").read_text(
             encoding="utf-8"
         )
-        self.assertRegex(runtime, r"^3\.14\n?$")
+        self.assertRegex(runtime, r"^3\.15\.2\n?$")
 
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         jobs = _job_blocks(ci)
-        self.assertIn("python-version: '3.14'", jobs["static-quality"])
-        self.assertIn("python-version: '3.14'", jobs["test"])
+        self.assertIn("python-version: '3.15.2'", jobs["static-quality"])
+        self.assertIn("python-version: '3.15.2'", jobs["test"])
+        self.assertIn("node-version: '26.13.1'", jobs["test"])
+        self.assertIn(
+            "uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1"
+            " # v7.1.0",
+            jobs["test"],
+        )
         self.assertIn("os: [ubuntu-latest, macos-15, windows-latest]", jobs["test"])
         self.assertNotIn("python-version: ['3.11'", jobs["test"])
         litellm = jobs["litellm-python"]
@@ -313,7 +319,7 @@ class DependencyPolicyTest(unittest.TestCase):
         self.assertNotIn("macos", litellm)
         self.assertNotIn("windows", litellm)
         self.assertIn(
-            "python-version: ['3.11', '3.12', '3.13', '3.14']",
+            "python-version: ['3.11', '3.12', '3.13', '3.14', '3.15.2']",
             litellm,
         )
         self.assertIn(
@@ -321,15 +327,16 @@ class DependencyPolicyTest(unittest.TestCase):
             litellm,
         )
         self.assertNotIn("python-version: '3.13'", ci)
+        self.assertNotIn("python-version: '3.14'", ci)
         self.assertNotIn("python-version: '3.15'", ci)
 
         requirements = (
             ROOT / "integrations" / "litellm" / "requirements.in"
         ).read_text(encoding="utf-8")
-        self.assertIn("Python 3.14 is the default", requirements)
-        self.assertIn("Python 3.11 through 3.14 are tested", requirements)
+        self.assertIn("Python 3.15.2 is the default", requirements)
+        self.assertIn("Python 3.11 through 3.15.2 are tested", requirements)
         self.assertIn(
-            "Python 3.15 is blocked by litellm's Requires-Python",
+            "litellm 1.109.1 declares Requires-Python >=3.10,<3.16",
             requirements,
         )
 
@@ -355,7 +362,10 @@ class DependencyPolicyTest(unittest.TestCase):
         for declaration in declarations:
             with self.subTest(requirement=declaration):
                 match = re.fullmatch(
-                    r"([\w.-]+)(?:\[[\w,.-]+\])?==(\d+(?:\.\d+)*)", declaration
+                    r"([\w.-]+)(?:\[[\w,.-]+\])?==(\d+(?:\.\d+)*)"
+                    r"(?: ; (?:python_full_version (?:<|>=) \"3\.\d+\""
+                    r"|sys_platform != \"win32\"))?",
+                    declaration,
                 )
                 self.assertIsNotNone(
                     match, "direct dependencies require exact stable pins"
@@ -364,7 +374,9 @@ class DependencyPolicyTest(unittest.TestCase):
                 package, version = match.groups()
                 self.assertRegex(
                     lock,
-                    rf"(?mi)^{re.escape(package)}=={re.escape(version)} \\\n"
+                    rf"(?mi)^{re.escape(package)}=={re.escape(version)}"
+                    r"(?: ; (?:python_full_version (?:<|>=) '3\.\d+'"
+                    r"|sys_platform != 'win32'))? \\\n"
                     r"    --hash=sha256:[0-9a-f]{64}",
                 )
 
@@ -535,15 +547,16 @@ class DependencyPolicyTest(unittest.TestCase):
                     encoding="utf-8"
                 )
                 self.assertEqual(count, text.count(setup_python))
-                self.assertEqual(count, text.count("python-version: '3.14'"))
+                self.assertEqual(count, text.count("python-version: '3.15.2'"))
                 self.assertNotIn("python-version: '3.13'", text)
+                self.assertNotIn("python-version: '3.14'", text)
                 self.assertNotIn("python-version: '3.15'", text)
                 self.assertNotIn("ece7cb06caefa5fff74198d8649806c4678c61a1", text)
                 self.assertNotIn("pip-install:", text)
 
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertEqual(3, ci.count(setup_python))
-        self.assertEqual(2, ci.count("python-version: '3.14'"))
+        self.assertEqual(2, ci.count("python-version: '3.15.2'"))
         self.assertNotIn("ece7cb06caefa5fff74198d8649806c4678c61a1", ci)
         self.assertNotIn("pip-install:", ci)
         self.assertIn("dart run coverage:format_coverage", ci)

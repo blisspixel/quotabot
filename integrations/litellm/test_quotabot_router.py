@@ -118,7 +118,7 @@ class RouterTests(unittest.TestCase):
             model_lines,
             [
                 "model: anthropic/claude-sonnet-5-5",
-                "model: openai/gpt-6-sol",
+                "model: openai/gpt-6.1-sol",
                 "model: xai/grok-4.7",
                 "model: ollama/qwen3-coder",
             ],

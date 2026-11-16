@@ -14,14 +14,32 @@ Notable changes to quotabot. Newest first.
   instead of replacing a pending one. `ci.yml` has no concurrency group.
   A policy test fails the build if either setting regresses. Pinned
   actionlint 1.7.7 ignores only the unknown `queue` key.
-- The LiteLLM example points its paid deployments at openai/gpt-6-sol,
-  anthropic/claude-sonnet-5-5, and xai/grok-4.7. The local deployment name
-  stays grok-code, and the Ollama example stays qwen3-coder. Demo route
-  labels use codex/gpt-6-sol and antigravity/gemini-4-argon. Model ids
-  checked 2026-11-03.
-- Raise the hash-locked LiteLLM integration's dnspython pin to 2.9.1 and its
-  filelock pin to 4.2.7. Both require Python 3.11 or newer, so the universal
-  lock now resolves from 3.11. LiteLLM stays at the clean 1.102.2 pin.
+- The capability catalog was refreshed on 2026-11-15. Claude is
+  claude-fable-5-2, claude-opus-5-5, claude-sonnet-5-5, and
+  claude-haiku-5-5. Codex is gpt-6.1-sol, gpt-6.1-terra, gpt-6-luna, and
+  gpt-6-astra. Grok is grok-4.7. Antigravity is gemini-4-carbon,
+  gemini-3.8-flash, and gemini-3.5-flash-lite, plus the existing
+  non-Gemini rows. The LiteLLM example points its paid deployments at
+  openai/gpt-6.1-sol, anthropic/claude-sonnet-5-5, and xai/grok-4.7. The
+  local deployment name stays grok-code, and the Ollama example stays
+  qwen3-coder. Demo route labels use codex/gpt-6.1-sol and
+  antigravity/gemini-4-carbon. Model ids checked 2026-11-15.
+- Raise the hash-locked LiteLLM integration to litellm 1.109.1, which
+  allows Python 3.15 and still rejects 3.16. dnspython is 2.9.2, oauthlib
+  is 4.0.1, and mcp is 2.3.0. filelock stays 4.2.7. jiter is 0.19.0,
+  markupsafe is 3.0.4, and regex is 2026.11.15 so those wheels cover
+  Python 3.15. uvloop is 0.23.0 off Windows. numpy is 2.4.6 below 3.12
+  and 2.5.5 from 3.12 up, which publishes 3.15 wheels. PyYAML stays
+  6.0.3, the newest release in litellm's range, and builds from the
+  hashed sdist on Python 3.15. The floor stays Python 3.11.
+- CI and the local gate default to Python 3.15.2. LiteLLM is tested on
+  3.11 through 3.15.2. The CI test job installs Node 26.13.1 before npm
+  ci. Python 3.10 and Node 20 are not supported.
+- Raise the MCP example lock's hono override to 4.13.18 and
+  @hono/node-server to 2.1.8. Hono 4.13.18 completes the validator
+  content-type fix from 4.13.16 and corrects that release's mount path
+  regression. The Node adapter 2.1.8 includes the 2.1.7 static-path fix.
+  The MCP SDK pin stays 1.32.1.
 - Raise the MCP example lock's body-parser pin to 2.4.0, fast-uri to 3.1.9,
   ip-address to 10.7.5, and zod to 4.6.7. body-parser 2.4.0 also moves qs to
   6.17.1. The MCP SDK pin stays 1.32.1.
@@ -60,11 +78,6 @@ Notable changes to quotabot. Newest first.
   when a catalog model is already shut down or shuts down within 30 days.
   Other providers stay presence-only. Summaries count shutdowns and omit
   model ids.
-- The capability catalog was refreshed on 2026-11-02. The light Claude model
-  is `claude-haiku-5-5` (1M context, 128K output). Codex standard includes
-  `gpt-6.1-terra`. Antigravity light includes `gemini-3.5-flash-lite`.
-  `gemini-3.1-pro` stays the Antigravity id. The Gemini API id is
-  `gemini-3.1-pro-preview`.
 - Agent editing rules live in `AGENTS.md`. `CLAUDE.md` imports that file.
 
 ## 0.11.18 - 2026-10-24

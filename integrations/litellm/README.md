@@ -84,17 +84,18 @@ account. Quota advice cannot switch a fixed deployment's credential.
    cp quotabot-routing.example.yaml quotabot-routing.yaml
    ```
 
-   Python 3.14 is the default. Python 3.11 through 3.14 are tested, and
-   Python 3.15 is blocked by litellm's Requires-Python. The requirements file
-   locks the proxy dependency and its transitive packages with hashes.
-   Dependabot reports available updates; selected versions are regenerated and
-   tested on a first-party branch. `pyproject.toml` declares that supported
-   range for package tooling and for Dependabot's resolver. `.python-version`
-   selects Python 3.14 for local version managers. Update both declarations
-   deliberately when the supported runtime range advances.
+   Python 3.15.2 is the default. Python 3.11 through 3.15.2 are tested.
+   litellm 1.109.1 declares Requires-Python >=3.10,<3.16 (checked 2026-11-15).
+   The requirements file locks the proxy dependency and its transitive
+   packages with hashes. Dependabot reports available updates; selected
+   versions are regenerated and tested on a first-party branch.
+   `pyproject.toml` declares the integration floor for package tooling and
+   for Dependabot's resolver. `.python-version` selects Python 3.15.2 for
+   local version managers. Update both declarations deliberately when the
+   supported runtime range advances.
 
    Regenerate the universal hash lock, then verify installation on Python 3.11
-   through 3.14. The resolution floor is 3.11 because the patched dnspython
+   through 3.15.2. The resolution floor is 3.11 because the patched dnspython
    and filelock releases require it:
 
    ```bash
