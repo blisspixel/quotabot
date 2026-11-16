@@ -4,6 +4,16 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- Linux desktop builds on Ubuntu 26.04 still compile tray_manager 0.5.3.
+  libayatana-appindicator 0.5.94 deprecates `app_indicator_new`, and the
+  shared `-Werror` setting was failing the plugin on that warning. The
+  plugin target alone keeps the deprecation as a warning. The application
+  target still builds with `-Werror`.
+- Workflow runs are not cancelled. Every concurrency group keeps
+  `cancel-in-progress: false` and sets `queue: max`, so a newer run waits
+  instead of replacing a pending one. `ci.yml` has no concurrency group.
+  A policy test fails the build if either setting regresses. Pinned
+  actionlint 1.7.7 ignores only the unknown `queue` key.
 - The capability catalog was refreshed on 2026-11-15. Claude is
   claude-fable-5-2, claude-opus-5-5, claude-sonnet-5-5, and
   claude-haiku-5-5. Codex is gpt-6.1-sol, gpt-6.1-terra, gpt-6-luna, and

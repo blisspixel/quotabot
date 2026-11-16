@@ -1,5 +1,6 @@
 import hashlib
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -171,15 +172,24 @@ foreach ($release in @('0.11.15', '0.11.15-rc.1')) {
         with tempfile.TemporaryDirectory(prefix="quotabot lifecycle ") as directory:
             target = Path(directory) / "quotabot"
             other = Path(directory) / "quotabot-old"
-            # copy2 reapplies source file flags. macOS refuses that for sleep.
-            shutil.copyfile(sleep, target)
-            shutil.copyfile(sleep, other)
-            target.chmod(0o755)
-            other.chmod(0o755)
+            sleep_exec = shlex.quote(sleep)
+
+            def start_named_sleeper(executable: Path) -> subprocess.Popen[bytes]:
+                # Ubuntu 26.04 ships uutils sleep as one multicall binary and
+                # selects the applet from the file name. quotabot-old ends
+                # with the od applet, so a copy exits instead of sleeping.
+                # Exec the real sleep by its own path. Checked 2026-11-16.
+                executable.write_text(
+                    f'#!/bin/sh\nexec {sleep_exec} "$@"\n',
+                    encoding="utf-8",
+                )
+                executable.chmod(0o755)
+                return subprocess.Popen([str(executable), "60"])
+
             for operating_system in ("Linux", "Darwin"):
                 with self.subTest(operating_system=operating_system):
-                    managed = subprocess.Popen([str(target), "60"])
-                    unrelated = subprocess.Popen([str(other), "60"])
+                    managed = start_named_sleeper(target)
+                    unrelated = start_named_sleeper(other)
                     try:
                         result = subprocess.run(
                             [

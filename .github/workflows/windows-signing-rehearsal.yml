@@ -6,6 +6,7 @@ on:
 concurrency:
   group: windows-signing-rehearsal-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read

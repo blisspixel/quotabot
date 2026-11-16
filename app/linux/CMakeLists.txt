@@ -74,6 +74,15 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# Ubuntu 26.04's libayatana-appindicator 0.5.94 marks app_indicator_new
+# deprecated. tray_manager 0.5.3 still calls it, and APPLY_STANDARD_SETTINGS
+# compiles that plugin with -Werror. Keep -Werror for the application and
+# demote this one diagnostic on the plugin target. Checked 2026-11-16.
+if(TARGET tray_manager_plugin)
+  target_compile_options(tray_manager_plugin PRIVATE
+    -Wno-error=deprecated-declarations)
+endif()
+
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build

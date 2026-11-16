@@ -460,6 +460,33 @@ lockfile, and run the full project gates. Retain advisory intake only as an
 emergency guard if a bot pull request appears: close it and delete its branch.
 If that automation fails, complete the cleanup manually.
 
+## Workflow runs are not cancelled
+
+Workflow runs in this repository are not cancelled, including a superseded
+pull request run. Every pushed commit gets a complete result. A concurrency
+group stays only when it serializes a real shared step, such as a release,
+a signing rehearsal, an install of a published build, a catalog audit, or
+advisory intake. That group uses `cancel-in-progress: false` and
+`queue: max`. Do not set `cancel-in-progress` to true or to an expression.
+Do not add a concurrency group only to drop older runs. `ci.yml` stays
+without a concurrency group so the test matrix can run side by side.
+
+`queue: max` keeps pending runs. GitHub's default queue is `single`, which
+cancels every waiting run except the latest even when `cancel-in-progress`
+is false. Up to 100 pending runs wait. GitHub cancels a further pending run
+past that limit. Waiting runs are ordered by when they started waiting, not
+by dispatch time. Checked against GitHub's concurrency documentation on
+2026-11-16:
+https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
+
+Pinned actionlint 1.7.7 does not parse `concurrency.queue`. The gap is still
+open in [rhysd/actionlint#657](https://github.com/rhysd/actionlint/issues/657)
+and [rhysd/actionlint#654](https://github.com/rhysd/actionlint/pull/654), and
+it is absent from actionlint 1.7.12. The ignore in `.github/actionlint.yaml`
+covers only that unknown key. The policy test fails the build when
+`cancel-in-progress` is not the literal `false` or when `queue: max` is
+missing.
+
 ---
 
 ## This repository

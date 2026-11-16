@@ -1,0 +1,15 @@
+# actionlint 1.7.7 does not know concurrency.queue. The gap is still open
+# upstream in rhysd/actionlint#657 and rhysd/actionlint#654, and it is absent
+# from actionlint 1.7.12 (latest release, 2026-03-30). GitHub documents
+# queue: max. Checked 2026-11-16.
+# https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
+# This ignore matches only that unknown key. It does not check the value.
+# tools/test_dependency_policy.py rejects any cancel-in-progress value other
+# than the literal false, and any concurrency block without queue: max.
+paths:
+  .github/workflows/**/*.yml:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section'
+  .github/workflows/**/*.yaml:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section'

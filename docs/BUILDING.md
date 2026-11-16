@@ -7,7 +7,9 @@ Dart. Per-OS build tools: Visual Studio with "Desktop development
 with C++" plus C++ ATL support for your installed MSVC toolset (Windows), Xcode
 and CocoaPods (macOS), or
 `clang cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev`
-(Linux).
+(Linux). Ubuntu 26.04 deprecates `app_indicator_new` in that library. The
+application still builds with `-Werror`. `tray_manager` 0.5.3 keeps that
+deprecation as a warning.
 
 ## One-command setup
 

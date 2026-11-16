@@ -13,6 +13,36 @@ real_rm="$(command -v rm)"
 installed_pid=""
 unrelated_pid=""
 
+# Ubuntu 26.04 ships uutils sleep as one multicall binary. It selects the
+# applet from the file name, and a suffix counts: quotabot-old ends with od.
+# Copying sleep therefore exits instead of sleeping. A shell script cannot
+# stand in either, because pgrep -x and /proc/pid/exe follow the interpreter.
+# Compile a tiny sleeper so the process name and executable path are the
+# installed file. Checked 2026-11-16.
+compile_sleeper() {
+  local destination="$1"
+  cc -O2 -x c -o "$destination" - << 'EOF'
+#include <stdlib.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+    unsigned int seconds = 60;
+    if (argc > 1) {
+        seconds = (unsigned int)atoi(argv[1]);
+    }
+    sleep(seconds);
+    return 0;
+}
+EOF
+  chmod +x "$destination"
+}
+
+start_named_sleeper() {
+  local destination="$1"
+  compile_sleeper "$destination"
+  "$destination" 60 &
+  started_sleeper_pid=$!
+}
+
 cleanup_test() {
   set +e
   if [ -n "$installed_pid" ]; then kill "$installed_pid" 2>/dev/null; fi
@@ -60,14 +90,13 @@ case "$host_kernel" in
     desktop_versions="$HOME/.local/share/.quotabot-desktop-versions"
     desktop_generation="$desktop_versions/generation-20260821020202-1002"
     mkdir -p "$desktop_generation" "$test_root/unrelated"
-    cp "$(command -v sleep)" "$cli_generation/bin/quotabot"
-    cp "$(command -v sleep)" "$test_root/unrelated/quotabot"
-    cp "$(command -v sleep)" "$desktop_generation/quotabot"
+    printf '#!/bin/sh\nexit 0\n' > "$desktop_generation/quotabot"
+    chmod +x "$desktop_generation/quotabot"
     ln -s '.quotabot-desktop-versions/generation-20260821020202-1002' "$desktop_root"
-    "$cli_generation/bin/quotabot" 60 &
-    installed_pid=$!
-    "$test_root/unrelated/quotabot" 60 &
-    unrelated_pid=$!
+    start_named_sleeper "$cli_generation/bin/quotabot"
+    installed_pid=$started_sleeper_pid
+    start_named_sleeper "$test_root/unrelated/quotabot"
+    unrelated_pid=$started_sleeper_pid
     sleep 0.1
     ;;
   *) echo "Unsupported test host: $host_kernel" >&2; exit 1 ;;
@@ -113,11 +142,10 @@ mac_versions="$mac_home/Applications/.quotabot.app-versions"
 mac_generation="$mac_versions/generation-20260821040404-1004"
 mac_executable="$mac_generation/Contents/MacOS/quotabot"
 mkdir -p "$(dirname "$mac_executable")"
-cp "$(command -v sleep)" "$mac_executable"
 ln -s '.quotabot.app-versions/generation-20260821040404-1004' \
   "$mac_home/Applications/quotabot.app"
-"$mac_executable" 60 &
-installed_pid=$!
+start_named_sleeper "$mac_executable"
+installed_pid=$started_sleeper_pid
 sleep 0.1
 mac_fake_bin="$test_root/mac-fake-bin"
 mkdir -p "$mac_fake_bin"
