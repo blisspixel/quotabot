@@ -33,7 +33,7 @@ instruction. Product use of the CLI and MCP surface is the rest of this guide.
 
 ## Project status
 
-The current verified stable release is 0.11.18. Callers should treat a snapshot
+The current verified stable release is 0.11.19. Callers should treat a snapshot
 with `drift_reason` as non-routable, keep measured percentages visible on
 admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
