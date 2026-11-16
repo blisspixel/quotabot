@@ -1455,6 +1455,28 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             self.assertIn("standalone macOS CLI", text)
             self.assertIn("nested Mach-O", text)
 
+    def test_linux_tray_plugin_deprecation_stays_a_warning(self) -> None:
+        cmake = (ROOT / "app" / "linux" / "CMakeLists.txt").read_text(encoding="utf-8")
+        settings, separator, after_plugins = cmake.partition(
+            "include(flutter/generated_plugins.cmake)"
+        )
+        self.assertEqual(separator, "include(flutter/generated_plugins.cmake)")
+        function = settings.split("function(APPLY_STANDARD_SETTINGS TARGET)", 1)[1]
+        function = function.split("endfunction()", 1)[0]
+        self.assertIn("-Wall -Werror", function)
+        self.assertNotIn("Wno-error", function)
+        plugin_block = after_plugins.split("if(TARGET tray_manager_plugin)", 1)[1]
+        plugin_block = plugin_block.split("endif()", 1)[0]
+        self.assertIn(
+            "target_compile_options(tray_manager_plugin PRIVATE",
+            plugin_block,
+        )
+        self.assertIn("-Wno-error=deprecated-declarations", plugin_block)
+        self.assertNotIn("BINARY_NAME", plugin_block)
+        self.assertEqual(cmake.count("-Wno-error=deprecated-declarations"), 1)
+        self.assertIn("tray_manager 0.5.3", after_plugins.split("endif()", 1)[0])
+        self.assertIn("libayatana-appindicator", after_plugins.split("endif()", 1)[0])
+
     def test_normal_ci_builds_and_verifies_native_desktop_archives(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
