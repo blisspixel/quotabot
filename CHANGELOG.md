@@ -8,7 +8,10 @@ Notable changes to quotabot. Newest first.
   and Xcode 26.6 build 17F113. The macOS 26 arm64 runner image readme
   20261102.0473.1, checked 2026-11-16, lists that Xcode build as the default.
   Flutter is 3.50.0 (`ab2912035e160d9cad6306df307576da6128ebdb`) and Dart is
-  3.14.0.
+  3.14.0. Pinned actionlint 1.7.7 does not list that runner label. The
+  ignore matches only `label "macos-26" is unknown` and does not add a
+  self-hosted runner list. actionlint stays at 1.7.7 because 1.7.12 still
+  does not parse `concurrency.queue`.
 - The desktop app depends on material_ui 1.11.1. Flutter 3.50 deprecates
   `package:flutter/material.dart`, and `flutter analyze` reports that import.
   The app imports `package:material_ui/material_ui.dart` instead. Widget

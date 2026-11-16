@@ -113,6 +113,7 @@ _CANCEL_OK = re.compile(r"^[ \t]*cancel-in-progress:[ \t]*false[ \t]*(?:#.*)?$")
 _QUEUE_ANY = re.compile(r"^[ \t]*queue[ \t]*:")
 _QUEUE_OK = re.compile(r"^[ \t]*queue:[ \t]*max[ \t]*(?:#.*)?$")
 _ACTIONLINT_QUEUE_IGNORE = 'unexpected key "queue" for "concurrency" section'
+_ACTIONLINT_MACOS_26_IGNORE = 'label "macos-26" is unknown'
 
 
 def _line_indent(line: str) -> int:
@@ -662,23 +663,37 @@ class DependencyPolicyTest(unittest.TestCase):
         self.assertEqual([], concurrency_problems(text, "ok"))
         self.assertEqual([], concurrency_problems("name: CI\non: push\n", "plain"))
 
-    def test_actionlint_ignore_is_only_the_unknown_queue_key(self) -> None:
+    def test_actionlint_ignores_are_the_queue_key_and_macos_26_label(self) -> None:
         config_path = ROOT / ".github" / "actionlint.yaml"
         config = config_path.read_text(encoding="utf-8")
         ignores = re.findall(r"(?m)^      - '([^']*)'$", config)
-        self.assertEqual([_ACTIONLINT_QUEUE_IGNORE, _ACTIONLINT_QUEUE_IGNORE], ignores)
+        expected = [
+            _ACTIONLINT_QUEUE_IGNORE,
+            _ACTIONLINT_MACOS_26_IGNORE,
+            _ACTIONLINT_QUEUE_IGNORE,
+            _ACTIONLINT_MACOS_26_IGNORE,
+        ]
+        self.assertEqual(expected, ignores)
         self.assertIn(".github/workflows/**/*.yml:", config)
         self.assertIn(".github/workflows/**/*.yaml:", config)
-        pattern = re.compile(_ACTIONLINT_QUEUE_IGNORE)
+        queue = re.compile(_ACTIONLINT_QUEUE_IGNORE)
         self.assertIsNotNone(
-            pattern.search(
+            queue.search(
                 'unexpected key "queue" for "concurrency" section. '
                 'expected one of "cancel-in-progress", "group"'
             )
         )
         self.assertIsNone(
-            pattern.search('unexpected key "not-a-key" for "concurrency" section')
+            queue.search('unexpected key "not-a-key" for "concurrency" section')
         )
+        label = re.compile(_ACTIONLINT_MACOS_26_IGNORE)
+        self.assertIsNotNone(
+            label.search(
+                'label "macos-26" is unknown. available labels are "ubuntu-latest"'
+            )
+        )
+        self.assertIsNone(label.search('label "macos-15" is unknown'))
+        self.assertIsNone(label.search('label "macos-26-intel" is unknown'))
         self.assertNotIn(".*", config)
         self.assertNotIn("self-hosted-runner:", config)
 

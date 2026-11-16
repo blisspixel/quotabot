@@ -486,10 +486,12 @@ https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows
 Pinned actionlint 1.7.7 does not parse `concurrency.queue`. The gap is still
 open in [rhysd/actionlint#657](https://github.com/rhysd/actionlint/issues/657)
 and [rhysd/actionlint#654](https://github.com/rhysd/actionlint/pull/654), and
-it is absent from actionlint 1.7.12. The ignore in `.github/actionlint.yaml`
-covers only that unknown key. The policy test fails the build when
-`cancel-in-progress` is not the literal `false` or when `queue: max` is
-missing.
+it is absent from actionlint 1.7.12. The same pin does not list the
+GitHub-hosted `macos-26` label, which actionlint 1.7.8 added. The ignores
+in `.github/actionlint.yaml` cover only that unknown key and the message
+`label "macos-26" is unknown`. They do not add a self-hosted runner list.
+The policy test fails the build when `cancel-in-progress` is not the
+literal `false` or when `queue: max` is missing.
 
 ---
 

@@ -6,10 +6,17 @@
 # This ignore matches only that unknown key. It does not check the value.
 # tools/test_dependency_policy.py rejects any cancel-in-progress value other
 # than the literal false, and any concurrency block without queue: max.
+#
+# The same pin does not list the GitHub-hosted macos-26 label. actionlint
+# 1.7.8 added it. This repository stays on 1.7.7 because 1.7.12 still does
+# not parse concurrency.queue. The second ignore matches only the unknown
+# macos-26 label message. It is not a self-hosted runner list.
 paths:
   .github/workflows/**/*.yml:
     ignore:
       - 'unexpected key "queue" for "concurrency" section'
+      - 'label "macos-26" is unknown'
   .github/workflows/**/*.yaml:
     ignore:
       - 'unexpected key "queue" for "concurrency" section'
+      - 'label "macos-26" is unknown'
