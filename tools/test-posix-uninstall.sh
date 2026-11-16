@@ -13,15 +13,33 @@ real_rm="$(command -v rm)"
 installed_pid=""
 unrelated_pid=""
 
-# Ubuntu 26.04 ships uutils sleep as a multicall binary. A copy named
-# quotabot exits with "unknown program" because the applet comes from argv0.
-# argv0 sleep selects the applet. The file name stays quotabot, which
-# pgrep -x and /proc/pid/exe match. Checked 2026-11-16.
+# Ubuntu 26.04 ships uutils sleep as one multicall binary. It selects the
+# applet from the file name, and a suffix counts: quotabot-old ends with od.
+# Copying sleep therefore exits instead of sleeping. A shell script cannot
+# stand in either, because pgrep -x and /proc/pid/exe follow the interpreter.
+# Compile a tiny sleeper so the process name and executable path are the
+# installed file. Checked 2026-11-16.
+compile_sleeper() {
+  local destination="$1"
+  cc -O2 -x c -o "$destination" - << 'EOF'
+#include <stdlib.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+    unsigned int seconds = 60;
+    if (argc > 1) {
+        seconds = (unsigned int)atoi(argv[1]);
+    }
+    sleep(seconds);
+    return 0;
+}
+EOF
+  chmod +x "$destination"
+}
+
 start_named_sleeper() {
   local destination="$1"
-  cp "$(command -v sleep)" "$destination"
-  chmod +x "$destination"
-  bash -c 'exec -a sleep "$1" 60' _ "$destination" &
+  compile_sleeper "$destination"
+  "$destination" 60 &
   started_sleeper_pid=$!
 }
 
@@ -72,7 +90,8 @@ case "$host_kernel" in
     desktop_versions="$HOME/.local/share/.quotabot-desktop-versions"
     desktop_generation="$desktop_versions/generation-20260821020202-1002"
     mkdir -p "$desktop_generation" "$test_root/unrelated"
-    cp "$(command -v sleep)" "$desktop_generation/quotabot"
+    printf '#!/bin/sh\nexit 0\n' > "$desktop_generation/quotabot"
+    chmod +x "$desktop_generation/quotabot"
     ln -s '.quotabot-desktop-versions/generation-20260821020202-1002' "$desktop_root"
     start_named_sleeper "$cli_generation/bin/quotabot"
     installed_pid=$started_sleeper_pid
