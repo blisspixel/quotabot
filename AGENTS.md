@@ -39,11 +39,15 @@ admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
 explicit-spend evidence. Fresh quota publishes before advisory analytics.
 
+Version 0.11.19 refreshes the live catalog, raises the patched dependency
+pins, and defaults source CI to Python 3.15.2 with Node 26.13.1. Workflow
+runs are not cancelled. Installer tests compile a sleeper, and the Linux
+desktop build keeps the tray_manager 0.5.3 deprecation as a warning.
 Version 0.11.18 sends `User-Agent: claude-code/2.1` on Claude account usage
 reads, shares a successful Claude capture for 20 minutes by default, and
 shows a remaining percent as N% free. An Antigravity model table can carry
 a tighter models window. The desktop first-run prompt stays dismissed after
-Skip or closing the window. Source CI defaults to Python 3.15.2.
+Skip or closing the window.
 Version 0.11.17 shares one human route line across doctor, suggest, and top,
 reads desktop theme files, and ages a stored Omarchy display before calling
 it live. A rendered Quickshell panel was not run.

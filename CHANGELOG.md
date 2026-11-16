@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.19 - 2026-11-16
+
 - Linux desktop builds on Ubuntu 26.04 still compile tray_manager 0.5.3.
   libayatana-appindicator 0.5.94 deprecates `app_indicator_new`, and the
   shared `-Werror` setting was failing the plugin on that warning. The
@@ -36,7 +38,7 @@ Notable changes to quotabot. Newest first.
   3.11 through 3.15.2. The CI test job installs Node 26.13.1 before npm
   ci. Python 3.10 and Node 20 are not supported.
 - Raise the MCP example lock's hono override to 4.13.18 and
-  @hono/node-server to 2.1.8. Hono 4.13.18 completes the validator
+  the Hono Node server adapter to 2.1.8. Hono 4.13.18 completes the validator
   content-type fix from 4.13.16 and corrects that release's mount path
   regression. The Node adapter 2.1.8 includes the 2.1.7 static-path fix.
   The MCP SDK pin stays 1.32.1.
