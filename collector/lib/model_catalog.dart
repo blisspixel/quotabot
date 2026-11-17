@@ -17,7 +17,7 @@ import 'provider_ids.dart';
 
 /// The date the catalog was last refreshed (YYYY-MM-DD). Surfaced so consumers
 /// can see how fresh the capability hints are.
-const String kCatalogUpdated = '2026-11-15';
+const String kCatalogUpdated = '2026-11-17';
 
 /// Providers whose windows are true rolling included-quota plans. Only these
 /// can ever mark a model quota-backed for the no-surprise `--budget=quota`
@@ -144,10 +144,27 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
     ),
   ],
   'antigravity': [
-    // Checked 2026-11-15:
+    // Presence checked 2026-11-17 against
+    // https://antigravity.google/docs/models/
+    // and a live `agy models` list. Ids are the stable prefixes of the
+    // effort-suffixed account ids, such as gemini-4-hydrogen-xhigh and
+    // claude-opus-5-5-high. The Gemini API list is a Gemini-id cross-check
+    // only and does not prove this page. The page marks Claude Sonnet 4.6
+    // (thinking), Claude Opus 4.6 (thinking), and GPT-OSS-120b removed on
+    // 2026-11-18. That account list already omitted the 4.6 ids and
+    // gemini-3.5-flash-lite, and it still included gpt-oss-120b-medium.
+    // Orchestrator and the Enterprise-only 3.7, 3.6, and 3.1 Pro rows are
+    // on the page and are not catalog models. Antigravity does not publish
+    // Claude context lengths, so those rows omit them.
+    //
+    // Gemini limits checked 2026-11-17:
     // https://aistudio.google.com/docs/models/gemini-4-carbon
+    // https://aistudio.google.com/docs/models/gemini-4-argon
+    // https://aistudio.google.com/docs/models/gemini-4-hydrogen
+    // https://aistudio.google.com/docs/models/gemini-3.8-flash
     // Unified context 1,048,576. Default sync max output 65,536. Tools,
-    // vision, and thinking. The catalog has no price fields.
+    // vision, and thinking. The catalog has no price fields. Carbon remains
+    // the Ultra and Enterprise row. This account's list did not include it.
     ModelInfo(
       id: 'gemini-4-carbon',
       displayName: 'Gemini 4 Carbon',
@@ -158,10 +175,26 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       reasoning: 'reasoning',
       tier: 'flagship',
     ),
-    // Checked 2026-11-15:
-    // https://aistudio.google.com/docs/models/gemini-3.8-flash
-    // Text, image, video, audio, and PDF in. Text out. Input 1,048,576.
-    // Output 65,536. Function calling and thinking.
+    ModelInfo(
+      id: 'gemini-4-argon',
+      displayName: 'Gemini 4 Argon',
+      contextTokens: 1048576,
+      maxOutputTokens: 65536,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'flagship',
+    ),
+    ModelInfo(
+      id: 'gemini-4-hydrogen',
+      displayName: 'Gemini 4 Hydrogen',
+      contextTokens: 1048576,
+      maxOutputTokens: 65536,
+      tools: true,
+      vision: true,
+      reasoning: 'reasoning',
+      tier: 'standard',
+    ),
     ModelInfo(
       id: 'gemini-3.8-flash',
       displayName: 'Gemini 3.8 Flash',
@@ -172,35 +205,16 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       reasoning: 'reasoning',
       tier: 'standard',
     ),
-    // Checked 2026-11-15:
-    // https://aistudio.google.com/docs/models/gemini-3.5-flash-lite
-    // Text output. Input limit 1,048,576. Output limit 65,536. Tools, vision,
-    // and thinking.
     ModelInfo(
-      id: 'gemini-3.5-flash-lite',
-      displayName: 'Gemini 3.5 Flash-Lite',
-      contextTokens: 1048576,
-      maxOutputTokens: 65536,
-      tools: true,
-      vision: true,
-      reasoning: 'reasoning',
-      tier: 'light',
-    ),
-    ModelInfo(
-      id: 'claude-sonnet-4.6-thinking',
-      displayName: 'Claude Sonnet 4.6 (thinking)',
-      reasoning: 'reasoning',
-      tier: 'standard',
-    ),
-    ModelInfo(
-      id: 'claude-opus-4.6-thinking',
-      displayName: 'Claude Opus 4.6 (thinking)',
+      id: 'claude-opus-5-5',
+      displayName: 'Claude Opus 5.5 (thinking)',
       reasoning: 'reasoning',
       tier: 'flagship',
     ),
     ModelInfo(
-      id: 'gpt-oss-120b',
-      displayName: 'GPT-OSS-120B',
+      id: 'claude-sonnet-5-5',
+      displayName: 'Claude Sonnet 5.5 (thinking)',
+      reasoning: 'reasoning',
       tier: 'standard',
     ),
   ],

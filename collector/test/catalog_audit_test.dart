@@ -281,6 +281,57 @@ void main() {
     expect(report.providers.single.endpointModelIds, ['claude-a', 'claude-b']);
   });
 
+  test('Antigravity Gemini API audit ignores Claude catalog ids', () async {
+    final source = defaultModelListSources()
+        .firstWhere((item) => item.provider == 'antigravity');
+    final client = MockClient((request) async {
+      expect(request.url.host, 'generativelanguage.googleapis.com');
+      return http.Response(
+        jsonEncode({
+          'models': [
+            {
+              'name': 'models/gemini-4-hydrogen',
+              'supportedGenerationMethods': ['generateContent'],
+            },
+          ],
+        }),
+        200,
+      );
+    });
+
+    final report = await auditModelCatalog(
+      now: _now,
+      catalog: const {
+        'antigravity': [
+          ModelInfo(id: 'gemini-4-hydrogen'),
+          ModelInfo(id: 'gemini-4-argon'),
+          ModelInfo(id: 'claude-opus-5-5'),
+        ],
+      },
+      sources: [source],
+      environment: const {'GEMINI_API_KEY': 'token'},
+      client: client,
+    );
+
+    final audit = report.providers.single;
+    expect(audit.ok, isTrue);
+    expect(audit.catalogModelIds, ['gemini-4-argon', 'gemini-4-hydrogen']);
+    expect(audit.catalogOnly, ['gemini-4-argon']);
+    expect(audit.missingFromCatalog, isEmpty);
+    expect(audit.catalogModelIds, isNot(contains('claude-opus-5-5')));
+    expect(
+      audit.coverageNote,
+      'The Antigravity check covers only Gemini ids that also exist on '
+      'the Gemini API. It does not prove the Antigravity model page.',
+    );
+    expect(audit.toJson()['coverage_note'], audit.coverageNote);
+    final detailed = formatCatalogAuditReport(report);
+    expect(detailed, contains(audit.coverageNote));
+    expect(detailed, isNot(contains('claude-opus-5-5')));
+    final summary = formatCatalogAuditReport(report, includeModelIds: false);
+    expect(summary, contains('only Gemini ids that also exist'));
+  });
+
   test('parses Gemini model names and filters non-generation models', () {
     final ids = parseModelList(
       {
@@ -366,6 +417,18 @@ void main() {
     expect(
       sources.map((source) => source.publishesShutdownDates),
       [true, false, false, false],
+    );
+    expect(
+      sources
+          .singleWhere((source) => source.provider == 'antigravity')
+          .coverageNote,
+      contains('only Gemini ids that also exist on the Gemini API'),
+    );
+    expect(
+      sources
+          .where((source) => source.provider != 'antigravity')
+          .map((source) => source.coverageNote),
+      everyElement(isNull),
     );
     final grok = sources.firstWhere((s) => s.provider == 'grok').includeModel;
     expect(grok('grok-4.3', null), isTrue);

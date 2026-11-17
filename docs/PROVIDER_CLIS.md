@@ -136,10 +136,15 @@ account id enters quota output.
   the TUI, the Models & Quota panel shows per-model-group Weekly and Five Hour
   limits. Antigravity replaced the consumer Gemini CLI on 2026-06-18.
 - Quota shape: two shared groups, each with Weekly and Five Hour limits: one
-  for Gemini models and one for Claude/GPT models. Gemini 3.7 Flash, 3.6 Flash,
-  3.5 Flash, and 3.1 Pro share the Gemini pool. Claude Sonnet 4.6, Claude Opus
-  4.6, and GPT-OSS-120B use the separate non-Gemini pool. Provider model rows
-  are gates onto those groups, not balances that can be added together.
+  for Gemini models and one for Claude/GPT models. Checked 2026-11-17 at
+  <https://antigravity.google/docs/models/>: Gemini 4 Carbon, Argon, and
+  Hydrogen, Gemini 3.8 Flash, and Claude Sonnet/Opus 5.5 (thinking) are the
+  current non-Enterprise rows. Claude Sonnet 4.6 (thinking), Claude Opus 4.6
+  (thinking), and GPT-OSS-120b are marked removed on 2026-11-18. Provider
+  model rows are gates onto those groups, not balances that can be added
+  together. quotabot catalog ids are the stable prefixes of the account's
+  `agy models` identifiers. Claude rows omit context length because
+  Antigravity does not publish it.
 - quotabot reads: the daily Cloud Code API that `agy` uses (`loadCodeAssist`,
   `onboardUser`, `retrieveUserQuotaSummary`, `fetchAvailableModels`). The
   grouped summary is the remaining weekly and five-hour balances for the Gemini

@@ -1047,8 +1047,121 @@ void main() {
     expect(terra.tier, 'standard');
   });
 
+  test('retired Antigravity ids are not summary-pool routes', () {
+    final antigravity = _cloud(
+      antigravityProviderId,
+      100,
+      resetsAt: _now + 5 * 86400,
+      modelQuotas: [
+        ModelQuota(
+          model: 'Gemini Models',
+          usedPercent: 100,
+          resetsAt: _now + 5 * 86400,
+          windowLabel: 'weekly',
+        ),
+        ModelQuota(
+          model: 'Claude and GPT models',
+          usedPercent: 0,
+          resetsAt: _now + 6 * 86400,
+          windowLabel: 'weekly',
+        ),
+      ],
+    );
+    final registry = buildModelRegistry(
+      [antigravity],
+      _now,
+      catalog: kModelCatalog,
+    );
+    final ids = registry.map((entry) => entry.model.id).toSet();
+    expect(ids, isNot(contains('claude-sonnet-4.6-thinking')));
+    expect(ids, isNot(contains('claude-opus-4.6-thinking')));
+    expect(ids, isNot(contains('gpt-oss-120b')));
+    expect(ids, isNot(contains('gemini-3.5-flash-lite')));
+    expect(
+      ids,
+      containsAll([
+        'gemini-4-hydrogen',
+        'gemini-4-argon',
+        'claude-opus-5-5',
+        'claude-sonnet-5-5',
+      ]),
+    );
+
+    final suggestion = suggestModel(
+      [antigravity],
+      _now,
+      catalog: kModelCatalog,
+    );
+    final available = suggestion.ranked
+        .where((entry) => entry.available)
+        .map((entry) => entry.model.id);
+    expect(available, containsAll(['claude-opus-5-5', 'claude-sonnet-5-5']));
+    expect(available, isNot(contains('claude-sonnet-4.6-thinking')));
+    expect(available, isNot(contains('claude-opus-4.6-thinking')));
+    expect(available, isNot(contains('gpt-oss-120b')));
+    expect(suggestion.recommended?.model.id, 'claude-sonnet-5-5');
+  });
+
+  test('Gemini 4 Hydrogen and Argon per-model quotas can be suggested', () {
+    ProviderQuota quota(List<ModelQuota> rows) => _cloud(
+          antigravityProviderId,
+          80,
+          resetsAt: _now + 5 * 86400,
+          modelQuotas: rows,
+        );
+    const hydrogen = ModelQuota(
+      model: 'gemini-4-hydrogen-xhigh',
+      usedPercent: 25,
+      resetsAt: _now + 3600,
+      windowLabel: 'weekly',
+    );
+    const argon = ModelQuota(
+      model: 'gemini-4-argon-high',
+      usedPercent: 10,
+      resetsAt: _now + 3600,
+      windowLabel: 'weekly',
+    );
+
+    final both = suggestModel(
+      [
+        quota(const [hydrogen, argon])
+      ],
+      _now,
+      catalog: kModelCatalog,
+    );
+    final hydrogenEntry = both.ranked.singleWhere(
+      (entry) => entry.model.id == 'gemini-4-hydrogen',
+    );
+    final argonEntry = both.ranked.singleWhere(
+      (entry) => entry.model.id == 'gemini-4-argon',
+    );
+    expect(hydrogenEntry.available, isTrue);
+    expect(hydrogenEntry.headroomPercent, 75);
+    expect(hydrogenEntry.model.contextTokens, 1048576);
+    expect(hydrogenEntry.model.maxOutputTokens, 65536);
+    expect(argonEntry.available, isTrue);
+    expect(argonEntry.headroomPercent, 90);
+    expect(argonEntry.model.contextTokens, 1048576);
+    expect(both.recommended?.model.id, 'gemini-4-hydrogen');
+
+    final onlyArgon = suggestModel(
+      [
+        quota(const [argon])
+      ],
+      _now,
+      catalog: kModelCatalog,
+    );
+    expect(onlyArgon.recommended?.model.id, 'gemini-4-argon');
+    expect(
+      onlyArgon.ranked
+          .singleWhere((entry) => entry.model.id == 'gemini-4-hydrogen')
+          .available,
+      isFalse,
+    );
+  });
+
   test('production catalog matches the dated supported provider lineups', () {
-    expect(kCatalogUpdated, '2026-11-15');
+    expect(kCatalogUpdated, '2026-11-17');
     expect(
       kModelCatalog[claudeProviderId]!.map((model) => model.id),
       [
@@ -1075,13 +1188,23 @@ void main() {
       kModelCatalog[antigravityProviderId]!.map((model) => model.id),
       [
         'gemini-4-carbon',
+        'gemini-4-argon',
+        'gemini-4-hydrogen',
         'gemini-3.8-flash',
-        'gemini-3.5-flash-lite',
-        'claude-sonnet-4.6-thinking',
-        'claude-opus-4.6-thinking',
-        'gpt-oss-120b',
+        'claude-opus-5-5',
+        'claude-sonnet-5-5',
       ],
     );
+    final opus = kModelCatalog[antigravityProviderId]!
+        .firstWhere((model) => model.id == 'claude-opus-5-5');
+    final sonnet = kModelCatalog[antigravityProviderId]!
+        .firstWhere((model) => model.id == 'claude-sonnet-5-5');
+    expect(opus.displayName, 'Claude Opus 5.5 (thinking)');
+    expect(sonnet.displayName, 'Claude Sonnet 5.5 (thinking)');
+    expect(opus.contextTokens, isNull);
+    expect(sonnet.contextTokens, isNull);
+    expect(opus.maxOutputTokens, isNull);
+    expect(sonnet.maxOutputTokens, isNull);
   });
 
   test('Claude Fable uses the tighter shared or scoped quota gate', () {

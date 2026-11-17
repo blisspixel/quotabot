@@ -470,7 +470,8 @@ State lives in the Antigravity globalStorage SQLite database at
   shows one `5h` and one `weekly` window: the most-constrained active bucket
   of each kind. That card is the tightest pool, not a single allowance. Model routing
   still follows the named group: `Gemini Models` covers Gemini catalog ids,
-  and `Claude and GPT models` covers Claude and GPT-OSS catalog ids. A spent
+  and `Claude and GPT models` covers catalog ids whose keys start with
+  `claude` or `gptoss`. A spent
   Gemini weekly window does not spend the Claude/GPT pool. When two to eight
   current named pools disagree, doctor, top, and the desktop card name that
   split. The suggestion names the open pool and any spent pools, and does not
@@ -939,7 +940,13 @@ catalog against provider-owned model-list endpoints:
 - Grok/xAI: `GET https://api.x.ai/v1/models` with `XAI_API_KEY`.
 - Antigravity/Gemini: `GET
   https://generativelanguage.googleapis.com/v1beta/models` with
-  `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+  `GEMINI_API_KEY` or `GOOGLE_API_KEY`. This check covers only Gemini
+  ids that also exist on the Gemini API. It does not prove the
+  Antigravity model page. Antigravity catalog rows come from
+  <https://antigravity.google/docs/models/> and the account's `agy models`
+  identifiers. Checked 2026-11-17. Claude and GPT-OSS ids are omitted
+  from this diff, so a clean Antigravity row is not an Antigravity
+  model-page check.
 
 The audit follows provider pagination tokens and reports model-id drift:
 `missing_from_catalog` and `catalog_only`. The OpenAI list also publishes an

@@ -722,7 +722,10 @@ committed cloud catalog honest without adding runtime network calls: the standal
 `bin/catalog_audit.dart` tool reads provider-owned model-list endpoints for
 OpenAI/Codex, Anthropic/Claude, xAI/Grok, and Gemini/Antigravity, follows
 pagination tokens, filters obvious non-language modalities, redacts query-string
-secrets, and emits a diff. It does not rewrite the catalog automatically because
+secrets, and emits a diff. The Antigravity check covers only Gemini ids that
+also exist on the Gemini API. It does not prove the Antigravity model page.
+Antigravity catalog rows come from that page and the account's `agy models`
+identifiers. The audit does not rewrite the catalog automatically because
 capability fields such as context, tools, vision, reasoning, and tier remain
 curated routing metadata.
 

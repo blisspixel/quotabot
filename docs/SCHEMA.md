@@ -585,7 +585,10 @@ array of `{provider, model, included_until}` for any curated `quotaIncludedUntil
 window that has already passed). Each provider row carries `provider`,
 `endpoint`, `auth_env`, `ok`, `skipped`, optional `error`, `catalog_models`,
 `endpoint_models`, `missing_from_catalog`, `catalog_only`, and
-`shutdown_dates_checked`. When that source published dates and at least one
+`shutdown_dates_checked`. When the source names a coverage limit, the row
+also carries `coverage_note`. The Antigravity source says its check covers
+only Gemini ids that also exist on the Gemini API and does not prove the
+Antigravity model page. When that source published dates and at least one
 catalog model has a validated `YYYY-MM-DD` shutdown date, the row also carries
 `shutdowns`: `{model, shutdown_date, days_remaining, actionable}`. An empty
 list omits the key. Only the Codex/OpenAI source publishes shutdown dates.
