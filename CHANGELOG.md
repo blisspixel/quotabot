@@ -4,6 +4,10 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- LM Studio decision models stay listed and are excluded from generation
+  routes. The published `GET /api/v1/models` schema, checked 2026-11-17,
+  adds `type: "decision"` and still has no producer-device field.
+  `capabilities.reasoning` stays undeclared.
 - Ollama list responses leave capability fields undeclared. The published
   `GET /api/tags` model summary, checked 2026-11-17, omits capabilities.
   A daemon array cannot replace `POST /api/show`, whose published schema

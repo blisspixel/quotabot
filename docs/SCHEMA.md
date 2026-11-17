@@ -402,8 +402,13 @@ declared as an embedding model, which stays listed but is never a routing
 candidate, while an absent value leaves the model routable. The optional boolean
 `text_generation` declares text-deployment eligibility: `false` keeps a non-text
 deployment inspectable but excludes generation suggestions and local provider
-fallback. `true` and absence do not establish execution location, account access,
-or quality; absence preserves older snapshot compatibility. A model gated by drifted last-trusted quota also
+fallback. An LM Studio model whose published type is `decision` is that
+explicit false. Its list `capabilities.reasoning` object stays undeclared:
+rechecked 2026-11-17, that list has no producer-device field. `true` and
+absence do not establish execution location, account access, or quality;
+absence preserves older snapshot compatibility. Ollama capability fields come
+from `POST /api/show`. The published `GET /api/tags` summary does not
+establish them. A model gated by drifted last-trusted quota also
 carries `drift_reason`
 and `drift_observed_at` and is unavailable. When a provider exposes per-model
 or provider-family quotas, those

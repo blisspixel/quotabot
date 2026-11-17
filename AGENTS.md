@@ -165,6 +165,10 @@ for that surface.
     it excludes self-reported manual quota and entries catalogued as paid API.
     Explicit `text_generation: false` identifies a non-text deployment; it stays
     inspectable but never qualifies generation advice or local provider fallback.
+    An LM Studio model whose published type is `decision` uses that flag.
+    `capabilities.reasoning` on its model list stays undeclared. Ollama
+    capability fields come from `POST /api/show`; the published `GET /api/tags`
+    summary does not establish them.
     A true or missing value does not prove execution location or account access.
     Version 0.11.8 adds `loaded_state_known` to local-runtime entries.
     Version 0.11.7 does not emit this flag. In 0.11.8, eligible models
