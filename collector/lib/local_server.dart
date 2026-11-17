@@ -70,6 +70,9 @@ Future<HttpServer> startLocalQuotabotServer({
   Duration requestBodyTimeout = defaultLocalHttpRequestBodyTimeout,
   int Function() now = nowEpoch,
   void Function(String message)? log,
+
+  /// Catalog paired with [snapshotProvider]. Defaults to the committed catalog.
+  Map<String, List<ModelInfo>> catalog = kModelCatalog,
 }) async {
   if (maxConcurrentRequests < 1) {
     throw ArgumentError.value(
@@ -659,7 +662,7 @@ Future<HttpServer> startLocalQuotabotServer({
     final admissionGates = providerRouteCapabilityGates(
       candidates,
       current,
-      catalog: kModelCatalog,
+      catalog: catalog,
     ).requestAdmissionByQuotaKey;
     final pipePenalties = routeSummaryProvider().pipePenaltyByProvider(
       now: current,
@@ -674,7 +677,7 @@ Future<HttpServer> startLocalQuotabotServer({
             burnStatsByProvider: burnStats,
             activeLeases: activeLeases,
             pipePenaltyByProvider: pipePenalties,
-            catalog: kModelCatalog,
+            catalog: catalog,
           ),
         );
 
@@ -1034,7 +1037,7 @@ Future<HttpServer> startLocalQuotabotServer({
           pipePenaltyByProvider: routeSummaryProvider().pipePenaltyByProvider(
             now: current,
           ),
-          catalog: kModelCatalog,
+          catalog: catalog,
           routeRequirements: routeRequirements.requirements,
         ),
       ).route.toJson(),

@@ -2080,6 +2080,25 @@ void main() {
   });
 
   test('local /suggest applies provider-route task query context', () async {
+    // The production Antigravity catalog no longer has a light row. This
+    // fixture keeps one so the default standard floor can block it while
+    // task=simple still admits it.
+    const catalog = {
+      'antigravity': [
+        ModelInfo(
+          id: 'gemini-3.8-flash',
+          displayName: 'Gemini 3.8 Flash',
+          reasoning: 'reasoning',
+          tier: 'standard',
+        ),
+        ModelInfo(
+          id: 'gemini-3.5-flash-lite',
+          displayName: 'Gemini 3.5 Flash-Lite',
+          reasoning: 'reasoning',
+          tier: 'light',
+        ),
+      ],
+    };
     final server = await startLocalQuotabotServer(
       port: 0,
       snapshotProvider: () async => [
@@ -2088,12 +2107,12 @@ void main() {
           10,
           modelQuotas: const [
             ModelQuota(model: 'gemini', usedPercent: 100),
-            // Light tier stays under the default standard reasoning floor.
             ModelQuota(model: 'Gemini 3.5 Flash-Lite', usedPercent: 0),
           ],
         ),
       ],
       now: () => _now,
+      catalog: catalog,
     );
     try {
       final defaultRoute = await _getJson(
