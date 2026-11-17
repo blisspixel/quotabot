@@ -39,6 +39,12 @@ admission denials, and use only the shipped policies `balanced`, `local_first`,
 and opt-in `quota_stretch`. Credit-backed balances still require typed-pool and
 explicit-spend evidence. Fresh quota publishes before advisory analytics.
 
+Version 0.11.20 refreshes the Antigravity catalog for the November 18
+removals, pins hosted Ubuntu jobs to 26.04, and admits the Lemonade
+guest-container recipes rocmfpx, halogen, and gufo. Catalog ids are the
+stable prefixes of the account's agy models list. The Gemini API audit
+covers only Gemini ids. Claude rows omit context length. Container
+format is not on-device proof.
 Version 0.11.19 refreshes the live catalog, raises the patched dependency
 pins, and defaults source CI to Python 3.15.2 with Node 26.13.1. Workflow
 runs are not cancelled. Installer tests compile a sleeper, and the Linux
