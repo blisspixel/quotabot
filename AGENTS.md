@@ -181,7 +181,10 @@ for that surface.
     local models when equivalent candidates are available. Cloud routes exposed
     through Ollama (`-cloud`) or Lemonade (`recipe: "cloud"`) carry
     `cloud_offloaded: true` and are excluded from local and free budgets, so they
-    are never evidence of local-only or free execution.
+    are never evidence of local-only or free execution. Lemonade `rocmfpx`,
+    `halogen`, and `gufo` are local container leaves. A complete composite
+    that uses them stays eligible with `execution_location: unknown`.
+    Container format is not an on-device claim.
     Ollama upstream aliases carry `upstream_routing: "declared"` or
     `"unresolved"`, independently of public-cloud or paid classification.
     Both states exclude local/quota budgets, local readiness, host fit, and
@@ -221,7 +224,9 @@ for that surface.
   default to `--budget=any`; use `--budget=any` explicitly on a suggestion to admit
   credit-backed or paid catalog entries. `--budget=local` and `--budget=quota`
   both exclude cloud-offloaded models exposed through Ollama (`-cloud`) or
-  Lemonade (`recipe: "cloud"`), which run remotely rather than on-device. Add
+  Lemonade (`recipe: "cloud"`), which run remotely rather than on-device.
+  Lemonade `rocmfpx`, `halogen`, and `gufo` stay in those budgets with
+  `execution_location: unknown`. Add
   `--exclude=A,B` to quota-reading commands after `--profile` when one request
   should avoid specific providers. Add `--use-expiring-quota` to a profiled
   `suggest` call only when you want soon-resetting included quota to outrank

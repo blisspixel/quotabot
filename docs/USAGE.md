@@ -922,7 +922,9 @@ tag suffix, such as `qwen3-coder:480b-cloud`. Lemonade can expose configured
 cloud-provider routes with `recipe: "cloud"`. quotabot flags both forms
 `cloud_offloaded` and excludes them from `--budget=local` and free budgets. They
 stay listed only under `--budget=any` and never prove local-only or free
-execution.
+execution. Lemonade `rocmfpx`, `halogen`, and `gufo` are local container
+recipes. A complete composite that uses them stays eligible, with
+`execution_location: unknown`. That container format is not an on-device claim.
 An Ollama alias can also declare an upstream without a `-cloud` suffix.
 `upstream_routing: "declared"` identifies that configuration without claiming
 the destination is public cloud, paid, or free. It is inspectable under `any`

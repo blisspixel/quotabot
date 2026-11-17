@@ -698,7 +698,11 @@ tag suffix. Lemonade exposes configured cloud routes with `recipe: "cloud"` and
 `cloud_provider`. quotabot preserves either as `cloud_offloaded` and excludes it
 from `budget=local` and free budgets, so a remote model reached through a local
 daemon is never counted as on-device or free. Detection uses each runtime's
-documented execution-location evidence.
+documented execution-location evidence. Rechecked 2026-11-17 at Lemonade
+v2026.46.2, `rocmfpx`, `halogen`, and `gufo` are guest-container leaves with
+local GPU devices. A complete composite that uses them keeps legacy
+eligibility and `execution_location: unknown`. Container format is not a
+cloud veto and is not on-device proof.
 Concrete-model suggestions can opt into `use_expiring_quota`, which computes a
 pure `ExpiringQuotaSignal` from existing headroom, reset, and local burn
 statistics. The signal is intentionally narrow: measured quota-backed providers

@@ -74,6 +74,35 @@ void main() {
     expect(suggestModel([quota], _now).ranked, hasLength(1));
   });
 
+  test('systemone stays informational and classification stays non-text', () {
+    final decision = _quota([
+      {
+        'id': 'decision',
+        'recipe': 'llamacpp',
+        'downloaded': true,
+        'labels': ['classification', 'systemone', 'reasoning'],
+      },
+    ]);
+    expect(decision.models.single.textGeneration, isFalse);
+    expect(decision.models.single.reasoning, isNull);
+    expect(decision.models.single.executionLocation, ExecutionLocation.unknown);
+    expect(isLocalRuntimeAvailableAt(decision, _now), isFalse);
+    expect(suggestModel([decision], _now).recommended, isNull);
+
+    final marker = _quota([
+      {
+        'id': 'marker',
+        'recipe': 'llamacpp',
+        'downloaded': true,
+        'labels': ['systemone', 'reasoning'],
+      },
+    ]);
+    expect(marker.models.single.textGeneration, isNull);
+    expect(marker.models.single.reasoning, isNull);
+    expect(marker.models.single.executionLocation, ExecutionLocation.unknown);
+    expect(isLocalRuntimeAvailableAt(marker, _now), isTrue);
+  });
+
   test('legacy missing or characteristic-only deployment labels remain unknown',
       () {
     for (final row in <Map<String, Object?>>[

@@ -899,12 +899,20 @@ Current compatibility limits:
 - Lemonade can expose configured cloud-provider models through its loopback
   daemon. `recipe: "cloud"` or a non-empty `cloud_provider` is preserved as
   `cloud_offloaded`, with the same local and free budget exclusions as Ollama.
-  Explicitly non-downloaded local catalog rows are omitted. Current deployment
-  labels are validated against the [stable API contract](https://github.com/lemonade-sdk/lemonade/blob/v2026.39.1/docs/api/openai.md#model-labels),
-  accessed 2026-09-30. Non-text models remain inspectable but cannot satisfy
+  Explicitly non-downloaded local catalog rows are omitted. Deployment
+  labels were rechecked on 2026-11-17 against the
+  [v2026.46.2 model-label contract](https://github.com/lemonade-sdk/lemonade/blob/v2026.46.2/docs/api/openai.md#model-labels).
+  Non-text models remain inspectable but cannot satisfy
   model suggestions or provider fallback. Missing old declarations remain
-  unknown. Neither text eligibility nor a missing cloud field proves composite
-  or on-device execution scope.
+  unknown. The [v2026.46.2 recipe registry](https://github.com/lemonade-sdk/lemonade/blob/v2026.46.2/CMakeLists.txt)
+  adds `rocmfpx`, `halogen`, and `gufo` as guest containers with local GPU
+  devices and chat-only modes. A complete non-cloud composite that uses them
+  keeps legacy eligibility. Guest container format, local GPU device nodes,
+  and the informational `systemone` and `reasoning` labels do not prove
+  on-device execution. `systemone` is not a deployment mode.
+  `classification` remains non-text. The health contract citation stays at
+  v2026.39.1. Neither text eligibility nor a missing cloud field proves
+  composite or on-device execution scope.
 - LM Studio's native `GET /api/v1/models` (0.4.0+) is now the preferred read,
   with `/api/v0/models` and the OpenAI-compatible `/v1/models` as fallbacks. The
   v1 shape is pinned by a fixture captured from a real 0.4.0+ server. Both

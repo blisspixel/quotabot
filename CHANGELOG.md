@@ -4,6 +4,15 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- Lemonade composite leaves admit `rocmfpx`, `halogen`, and `gufo`.
+  Checked 2026-11-17 at tag v2026.46.2: `LEMON_BACKENDS` adds those
+  recipes, and each descriptor is a guest container with local GPU
+  devices and chat-only modes. They are not `recipe: "cloud"`. A
+  complete tree keeps legacy eligibility and `execution_location:
+  unknown`. Container format is not on-device proof. `cloud` stays
+  outside the leaf list. The `systemone` label stays informational.
+  `classification` still denies text generation. The `reasoning` label
+  stays undeclared.
 - Hosted Ubuntu jobs select `ubuntu-26.04`, and the Linux arm64 release
   cells select `ubuntu-26.04-arm`. Checked 2026-11-17: both images are
   generally available, and `ubuntu-latest` finishes moving to 26.04 on
