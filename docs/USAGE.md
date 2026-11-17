@@ -853,15 +853,20 @@ models the runtime says can call tools. Ollama models with an explicit
 `thinking` declaration can satisfy `--require-reasoning --budget=local` or
 `--task=reasoning --budget=local`. This is declared capability, not a model
 quality score; it cannot override context, embedding, freshness, or spend gates.
-LM Studio reasoning is not yet admitted because LM Link execution location
-cannot be established from its current model-list metadata.
+Ollama reads that `thinking` declaration from `POST /api/show`. Its published
+`GET /api/tags` summary, rechecked 2026-11-17, does not establish capabilities.
+LM Studio reasoning is not admitted. Rechecked the same day, its model list
+still has no producer-device field, so `capabilities.reasoning` does not
+satisfy `--require-reasoning`. A model whose `type` is `decision` stays listed
+and is excluded from generation routes.
 A capability the runtime never declared
 is never assumed, so a runtime that publishes only model names has nothing a
 capability filter can admit. A tier floor still excludes local models, whose
 tier is unknown, so `--task=hard` continues to prefer a cloud model. A model the
 runtime declares as an embedding model is listed with an `embedding` label but
-is never suggested as a route, since it cannot serve a generation request; a
-runtime that states no kind keeps its models routable. The same filters are arguments on the MCP `list_models`
+is never suggested as a route, since it cannot serve a generation request. A
+stated decision type is a non-text deployment. A runtime that states no kind
+keeps its models routable. The same filters are arguments on the MCP `list_models`
 tool. Tiers are the providers' own product tiers, not a quotabot quality ranking.
 `quotabot models` and MCP `list_models` default to `budget=any` for inspection.
 Concrete CLI suggestions and MCP `suggest_model` default to `budget=quota`, which

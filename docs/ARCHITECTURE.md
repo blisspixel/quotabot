@@ -683,13 +683,16 @@ Recommendations also echo available local size, context, and fit evidence so
 callers can see why a model is loaded versus merely installed without forcing a
 model call.
 Ollama's explicit `thinking` capability propagates through the existing model
-reasoning field. Missing or malformed declarations cannot satisfy a reasoning
-requirement, and capability support cannot override cloud, embedding, stale,
-context, or spend exclusions. LM Studio reasoning remains unadmitted while its
-LM Link execution location cannot be established from the model-list contract.
-Rechecked on 2026-10-22, that list still has no producer-device field.
-Normalized local models publish `execution_location` as `unknown` or `remote`
-only.
+reasoning field. That declaration comes from `POST /api/show`. The published
+`GET /api/tags` summary, rechecked 2026-11-17, omits capabilities, and a
+daemon-supplied list array stays undeclared. Missing or malformed declarations
+cannot satisfy a reasoning requirement, and capability support cannot override
+cloud, embedding, stale, context, or spend exclusions. LM Studio reasoning
+remains unadmitted. Rechecked 2026-11-17, `GET /api/v1/models` still has no
+producer-device field, and its `capabilities.reasoning` object is not a
+location. A published `type` of `decision` stays listed with
+`text_generation: false` and cannot be a generation route. Normalized local
+models publish `execution_location` as `unknown` or `remote` only.
 Ollama exposes cloud-offloaded models through the local daemon with a `-cloud`
 tag suffix. Lemonade exposes configured cloud routes with `recipe: "cloud"` and
 `cloud_provider`. quotabot preserves either as `cloud_offloaded` and excludes it
