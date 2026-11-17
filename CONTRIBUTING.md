@@ -22,7 +22,7 @@ For security issues, do not open a public issue; see [SECURITY.md](SECURITY.md).
 
 ## Development setup
 
-Use Flutter 3.44.6 with Dart 3.12.2, matching CI and release builds. Python
+Use Flutter 3.50.0 with Dart 3.14.0, matching CI and release builds. Python
 3.15.2 is the default. Python 3.11 through 3.15.2 are tested for LiteLLM.
 Confirm that
 `flutter`, `dart`, and a supported `python` resolve in the current shell before
@@ -43,7 +43,7 @@ pwsh tools/check.ps1
 On macOS and Linux, `tools/setup.sh` and the desktop packagers remap a Flutter
 or Dart SDK whose path contains spaces before native-asset commands run.
 
-The Windows gate checks Flutter 3.44.6, Dart 3.12.2, and Python 3.15 before
+The Windows gate checks Flutter 3.50.0, Dart 3.14.0, and Python 3.15 before
 running checks, and installs the hash-locked development tools into the selected
 Python environment. A virtual environment is recommended.
 

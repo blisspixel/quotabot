@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot/desktop_analytics.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
@@ -14,6 +14,7 @@ import 'package:quotabot_collector/profiles.dart';
 import 'package:quotabot_collector/webhook.dart';
 
 import 'support/settings_navigation.dart';
+import 'support/tooltip_finder.dart';
 
 const _account = 'codex-refresh-fixture';
 
@@ -123,7 +124,7 @@ class _NotificationProbe implements DesktopNotificationClient {
 }
 
 Future<void> _toggleNotifications(WidgetTester tester) async {
-  await tester.tap(find.byTooltip('Settings'));
+  await tester.tap(find.byMaterialTooltip('Settings'));
   await tester.pumpAndSettle();
   await selectSettingsCategory(tester, SettingsCategory.alerts);
   final toggle = find.byKey(const ValueKey('settings-notifications'));
@@ -194,7 +195,7 @@ void main() {
       expect(_cardText('captured 5m ago'), findsOneWidget);
       expect(_cardText('live | scope: whole account'), findsOneWidget);
 
-      final refresh = find.byTooltip('Refresh now');
+      final refresh = find.byMaterialTooltip('Refresh now');
       // Two taps before the next frame exercise coalescing as well as the
       // disabled button shown after the frame rebuilds.
       await tester.tap(refresh);
@@ -203,7 +204,7 @@ void main() {
       expect(collections, 2);
       expect(activeCollections, 1);
       expect(peakCollections, 1);
-      final refreshing = find.byTooltip('Refreshing quotas');
+      final refreshing = find.byMaterialTooltip('Refreshing quotas');
       expect(refreshing, findsOneWidget);
       final disabled = tester.widget<InkWell>(
         find.descendant(of: refreshing, matching: find.byType(InkWell)),
@@ -228,10 +229,10 @@ void main() {
       expect(_cardText('captured 5m ago'), findsNothing);
       expect(_cardText('live | scope: whole account'), findsOneWidget);
       expect(find.textContaining('Refresh failed'), findsNothing);
-      expect(find.byTooltip('Refreshing quotas'), findsNothing);
+      expect(find.byMaterialTooltip('Refreshing quotas'), findsNothing);
       final enabled = tester.widget<InkWell>(
         find.descendant(
-          of: find.byTooltip('Refresh now'),
+          of: find.byMaterialTooltip('Refresh now'),
           matching: find.byType(InkWell),
         ),
       );
@@ -277,7 +278,7 @@ void main() {
       expect(_cardText('95% free'), findsOneWidget);
       expect(_cardText('70% free'), findsOneWidget);
 
-      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.tap(find.byMaterialTooltip('Refresh now'));
       await tester.pumpAndSettle();
 
       expect(collections, 2);
@@ -289,7 +290,7 @@ void main() {
       expect(card.quota.account, _account);
       expect(card.quota.asOf, refreshed.asOf);
       expect(card.quota.windows, hasLength(2));
-      expect(find.byTooltip('Refresh now'), findsOneWidget);
+      expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -379,14 +380,14 @@ void main() {
     expect(_cardText('95% free'), findsOneWidget);
     expect(find.text('Personal'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Refresh now'));
+    await tester.tap(find.byMaterialTooltip('Refresh now'));
     await tester.pumpAndSettle();
     expect(collections, 2);
     expect(analyticsReads, 2);
-    expect(find.byTooltip('Refresh now'), findsOneWidget);
+    expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
     expect(_cardText('90% free'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('settings-profile')));
     await tester.pumpAndSettle();
@@ -410,7 +411,7 @@ void main() {
     expect(_cardText('75% free'), findsNothing);
     expect(_cardText('90% free'), findsNothing);
     expect(saved?.activeProfile, 'work');
-    expect(find.byTooltip('Refresh now'), findsOneWidget);
+    expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
     expect(collections, 2);
     expect(analyticsReads, 2);
     expect(tester.takeException(), isNull);
@@ -442,13 +443,13 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(_cardText('95% free'), findsOneWidget);
-      expect(find.byTooltip('Refresh now'), findsOneWidget);
+      expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
       expect(find.text('Recent usage checks pending'), findsOneWidget);
-      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.tap(find.byMaterialTooltip('Refresh now'));
       await tester.pumpAndSettle();
       expect(_cardText('70% free'), findsOneWidget);
-      expect(find.byTooltip('Refresh now'), findsOneWidget);
-      await tester.tap(find.byTooltip('Refresh now'));
+      expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
+      await tester.tap(find.byMaterialTooltip('Refresh now'));
       await tester.pumpAndSettle();
       expect(_cardText('60% free'), findsOneWidget);
       expect(jobs, hasLength(1));
@@ -478,7 +479,7 @@ void main() {
       expect(tile.insights, same(latest));
       expect(_cardText('60% free'), findsOneWidget);
       expect(find.text('Recent usage checks pending'), findsNothing);
-      expect(find.byTooltip('Refresh now'), findsOneWidget);
+      expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -519,7 +520,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      await tester.tap(find.byTooltip('Quota analytics'));
+      await tester.tap(find.byMaterialTooltip('Quota analytics'));
       await tester.pumpAndSettle();
       expect(
         find.textContaining('Loading history and recent usage.'),
@@ -533,14 +534,14 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('synthetic private'), findsNothing);
-      await tester.tap(find.byTooltip('Back to quotas'));
+      await tester.tap(find.byMaterialTooltip('Back to quotas'));
       await tester.pumpAndSettle();
       final tile = tester.widget<ProviderTile>(find.byType(ProviderTile));
       expect(tile.quota, same(quota));
       expect(tile.quota.stale, isFalse);
       expect(find.text('Recent usage checks unavailable'), findsOneWidget);
       expect(find.textContaining('Refresh failed'), findsNothing);
-      expect(find.byTooltip('Refresh now'), findsOneWidget);
+      expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
       expect(
         find.byWidgetPredicate(
           (widget) =>
@@ -570,7 +571,7 @@ void main() {
         }, analyticsJobStarter: (_) => job),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.tap(find.byMaterialTooltip('Refresh now'));
       await tester.pumpAndSettle();
       expect(job.cancellations, 1);
       expect(find.textContaining('Next: Codex'), findsNothing);
@@ -588,7 +589,7 @@ void main() {
       expect(_cardText('70% free, last known'), findsOneWidget);
       expect(find.text('Recent usage checks unavailable'), findsOneWidget);
       expect(find.textContaining('Next: Codex'), findsNothing);
-      expect(find.byTooltip('Refresh now'), findsOneWidget);
+      expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -661,7 +662,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Recent usage checks pending'), findsOneWidget);
-      expect(find.byTooltip('Refresh now'), findsOneWidget);
+      expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
       expect(notifications.lowQuotaBodies, ['Codex weekly at 0% free']);
       expect(posts, hasLength(1));
       expect(jobs.single.done.isCompleted, isFalse);
@@ -670,11 +671,11 @@ void main() {
       expect(find.text('Recent usage checks unavailable'), findsOneWidget);
       expect(jobs.single.cancellations, 1);
       weeklyUsed = 10;
-      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.tap(find.byMaterialTooltip('Refresh now'));
       await tester.pumpAndSettle();
       expect(posts, hasLength(1));
       weeklyUsed = 100;
-      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.tap(find.byMaterialTooltip('Refresh now'));
       await tester.pumpAndSettle();
       expect(find.text('Recent usage checks unavailable'), findsOneWidget);
       expect(posts, hasLength(2));

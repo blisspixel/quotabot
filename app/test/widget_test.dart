@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:ui' show SemanticsAction, Tristate;
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot/chrome_controls.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot/profile_ui.dart';
@@ -12,6 +12,8 @@ import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
+
+import 'support/tooltip_finder.dart';
 
 ProviderQuota _provider(
   String id,
@@ -75,9 +77,9 @@ void main() {
         ),
       );
 
-      expect(find.byTooltip('Expand'), findsOneWidget);
+      expect(find.byMaterialTooltip('Expand'), findsOneWidget);
       expect(find.bySemanticsLabel('Expand'), findsOneWidget);
-      final enabledSize = tester.getSize(find.byTooltip('Expand'));
+      final enabledSize = tester.getSize(find.byMaterialTooltip('Expand'));
       expect(enabledSize.width, greaterThanOrEqualTo(28));
       expect(enabledSize.height, greaterThanOrEqualTo(28));
       var node = tester.getSemantics(find.bySemanticsLabel('Expand'));
@@ -101,7 +103,9 @@ void main() {
           ),
         ),
       );
-      final disabledSize = tester.getSize(find.byTooltip('Refreshing quotas'));
+      final disabledSize = tester.getSize(
+        find.byMaterialTooltip('Refreshing quotas'),
+      );
       expect(disabledSize.width, greaterThanOrEqualTo(28));
       expect(disabledSize.height, greaterThanOrEqualTo(28));
       node = tester.getSemantics(find.bySemanticsLabel('Refreshing quotas'));
@@ -567,47 +571,50 @@ void main() {
       },
     );
 
-    test('builds provider options from live data and saved profile filters', () {
-      final options = profileProviderOptions(
-        [
-          _provider('codex', 'default'),
-          _provider(
-            'claude',
-            'credential:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          ),
-          _provider('grok', 'work@example.com'),
-        ],
-        profiles: [
-          const QuotaProfile(
-            name: 'archived',
-            providers: {'cursor'},
-            accounts: {
-              'cursor': {'old@example.com'},
-            },
-          ),
-          const QuotaProfile(
-            name: 'legacy-credentials',
-            accounts: {
-              'claude': {'max'},
-              'codex': {'plus'},
-            },
-          ),
-        ],
-      );
+    test(
+      'builds provider options from live data and saved profile filters',
+      () {
+        final options = profileProviderOptions(
+          [
+            _provider('codex', 'default'),
+            _provider(
+              'claude',
+              'credential:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            ),
+            _provider('grok', 'work@example.com'),
+          ],
+          profiles: [
+            const QuotaProfile(
+              name: 'archived',
+              providers: {'cursor'},
+              accounts: {
+                'cursor': {'old@example.com'},
+              },
+            ),
+            const QuotaProfile(
+              name: 'legacy-credentials',
+              accounts: {
+                'claude': {'max'},
+                'codex': {'plus'},
+              },
+            ),
+          ],
+        );
 
-      expect(options.map((o) => o.provider), [
-        'claude',
-        'codex',
-        'cursor',
-        'grok',
-      ]);
-      expect(options[0].accounts, [
-        'credential:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      ]);
-      expect(options[1].accounts, isEmpty);
-      expect(options[2].accounts, ['old@example.com']);
-      expect(options[3].accounts, ['work@example.com']);
-    });
+        expect(options.map((o) => o.provider), [
+          'claude',
+          'codex',
+          'cursor',
+          'grok',
+        ]);
+        expect(options[0].accounts, [
+          'credential:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        ]);
+        expect(options[1].accounts, isEmpty);
+        expect(options[2].accounts, ['old@example.com']);
+        expect(options[3].accounts, ['work@example.com']);
+      },
+    );
 
     test('builds exact profile filters from editor selection', () {
       final options = [

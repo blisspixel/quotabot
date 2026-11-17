@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'theme_spec.dart';
 import 'typography.dart';
@@ -141,9 +141,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   controller: _scroll,
                   thumbVisibility: true,
                   child: ScrollConfiguration(
-                    behavior: ScrollConfiguration.of(
-                      context,
-                    ).copyWith(scrollbars: false),
+                    behavior: ScrollConfiguration.of(context)
+                        .copyWith(scrollbars: false),
                     child: SingleChildScrollView(
                       controller: _scroll,
                       padding: const EdgeInsets.only(right: 10),

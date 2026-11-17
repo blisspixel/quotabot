@@ -1,5 +1,5 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot/desktop_notification_policy.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
@@ -8,6 +8,7 @@ import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/models.dart';
 
 import 'support/settings_navigation.dart';
+import 'support/tooltip_finder.dart';
 
 const _automationPolicies = {
   'screenshots': DesktopNotificationPolicy(screenshotCapture: true),
@@ -102,7 +103,7 @@ void _desktopSurface(WidgetTester tester) {
 }
 
 Future<void> _toggleNotifications(WidgetTester tester) async {
-  await tester.tap(find.byTooltip('Settings'));
+  await tester.tap(find.byMaterialTooltip('Settings'));
   await tester.pumpAndSettle();
   await selectSettingsCategory(tester, SettingsCategory.alerts);
   final toggle = find.byKey(const ValueKey('settings-notifications'));
@@ -158,7 +159,7 @@ void main() {
 
           await _toggleNotifications(tester);
           expect(saved?.enableNotifications, !enabled);
-          await tester.tap(find.byTooltip('Refresh now'));
+          await tester.tap(find.byMaterialTooltip('Refresh now'));
           await tester.pumpAndSettle();
           expect(collections, 2);
           expect(notifications.calls, isEmpty);

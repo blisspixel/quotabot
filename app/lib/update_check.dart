@@ -92,9 +92,8 @@ int compareQuotabotVersions(String left, String right) {
     final leftNumeric = RegExp(r'^[0-9]+$').hasMatch(leftPart);
     final rightNumeric = RegExp(r'^[0-9]+$').hasMatch(rightPart);
     if (leftNumeric && rightNumeric) {
-      final compared = BigInt.parse(
-        leftPart,
-      ).compareTo(BigInt.parse(rightPart));
+      final compared = BigInt.parse(leftPart)
+          .compareTo(BigInt.parse(rightPart));
       if (compared != 0) return compared;
     } else if (leftNumeric) {
       return -1;
@@ -419,8 +418,10 @@ class QuotabotCliInstallResult {
   });
 }
 
-typedef CliProcessRunner =
-    Future<ProcessResult> Function(String executable, List<String> arguments);
+typedef CliProcessRunner = Future<ProcessResult> Function(
+  String executable,
+  List<String> arguments,
+);
 
 /// The checksum-verified CLI updater, when this machine has one installed.
 String? defaultQuotabotCliPath({

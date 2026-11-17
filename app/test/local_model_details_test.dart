@@ -1,11 +1,13 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot/local_model_details.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/models.dart';
+
+import 'support/tooltip_finder.dart';
 
 const _now = 1809500000;
 const _gib = 1024 * 1024 * 1024;
@@ -680,7 +682,7 @@ void main() {
     expect(find.text('1 of 3 models'), findsOneWidget);
     expect(_model('catalog/model-a'), findsNothing);
     expect(find.text('Cold'), findsOneWidget);
-    await tester.tap(find.byTooltip('Clear search'));
+    await tester.tap(find.byMaterialTooltip('Clear search'));
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(search).controller!.text, isEmpty);
     expect(tester.widget<TextField>(search).focusNode!.hasFocus, isTrue);
@@ -886,8 +888,7 @@ void main() {
           labeledTapTargetGuideline,
           const MinimumTapTargetGuideline(
             size: Size(28, 28),
-            link:
-                'https://learn.microsoft.com/windows/apps/design/input/guidelines-for-targeting',
+            link: 'https://learn.microsoft.com/windows/apps/design/input/guidelines-for-targeting',
           ),
           textContrastGuideline,
         ]) {
@@ -926,7 +927,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byType(LocalModelDetailsButton), findsNothing);
-      await tester.tap(find.byTooltip('Expand'));
+      await tester.tap(find.byMaterialTooltip('Expand'));
       await tester.pumpAndSettle();
       await tester.tap(find.byType(ProviderTile));
       await tester.pumpAndSettle();
@@ -939,7 +940,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('0 of 1 models'), findsOneWidget);
-      await tester.tap(find.byTooltip('Clear search'));
+      await tester.tap(find.byMaterialTooltip('Clear search'));
       await tester.pumpAndSettle();
       expect(_model('compact-model'), findsOneWidget);
       expect(collects, 1);
@@ -989,7 +990,7 @@ void main() {
           isTrue,
         );
         expect(tester.takeException(), isNull);
-        await tester.tap(find.byTooltip('Clear search'));
+        await tester.tap(find.byMaterialTooltip('Clear search'));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         final close = find.text('Close');

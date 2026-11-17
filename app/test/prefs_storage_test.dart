@@ -161,9 +161,8 @@ void main() {
   });
 
   test('malformed protected preferences report invalid data', () async {
-    File(
-      '${quotabotDir('app').path}/prefs.json',
-    ).writeAsStringSync('{not-json');
+    File('${quotabotDir('app').path}/prefs.json')
+        .writeAsStringSync('{not-json');
 
     final loaded = await Prefs.load();
 
@@ -186,9 +185,8 @@ void main() {
   });
 
   test('malformed UTF-8 preferences report invalid data', () async {
-    File(
-      '${quotabotDir('app').path}/prefs.json',
-    ).writeAsBytesSync(const [0xff, 0xfe, 0xfd]);
+    File('${quotabotDir('app').path}/prefs.json')
+        .writeAsBytesSync(const [0xff, 0xfe, 0xfd]);
 
     final loaded = await Prefs.load();
 
@@ -197,9 +195,8 @@ void main() {
   });
 
   test('oversized protected preferences are rejected before reading', () async {
-    File(
-      '${quotabotDir('app').path}/prefs.json',
-    ).writeAsBytesSync(List<int>.filled(64 * 1024 + 1, 0x20));
+    File('${quotabotDir('app').path}/prefs.json')
+        .writeAsBytesSync(List<int>.filled(64 * 1024 + 1, 0x20));
 
     final loaded = await Prefs.load();
 

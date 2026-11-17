@@ -1008,13 +1008,13 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         self.assertNotIn("macos-latest", release)
         self.assertNotIn("macos-latest", rehearsal)
-        self.assertEqual(release.count("macos-15"), 8)
-        self.assertEqual(rehearsal.count("macos-15"), 2)
+        self.assertEqual(release.count("macos-26"), 8)
+        self.assertEqual(rehearsal.count("macos-26"), 2)
         self.assertEqual(release.count("require-macos-toolchain.sh"), 8)
         self.assertEqual(rehearsal.count("require-macos-toolchain.sh"), 2)
         self.assertEqual(ci.count("require-macos-toolchain.sh"), 1)
-        self.assertIn("/Applications/Xcode_16.4.app/Contents/Developer", release)
-        self.assertIn("Build version 16F6", toolchain)
+        self.assertIn("/Applications/Xcode_26.6.app/Contents/Developer", release)
+        self.assertIn("Build version 17F113", toolchain)
         self.assertIn("notarytool stapler", toolchain)
 
     def test_signing_rehearsals_are_protected_bounded_and_nonpublishing(

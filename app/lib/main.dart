@@ -3,11 +3,11 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
@@ -575,12 +575,11 @@ TextTheme _tabularFigures(TextTheme t) {
   );
 }
 
-typedef AlertPoster =
-    Future<WebhookResult> Function(
-      String url,
-      Map<String, dynamic> payload, {
-      required bool allowExternal,
-    });
+typedef AlertPoster = Future<WebhookResult> Function(
+  String url,
+  Map<String, dynamic> payload, {
+  required bool allowExternal,
+});
 
 typedef PrefsSaver = Future<void> Function(Prefs prefs);
 

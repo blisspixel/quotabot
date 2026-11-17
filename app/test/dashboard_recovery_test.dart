@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot/desktop_analytics.dart';
 import 'package:quotabot/desktop_refresh_recovery.dart';
 import 'package:quotabot/main.dart';
@@ -12,6 +12,7 @@ import 'package:quotabot_collector/models.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'support/settings_navigation.dart';
+import 'support/tooltip_finder.dart';
 
 class _Clock {
   DateTime now = DateTime.utc(2026, 9, 5, 12);
@@ -147,14 +148,14 @@ void main() {
       window.onWindowEvent('focus');
       await tester.pump();
       expect(calls, 2);
-      expect(find.byTooltip('Refreshing quotas'), findsOneWidget);
+      expect(find.byMaterialTooltip('Refreshing quotas'), findsOneWidget);
       pending.complete([refreshed]);
       await tester.pumpAndSettle();
       expect(_cardText('70% free'), findsOneWidget);
       final card = tester.widget<ProviderTile>(find.byType(ProviderTile));
       expect(card.quota.asOf, refreshed.asOf);
       expect(card.quota.account, initial.account);
-      expect(find.byTooltip('Refresh now'), findsOneWidget);
+      expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
       expect(jobs, hasLength(2));
       expect(jobs.last.done.isCompleted, isFalse);
       expect(find.textContaining('Recent usage checks pending'), findsWidgets);
@@ -199,7 +200,7 @@ void main() {
     clock.advance(const Duration(minutes: 5));
     // The old frame still exposes the actual manual control for this burst.
     window.onWindowEvent('focus');
-    await tester.tap(find.byTooltip('Refresh now'));
+    await tester.tap(find.byMaterialTooltip('Refresh now'));
     _returnEvents(window);
     await tester.pump();
     expect(calls, 2);
@@ -333,7 +334,7 @@ void main() {
         tester.widget<ProviderTile>(find.byType(ProviderTile)).quota,
         same(renewed),
       );
-      expect(find.byTooltip('Refresh now'), findsOneWidget);
+      expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -370,7 +371,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(_cardText('weekly spent'), findsNothing);
         expect(_cardText('95% free'), findsOneWidget);
-        expect(find.byTooltip('Refresh now'), findsOneWidget);
+        expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
         window.onWindowEvent('focus');
         await tester.pump();
         expect(calls, 2);
@@ -411,7 +412,7 @@ void main() {
       await tester.pump(const Duration(seconds: 30));
       await tester.pumpAndSettle();
       expect(calls, 2);
-      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.tap(find.byMaterialTooltip('Refresh now'));
       await tester.pumpAndSettle();
       expect(calls, 3);
       expect(find.textContaining('Refresh failed'), findsNothing);
@@ -462,7 +463,7 @@ void main() {
       pending.complete([_quota(free: 70)]);
       await tester.pumpAndSettle();
       expect(_cardText('70% free'), findsOneWidget);
-      expect(find.byTooltip('Refresh now'), findsOneWidget);
+      expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -495,7 +496,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(calls, 2);
       expect(_cardText('70% free'), findsOneWidget);
-      expect(find.byTooltip('Refresh now'), findsOneWidget);
+      expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -625,7 +626,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     clock.advance(const Duration(minutes: 1));
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     await selectSettingsCategory(tester, SettingsCategory.alerts);
     final cadence = find.byKey(const ValueKey('settings-cadence-15m'));
@@ -672,7 +673,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(calls, 1);
       // Existing explicit refresh remains independent of automatic recovery.
-      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.tap(find.byMaterialTooltip('Refresh now'));
       await tester.pumpAndSettle();
       expect(calls, 2);
       await tester.pumpWidget(const SizedBox.shrink());

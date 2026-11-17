@@ -4,13 +4,14 @@ publish_to: 'none'
 version: 0.11.19+74
 
 environment:
-  sdk: ^3.12.2
-  flutter: ">=3.38.1"
+  sdk: ^3.14.0
+  flutter: ">=3.50.0"
 
 dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  material_ui: ^1.11.1
   window_manager: ^0.5.2
   screen_retriever: ^0.2.2
   quotabot_collector:

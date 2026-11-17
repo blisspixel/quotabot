@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show SemanticsAction, Tristate;
 
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot/chrome_controls.dart';
 import 'package:quotabot/fleet.dart';
 import 'package:quotabot/main.dart';
@@ -21,6 +21,7 @@ import 'package:quotabot_collector/updater.dart' hide QuotabotRelease;
 import 'package:quotabot_collector/webhook.dart';
 
 import 'support/settings_navigation.dart';
+import 'support/tooltip_finder.dart';
 
 PortableDesktopSkew _skewAt(QuotabotVersion version) => PortableDesktopSkew(
   referenceVersion: version,
@@ -70,16 +71,16 @@ Future<void> _useDesktopSurface(WidgetTester tester) async {
 
 Future<void> _selectMenuValue(WidgetTester tester, String value) async {
   if (value == 'refresh') {
-    final refresh = find.byTooltip('Refresh now');
+    final refresh = find.byMaterialTooltip('Refresh now');
     if (refresh.evaluate().isNotEmpty) await tester.tap(refresh);
     await tester.pumpAndSettle();
     return;
   }
-  if (find.byTooltip('Settings').evaluate().isEmpty) {
-    await tester.tap(find.byTooltip('Expand'));
+  if (find.byMaterialTooltip('Settings').evaluate().isEmpty) {
+    await tester.tap(find.byMaterialTooltip('Expand'));
     await tester.pumpAndSettle();
   }
-  await tester.tap(find.byTooltip('Settings'));
+  await tester.tap(find.byMaterialTooltip('Settings'));
   await tester.pumpAndSettle();
 
   if (value == 'profiles:manage') {
@@ -555,7 +556,7 @@ void main() {
       find.textContaining('next  Codex').first,
     );
     expect(nextLine.style?.fontWeight, FontWeight.w600);
-    final details = find.byTooltip('Explain recommendation');
+    final details = find.byMaterialTooltip('Explain recommendation');
     expect(details, findsOneWidget);
 
     final detailsButton = tester
@@ -624,7 +625,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('next  Ollama'), findsOneWidget);
-    await tester.tap(find.byTooltip('Explain recommendation'));
+    await tester.tap(find.byMaterialTooltip('Explain recommendation'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Quota-stretch policy:'), findsOneWidget);
     expect(
@@ -828,7 +829,7 @@ void main() {
     await tester.pump();
 
     expect(posts, 1);
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     await selectSettingsCategory(tester, SettingsCategory.alerts);
     expect(find.text('Alert webhook: delivery failed'), findsOneWidget);
@@ -845,7 +846,7 @@ void main() {
     );
     await tester.tap(find.widgetWithText(TextButton, 'Save'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     await selectSettingsCategory(tester, SettingsCategory.alerts);
     expect(find.text('Alert webhook: delivery failed'), findsOneWidget);
@@ -902,7 +903,7 @@ void main() {
 
       // A completed refresh while the first transport awaits is coalesced into
       // the same flight. It must not start a duplicate webhook batch.
-      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.tap(find.byMaterialTooltip('Refresh now'));
       await tester.pump();
       await tester.pump();
       expect(posts, 1);
@@ -914,19 +915,19 @@ void main() {
 
       // The coalesced red check remains armed, so another steady-red refresh is
       // silent. Recovery clears the edge, and a later red crossing fires once.
-      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.tap(find.byMaterialTooltip('Refresh now'));
       await tester.pump();
       await tester.pump();
       expect(posts, 1);
 
       current = recovered;
-      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.tap(find.byMaterialTooltip('Refresh now'));
       await tester.pump();
       await tester.pump();
       expect(posts, 1);
 
       current = red;
-      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.tap(find.byMaterialTooltip('Refresh now'));
       await tester.pump();
       await tester.pump();
       expect(posts, 2);
@@ -955,9 +956,8 @@ void main() {
                   now - 30,
                 );
         final chrome = AppChromeTheme.forSpec(brightness, appThemeSystem);
-        final theme = ThemeData(
-          brightness: brightness,
-        ).copyWith(extensions: [chrome]);
+        final theme = ThemeData(brightness: brightness)
+            .copyWith(extensions: [chrome]);
         await tester.pumpWidget(
           MaterialApp(
             theme: theme,
@@ -969,7 +969,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.byTooltip('Setup and help'));
+        await tester.tap(find.byMaterialTooltip('Setup and help'));
         await tester.pumpAndSettle();
 
         final label = tester.widget<Text>(find.text('provider drift'));
@@ -1022,7 +1022,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Setup and help'));
+    await tester.tap(find.byMaterialTooltip('Setup and help'));
     await tester.pumpAndSettle();
 
     final dialog = find.byType(Dialog);
@@ -1042,7 +1042,7 @@ void main() {
       ),
       findsNothing,
     );
-    expect(find.byTooltip('Set up Antigravity'), findsOneWidget);
+    expect(find.byMaterialTooltip('Set up Antigravity'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox());
@@ -1092,7 +1092,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(collections, 1);
 
-    await tester.tap(find.byTooltip('Setup and help'));
+    await tester.tap(find.byMaterialTooltip('Setup and help'));
     await tester.pumpAndSettle();
     final dialog = find.byType(Dialog);
     expect(
@@ -1176,7 +1176,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Setup and help'));
+      await tester.tap(find.byMaterialTooltip('Setup and help'));
       await tester.pumpAndSettle();
 
       final dialog = find.byType(Dialog);
@@ -1203,7 +1203,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.byTooltip('Set up Claude (account bbbbbbbb)'),
+        find.byMaterialTooltip('Set up Claude (account bbbbbbbb)'),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);
@@ -1247,12 +1247,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Setup and help'));
+    await tester.tap(find.byMaterialTooltip('Setup and help'));
     await tester.pumpAndSettle();
 
     expect(find.text('invalid evidence'), findsOneWidget);
     expect(find.widgetWithText(TextButton, 'Connect'), findsNothing);
-    expect(find.byTooltip('Set up Grok'), findsOneWidget);
+    expect(find.byMaterialTooltip('Set up Grok'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -1302,11 +1302,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Refresh now'));
+    await tester.tap(find.byMaterialTooltip('Refresh now'));
     await tester.pump();
     expect(collections, 2);
 
-    await tester.tap(find.byTooltip('Setup and help'));
+    await tester.tap(find.byMaterialTooltip('Setup and help'));
     await tester.pumpAndSettle();
     final connect = find.descendant(
       of: find.byType(Dialog),
@@ -1378,7 +1378,7 @@ void main() {
     );
     await tester.pump();
 
-    await tester.tap(find.byTooltip('Collapse'));
+    await tester.tap(find.byMaterialTooltip('Collapse'));
     await tester.pumpAndSettle();
 
     const warning = 'Settings not saved (storage unavailable)';
@@ -1386,7 +1386,7 @@ void main() {
       (widget) =>
           widget is Tooltip && (widget.message?.contains(warning) ?? false),
     );
-    expect(find.byTooltip('Expand'), findsOneWidget);
+    expect(find.byMaterialTooltip('Expand'), findsOneWidget);
     expect(warningTooltip, findsOneWidget);
     expect(
       find.descendant(
@@ -1419,9 +1419,9 @@ void main() {
     expect(find.textContaining('private details'), findsNothing);
     expect(find.bySemanticsLabel(trayUnavailableMessage), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Collapse'));
+    await tester.tap(find.byMaterialTooltip('Collapse'));
     await tester.pump();
-    expect(find.byTooltip(trayUnavailableMessage), findsOneWidget);
+    expect(find.byMaterialTooltip(trayUnavailableMessage), findsOneWidget);
     expect(find.textContaining('private details'), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -1472,8 +1472,8 @@ void main() {
           .hasAction(SemanticsAction.tap),
       isTrue,
     );
-    expect(find.byTooltip('Expand'), findsOneWidget);
-    expect(find.byTooltip('Close'), findsOneWidget);
+    expect(find.byMaterialTooltip('Expand'), findsOneWidget);
+    expect(find.byMaterialTooltip('Close'), findsOneWidget);
 
     final decisionButton = tester.widget<InkWell>(decision);
     expect(decisionButton.focusNode, isNotNull);
@@ -1587,7 +1587,7 @@ void main() {
     expect(find.textContaining('next  Antigravity'), findsOneWidget);
     expect(find.text('80'), findsWidgets);
     for (final tooltip in ['Expand', 'Close']) {
-      final rect = tester.getRect(find.byTooltip(tooltip));
+      final rect = tester.getRect(find.byMaterialTooltip(tooltip));
       expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
       expect(rect.right, lessThanOrEqualTo(286), reason: tooltip);
     }
@@ -1725,7 +1725,7 @@ void main() {
     expect(find.text('No providers - Edit profile'), findsOneWidget);
     expect(find.text('Edit profile'), findsNothing);
     for (final tooltip in ['Expand', 'Close']) {
-      final rect = tester.getRect(find.byTooltip(tooltip));
+      final rect = tester.getRect(find.byMaterialTooltip(tooltip));
       expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
       expect(rect.right, lessThanOrEqualTo(200), reason: tooltip);
     }
@@ -1789,7 +1789,7 @@ void main() {
       findsOneWidget,
     );
     for (final tooltip in ['Expand', 'Close']) {
-      final rect = tester.getRect(find.byTooltip(tooltip));
+      final rect = tester.getRect(find.byMaterialTooltip(tooltip));
       expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
       expect(rect.right, lessThanOrEqualTo(200), reason: tooltip);
     }
@@ -1843,7 +1843,7 @@ void main() {
       findsOneWidget,
     );
     for (final tooltip in ['Expand', 'Close']) {
-      final control = find.byTooltip(tooltip);
+      final control = find.byMaterialTooltip(tooltip);
       expect(control, findsOneWidget);
       final rect = tester.getRect(control);
       expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
@@ -2002,22 +2002,22 @@ void main() {
     await tester.pump();
     expect(find.byType(InsightsPanel), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Quota analytics'));
+    await tester.tap(find.byMaterialTooltip('Quota analytics'));
     await tester.pump();
     expect(find.text('Analytics'), findsOneWidget);
     expect(find.byType(FleetScreen), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Back to quotas'));
+    await tester.tap(find.byMaterialTooltip('Back to quotas'));
     await tester.pump();
     expect(find.text('Quota'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Collapse'));
+    await tester.tap(find.byMaterialTooltip('Collapse'));
     await tester.pump();
-    expect(find.byTooltip('Expand'), findsOneWidget);
+    expect(find.byMaterialTooltip('Expand'), findsOneWidget);
     expect(find.textContaining('next  Antigravity'), findsWidgets);
     expect(find.byType(ProviderTile), findsNothing);
 
-    await tester.tap(find.byTooltip('Expand'));
+    await tester.tap(find.byMaterialTooltip('Expand'));
     await tester.pump();
     expect(find.byType(ProviderTile), findsNWidgets(7));
     expect(tester.takeException(), isNull);
@@ -2041,7 +2041,7 @@ void main() {
     await tester.pump();
     expect(tester.takeException(), isNull);
 
-    await tester.tap(find.byTooltip('Quota analytics'));
+    await tester.tap(find.byMaterialTooltip('Quota analytics'));
     await tester.pump();
 
     for (final tooltip in [
@@ -2051,7 +2051,7 @@ void main() {
       'Setup and help',
       'Close',
     ]) {
-      final rect = tester.getRect(find.byTooltip(tooltip));
+      final rect = tester.getRect(find.byMaterialTooltip(tooltip));
       expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
       expect(rect.right, lessThanOrEqualTo(340), reason: tooltip);
     }
@@ -2078,7 +2078,7 @@ void main() {
     await tester.pump();
 
     final title = tester.getRect(find.text('Quota'));
-    final refresh = tester.getRect(find.byTooltip('Refresh now'));
+    final refresh = tester.getRect(find.byMaterialTooltip('Refresh now'));
     expect(refresh.top, greaterThanOrEqualTo(title.bottom));
     expect(refresh.right, lessThanOrEqualTo(340));
     expect(tester.takeException(), isNull);
@@ -2099,12 +2099,12 @@ void main() {
       await tester.pump();
 
       expect(find.byType(FleetScreen), findsOneWidget);
-      expect(find.byTooltip('Back to quotas'), findsOneWidget);
+      expect(find.byMaterialTooltip('Back to quotas'), findsOneWidget);
 
-      await tester.tap(find.byTooltip('Back to quotas'));
+      await tester.tap(find.byMaterialTooltip('Back to quotas'));
       await tester.pump();
       expect(find.byType(FleetScreen), findsNothing);
-      expect(find.byTooltip('Expand'), findsOneWidget);
+      expect(find.byMaterialTooltip('Expand'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -2151,7 +2151,7 @@ void main() {
     await tester.pumpWidget(_wrap(const Dashboard.test(prefs: Prefs())));
     await tester.pump();
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     await selectSettingsCategory(tester, SettingsCategory.display);
     expect(find.text('Provider order'), findsOneWidget);
@@ -2205,10 +2205,10 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, 'Save'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Setup and help'));
+    await tester.tap(find.byMaterialTooltip('Setup and help'));
     await tester.pumpAndSettle();
     expect(find.text('Providers'), findsOneWidget);
-    await tester.tap(find.byTooltip('Close providers'));
+    await tester.tap(find.byMaterialTooltip('Close providers'));
     await tester.pumpAndSettle();
 
     await tester.longPress(find.byType(ProviderTile).first);
@@ -2264,7 +2264,7 @@ void main() {
     await tester.pump();
 
     expect(checks, 0);
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Profiles and providers'), findsOneWidget);
     expect(find.text('Display'), findsOneWidget);
@@ -2348,7 +2348,7 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     await selectSettingsCategory(tester, SettingsCategory.updates);
     final check = find.byKey(const ValueKey('settings-check-updates'));
@@ -2393,7 +2393,7 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     await selectSettingsCategory(tester, SettingsCategory.updates);
     final install = find.byKey(const ValueKey('settings-install-update'));
@@ -2454,7 +2454,7 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     await selectSettingsCategory(tester, SettingsCategory.updates);
     final check = find.byKey(const ValueKey('settings-check-updates'));
@@ -2516,7 +2516,7 @@ void main() {
     );
     await tester.pump();
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     await selectSettingsCategory(tester, SettingsCategory.updates);
     final checkUpdates = find.byKey(const ValueKey('settings-check-updates'));
@@ -2574,7 +2574,7 @@ void main() {
     );
     await tester.pump();
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     await selectSettingsCategory(tester, SettingsCategory.updates);
     final checkUpdates = find.byKey(const ValueKey('settings-check-updates'));
@@ -2616,7 +2616,7 @@ void main() {
     );
     await tester.pump();
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     await selectSettingsCategory(tester, SettingsCategory.updates);
     final checkUpdates = find.byKey(const ValueKey('settings-check-updates'));
@@ -2639,8 +2639,7 @@ void main() {
         latest: QuotabotRelease(
           tag: 'v0.10.0-rc.7',
           version: '0.10.0-rc.7',
-          url:
-              'https://github.com/blisspixel/quotabot/releases/tag/v0.10.0-rc.7',
+          url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.0-rc.7',
           prerelease: true,
         ),
       ),
@@ -2667,7 +2666,7 @@ void main() {
 
     await tester.pumpWidget(_wrap(const Dashboard.test(prefs: Prefs())));
     await tester.pump();
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Settings'), findsOneWidget);
 
@@ -2683,7 +2682,7 @@ void main() {
     expect(connections.maxLines, isNull);
     expect(connections.overflow, isNull);
     expect(connections.softWrap, isNot(isFalse));
-    await tester.tap(find.byTooltip('Close settings'));
+    await tester.tap(find.byMaterialTooltip('Close settings'));
     await tester.pumpAndSettle();
     expect(find.text('Settings'), findsNothing);
     expect(tester.takeException(), isNull);
@@ -2717,7 +2716,7 @@ void main() {
     expect(find.text('personal@example.com'), findsNothing);
     expect(find.text('work@example.com'), findsNothing);
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(_providerMenuValues(tester), ['show:claude']);
     expect(find.text('personal@example.com'), findsNothing);
@@ -2756,7 +2755,7 @@ void main() {
     expect(find.text('personal@example.com'), findsOneWidget);
     expect(find.text('work@example.com'), findsWidgets);
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byMaterialTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(_providerMenuValues(tester), [
       'show:claude|personal@example.com',
@@ -2799,7 +2798,7 @@ void main() {
     expect(saved?.hidden, {'claude|work@example.com'});
 
     snapshot = [_multiAccountClaude(now).last];
-    await tester.tap(find.byTooltip('Refresh now'));
+    await tester.tap(find.byMaterialTooltip('Refresh now'));
     await tester.pumpAndSettle();
     expect(find.byType(ProviderTile), findsNothing);
 
@@ -2882,7 +2881,7 @@ void main() {
     expect(find.textContaining('80% included'), findsOneWidget);
     expect(find.textContaining('80% free'), findsWidgets);
 
-    await tester.tap(find.byTooltip('Refresh now'));
+    await tester.tap(find.byMaterialTooltip('Refresh now'));
     await tester.pump();
     await tester.pump();
 
@@ -2894,7 +2893,10 @@ void main() {
       find.text('Quota data is stale - use your usual model'),
       findsOneWidget,
     );
-    expect(find.byTooltip('Explain why no route is safe'), findsOneWidget);
+    expect(
+      find.byMaterialTooltip('Explain why no route is safe'),
+      findsOneWidget,
+    );
     expect(
       find.text('quota above is last known - refresh failed'),
       findsOneWidget,
@@ -2913,7 +2915,7 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.tap(find.byTooltip('Explain why no route is safe'));
+    await tester.tap(find.byMaterialTooltip('Explain why no route is safe'));
     await tester.pumpAndSettle();
     expect(find.text('Why no route is safe'), findsOneWidget);
     expect(
@@ -3030,9 +3032,8 @@ void main() {
       expect(notifications.scheduled.single.title, 'Quota reset soon');
       expect(
         notifications.scheduled.single.scheduledDate,
-        DateTime.fromMillisecondsSinceEpoch(
-          scheduledReset * 1000,
-        ).subtract(quotaResetReminderLeadTime),
+        DateTime.fromMillisecondsSinceEpoch(scheduledReset * 1000)
+            .subtract(quotaResetReminderLeadTime),
       );
       expect(
         notifications.shown.where((item) => item.title == 'Quota reset soon'),
@@ -3281,7 +3282,7 @@ void main() {
       await tester.pump();
       expect(scheduleStarted.isCompleted, isTrue);
 
-      await tester.tap(find.byTooltip('Settings'));
+      await tester.tap(find.byMaterialTooltip('Settings'));
       await tester.pumpAndSettle();
       await selectSettingsCategory(tester, SettingsCategory.alerts);
       await tester.tap(find.byKey(const ValueKey('settings-notifications')));
@@ -3513,14 +3514,14 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.byTooltip('Refresh now'), findsOneWidget);
-    await tester.tap(find.byTooltip('Refresh now'));
+    expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
+    await tester.tap(find.byMaterialTooltip('Refresh now'));
     await tester.pump();
 
-    expect(find.byTooltip('Refreshing quotas'), findsOneWidget);
+    expect(find.byMaterialTooltip('Refreshing quotas'), findsOneWidget);
     final disabled = tester.widget<InkWell>(
       find.descendant(
-        of: find.byTooltip('Refreshing quotas'),
+        of: find.byMaterialTooltip('Refreshing quotas'),
         matching: find.byType(InkWell),
       ),
     );
@@ -3529,7 +3530,7 @@ void main() {
     pending.complete([quota]);
     await tester.pump();
     await tester.pump();
-    expect(find.byTooltip('Refresh now'), findsOneWidget);
+    expect(find.byMaterialTooltip('Refresh now'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
   });

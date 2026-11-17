@@ -31,8 +31,8 @@ jobs:
         shell: pwsh
         run: >
           ./tools/setup-flutter-ci.ps1
-          -FlutterVersion '3.44.6'
-          -ExpectedCommit 'ee80f08bbf97172ec030b8751ceab557177a34a6'
+          -FlutterVersion '3.50.0'
+          -ExpectedCommit 'ab2912035e160d9cad6306df307576da6128ebdb'
 
       - name: Collector dependencies
         working-directory: collector

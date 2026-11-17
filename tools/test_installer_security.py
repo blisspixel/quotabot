@@ -565,6 +565,20 @@ foreach ($release in @('0.11.15', '0.11.15-rc.1')) {
         self.assertIn("cp -a --link", helper)
         self.assertIn("cp -al", helper)
 
+    def test_posix_cli_packager_renames_the_linux_aot_library(self) -> None:
+        script = (ROOT / "tools" / "package-cli.sh").read_text(encoding="utf-8")
+
+        rename_executable = script.index(
+            'mv "$bundle/bin/collect" "$packaged_executable"'
+        )
+        built_library = script.index('"$packaged_lib/libdartaotcollect.so"')
+        packaged_library = script.index('"$packaged_lib/libdartaotquotabot.so"')
+        missing_library = script.index("CLI build did not produce $built_library")
+        self.assertLess(rename_executable, built_library)
+        self.assertLess(built_library, packaged_library)
+        self.assertLess(packaged_library, missing_library)
+        self.assertIn('[ "$os" = "linux" ]', script)
+
     def test_posix_desktop_packagers_map_spaced_dart_paths(self) -> None:
         for name in ("package-linux.sh", "package-macos.sh", "setup.sh"):
             script = (ROOT / "tools" / name).read_text(encoding="utf-8")

@@ -486,10 +486,12 @@ https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows
 Pinned actionlint 1.7.7 does not parse `concurrency.queue`. The gap is still
 open in [rhysd/actionlint#657](https://github.com/rhysd/actionlint/issues/657)
 and [rhysd/actionlint#654](https://github.com/rhysd/actionlint/pull/654), and
-it is absent from actionlint 1.7.12. The ignore in `.github/actionlint.yaml`
-covers only that unknown key. The policy test fails the build when
-`cancel-in-progress` is not the literal `false` or when `queue: max` is
-missing.
+it is absent from actionlint 1.7.12. The same pin does not list the
+GitHub-hosted `macos-26` label, which actionlint 1.7.8 added. The ignores
+in `.github/actionlint.yaml` cover only that unknown key and the message
+`label "macos-26" is unknown`. They do not add a self-hosted runner list.
+The policy test fails the build when `cancel-in-progress` is not the
+literal `false` or when `queue: max` is missing.
 
 ---
 
@@ -499,7 +501,7 @@ quotabot is a local advisor, not a proxy: a Dart collector plus an optional
 Flutter desktop app that share one code path. It reports remaining AI coding
 quota and recommends a route. It has no quotabot account, telemetry, or
 inference. The stack is Dart and Flutter, pinned in CI and
-[docs/BUILDING.md](docs/BUILDING.md) to Flutter 3.44.6 with Dart 3.12.2. Do not
+[docs/BUILDING.md](docs/BUILDING.md) to Flutter 3.50.0 with Dart 3.14.0. Do not
 upgrade that toolchain, or reopen the language choice, as a drive-by.
 
 How to call the shipped CLI and MCP surface is the product guide above,

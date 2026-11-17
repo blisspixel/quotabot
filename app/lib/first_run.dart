@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
@@ -123,14 +123,11 @@ String firstRunSetupHint(
       id == lmStudioProviderId ||
       id == lemonadeProviderId) {
     return switch (httpStatus) {
-      401 =>
-        'The local server requires authentication. Review its metadata access settings.',
+      401 => 'The local server requires authentication. Review its metadata access settings.',
       403 =>
         'The local server denied metadata access. Review its access settings.',
-      200 =>
-        'The local server returned invalid model metadata. Check its version and settings.',
-      _ when httpStatus != null =>
-        'The local server\'s model metadata is unavailable. Check its status and settings.',
+      200 => 'The local server returned invalid model metadata. Check its version and settings.',
+      _ when httpStatus != null => 'The local server\'s model metadata is unavailable. Check its status and settings.',
       _ => 'Start the local server and enable metadata access.',
     };
   }
@@ -366,9 +363,9 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
                 children: [
                   Flexible(
                     child: TextButton(
-                      onPressed: () => Navigator.of(
-                        context,
-                      ).pop(const FirstRunResult.skipped()),
+                      onPressed: () =>
+                          Navigator.of(context)
+                              .pop(const FirstRunResult.skipped()),
                       child: const Text(
                         'Skip for now',
                         maxLines: 1,
@@ -381,9 +378,9 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
                         ? _continueFromFound
                         : _step == 1
                         ? _continueFromChoose
-                        : () => Navigator.of(
-                            context,
-                          ).pop(FirstRunResult.done(_selected)),
+                        : () =>
+                              Navigator.of(context)
+                                  .pop(FirstRunResult.done(_selected)),
                     child: Text(_step == 2 ? 'Done' : 'Continue'),
                   ),
                 ],

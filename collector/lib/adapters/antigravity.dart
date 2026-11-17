@@ -574,7 +574,8 @@ class AntigravityAdapter {
       }
       // Overlap live account reads. Default-grant lending stays on the first
       // discovered identity, and Future.wait keeps that discovered order.
-      return Future.wait([
+      // Await so a failure after the reads start stays inside this catch.
+      return await Future.wait([
         for (var i = 0; i < accounts.length; i++)
           _collectAccount(
             accounts[i],

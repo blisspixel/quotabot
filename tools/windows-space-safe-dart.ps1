@@ -7,8 +7,8 @@ function Assert-QuotabotGateVersions {
     [Parameter(Mandatory)][string]$PythonVersion
   )
 
-  if ($FlutterVersion -ne '3.44.6' -or $DartVersion -ne '3.12.2') {
-    throw "Contributor gate requires Flutter 3.44.6 and Dart 3.12.2; resolved Flutter $FlutterVersion and Dart $DartVersion. Correct PATH before retrying."
+  if ($FlutterVersion -ne '3.50.0' -or $DartVersion -ne '3.14.0') {
+    throw "Contributor gate requires Flutter 3.50.0 and Dart 3.14.0; resolved Flutter $FlutterVersion and Dart $DartVersion. Correct PATH before retrying."
   }
   if ($PythonVersion -notmatch '^3\.15\.\d+$') {
     throw "Contributor gate requires Python 3.15, matching CI. Resolved Python $PythonVersion. Correct PATH before retrying."

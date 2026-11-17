@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// The startup loader: a quota-gauge arc that sweeps while the first snapshot is
 /// collected, instead of a stock spinner. Honors reduced-motion by holding a

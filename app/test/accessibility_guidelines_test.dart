@@ -1,14 +1,15 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/profiles.dart';
 
+import 'support/tooltip_finder.dart';
+
 const desktopTapTargetGuideline = MinimumTapTargetGuideline(
   size: Size(28, 28),
-  link:
-      'https://learn.microsoft.com/windows/apps/design/input/guidelines-for-targeting',
+  link: 'https://learn.microsoft.com/windows/apps/design/input/guidelines-for-targeting',
 );
 
 void main() {
@@ -49,7 +50,7 @@ void main() {
           await _expectAccessibilityGuidelines(tester);
 
           if (!compact) {
-            await tester.tap(find.byTooltip('Quota analytics'));
+            await tester.tap(find.byMaterialTooltip('Quota analytics'));
             await tester.pumpAndSettle();
             await _expectAccessibilityGuidelines(tester);
           }
