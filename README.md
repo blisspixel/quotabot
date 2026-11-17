@@ -11,6 +11,7 @@ models, loaded state, context, and available hardware evidence, so you can use
 on-device capacity directly or fall back when subscription caps are low.
 
 > **Current stable:** 0.11.19. quotabot remains under active 0.x development.
+> **Pending publication:** 0.11.20.
 > **Next:** installed harness proof, idle-machine account freshness, a positive
 > on-device producer, and a supported Claude quota integration remain open.
 > Native signing proceeds alongside product development and remains a 1.0

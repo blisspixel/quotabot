@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.11.20 - 2026-11-17
+
 - The Antigravity catalog matches the model page and a live `agy models`
   list checked 2026-11-17. It adds `gemini-4-hydrogen`, `gemini-4-argon`,
   `claude-opus-5-5`, and `claude-sonnet-5-5`. It keeps `gemini-4-carbon`
