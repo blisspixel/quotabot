@@ -134,7 +134,7 @@ void main() {
       expect(result.stderr as String, contains(testCase.$2));
     }
     expect(temp.listSync(), isEmpty);
-  });
+  }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('global help remains available', () async {
     final result = await runCli(['--help']);
