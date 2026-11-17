@@ -4,30 +4,35 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.11.19.
+The current verified stable release is 0.11.20.
 
-Version [0.11.19](https://github.com/blisspixel/quotabot/releases/tag/v0.11.19) refreshes
-the live catalog, raises the patched dependency pins, and defaults source CI
-to Python 3.15.2 with Node 26.13.1. LiteLLM is tested on Python 3.11 through
-3.15.2. Workflow runs are not cancelled. Installer tests compile a sleeper,
-and the Linux desktop build keeps the tray_manager 0.5.3 deprecation as a
-warning. The 0.11.18 Claude user-agent, shared capture, N% free display,
-Antigravity models window, and first-run dismissal remain. The 0.11.17 route
-line, theme files, and aged Omarchy display remain. The 0.11.16
-hand-extracted desktop notice remains: that copy stays in place, and the
-desktop dialog uses the installed CLI version. Managed desktop updates from
-0.11.15 remain. Earlier quota-readiness and bounded MCP contracts remain in
+Version [0.11.20](https://github.com/blisspixel/quotabot/releases/tag/v0.11.20) refreshes
+the Antigravity catalog for the November 18 removals, pins hosted Ubuntu
+jobs to 26.04, and admits the Lemonade guest-container recipes rocmfpx,
+halogen, and gufo. Catalog ids are the stable prefixes of the account's
+agy models list. The Gemini API audit covers only Gemini ids. Claude rows
+omit context length. Container format is not on-device proof. The 0.11.19
+catalog refresh, patched dependency pins, Python 3.15.2 and Node 26.13.1
+CI defaults, and uncancelled workflow runs remain. LiteLLM is tested on
+Python 3.11 through 3.15.2. Installer tests compile a sleeper, and the
+Linux desktop build keeps the tray_manager 0.5.3 deprecation as a warning.
+The 0.11.18 Claude user-agent, shared capture, N% free display, Antigravity
+models window, and first-run dismissal remain. The 0.11.17 route line,
+theme files, and aged Omarchy display remain. The 0.11.16 hand-extracted
+desktop notice remains: that copy stays in place, and the desktop dialog
+uses the installed CLI version. Managed desktop updates from 0.11.15
+remain. Earlier quota-readiness and bounded MCP contracts remain in
 effect. See the
 [changelog](../CHANGELOG.md) and
 [quality review](research/2026-10-11-next-quality-review.md).
 
-The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/43939016463),
-[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/43939077213), and
-[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/43949128458).
+The release passed [three-OS main CI](https://github.com/blisspixel/quotabot/actions/runs/44184138903),
+[Release workflow](https://github.com/blisspixel/quotabot/actions/runs/44192708464), and
+[published Install smoke](https://github.com/blisspixel/quotabot/actions/runs/44202370286).
 The immutable fourteen-asset set contains four CLI and three desktop
 archive/checksum pairs. Publication verified exact workflow provenance and
 fresh downloads. Unpinned Latest smoke covers clean install, upgrade from
-0.11.18, persistent state, source setup, and stable-channel resolution on
+0.11.19, persistent state, source setup, and stable-channel resolution on
 Windows, macOS, and Linux. Desktop checks verify Windows/Linux startup and
 the installed macOS bundle.
 
