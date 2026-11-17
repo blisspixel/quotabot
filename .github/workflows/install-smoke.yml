@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   resolve-releases:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       target_tag: ${{ steps.releases.outputs.target_tag }}
@@ -150,7 +150,7 @@ jobs:
         os:
           - windows-latest
           - macos-latest
-          - ubuntu-latest
+          - ubuntu-26.04
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     env:
@@ -414,7 +414,7 @@ jobs:
         os:
           - windows-latest
           - macos-latest
-          - ubuntu-latest
+          - ubuntu-26.04
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:

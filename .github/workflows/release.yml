@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   preflight:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       windows_signing_backend: ${{ steps.signing_modes.outputs.windows_signing_backend }}
@@ -171,7 +171,7 @@ jobs:
       - quality-gate
       - codeql-gate
       - secret-scan-gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     outputs:
       previous_tag: ${{ steps.ensure_release.outputs.previous_tag }}
@@ -225,10 +225,10 @@ jobs:
         # source (install.sh says so). Re-add an Intel leg only if a hosted Intel
         # runner returns or we add a Rosetta x64 cross-build.
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-26.04
             script: bash tools/package-cli.sh
             archive: release/quotabot-linux-x64.tar.gz
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04-arm
             script: bash tools/package-cli.sh
             archive: release/quotabot-linux-arm64.tar.gz
     runs-on: ${{ matrix.os }}
@@ -902,9 +902,9 @@ jobs:
             archive: quotabot-windows-x64.zip
           - os: macos-26
             archive: quotabot-darwin-arm64.tar.gz
-          - os: ubuntu-latest
+          - os: ubuntu-26.04
             archive: quotabot-linux-x64.tar.gz
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04-arm
             archive: quotabot-linux-arm64.tar.gz
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -1425,7 +1425,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-26.04
             script: bash tools/package-linux.sh
             archive: release/quotabot-linux-x64-desktop.tar.gz
     runs-on: ${{ matrix.os }}
@@ -1772,7 +1772,7 @@ jobs:
             archive: quotabot-windows-x64-desktop.zip
           - os: macos-26
             archive: quotabot-darwin-arm64-desktop.zip
-          - os: ubuntu-latest
+          - os: ubuntu-26.04
             archive: quotabot-linux-x64-desktop.tar.gz
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -2060,7 +2060,7 @@ jobs:
           needs.create-release.result == 'success' &&
           needs.verify-cli-release.result == 'success' &&
           needs.verify-desktop-release.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -2208,7 +2208,7 @@ jobs:
           needs.quality-gate.result == 'success' &&
           needs.codeql-gate.result == 'success' &&
           needs.secret-scan-gate.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read

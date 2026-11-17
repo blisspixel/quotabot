@@ -114,6 +114,8 @@ _QUEUE_ANY = re.compile(r"^[ \t]*queue[ \t]*:")
 _QUEUE_OK = re.compile(r"^[ \t]*queue:[ \t]*max[ \t]*(?:#.*)?$")
 _ACTIONLINT_QUEUE_IGNORE = 'unexpected key "queue" for "concurrency" section'
 _ACTIONLINT_MACOS_26_IGNORE = 'label "macos-26" is unknown'
+_ACTIONLINT_UBUNTU_26_IGNORE = 'label "ubuntu-26\\.04" is unknown'
+_ACTIONLINT_UBUNTU_26_ARM_IGNORE = 'label "ubuntu-26\\.04-arm" is unknown'
 
 
 def _line_indent(line: str) -> int:
@@ -313,10 +315,10 @@ class DependencyPolicyTest(unittest.TestCase):
             " # v7.1.0",
             jobs["test"],
         )
-        self.assertIn("os: [ubuntu-latest, macos-26, windows-latest]", jobs["test"])
+        self.assertIn("os: [ubuntu-26.04, macos-26, windows-latest]", jobs["test"])
         self.assertNotIn("python-version: ['3.11'", jobs["test"])
         litellm = jobs["litellm-python"]
-        self.assertIn("runs-on: ubuntu-latest", litellm)
+        self.assertIn("runs-on: ubuntu-26.04", litellm)
         self.assertNotIn("macos", litellm)
         self.assertNotIn("windows", litellm)
         self.assertIn(
@@ -663,16 +665,31 @@ class DependencyPolicyTest(unittest.TestCase):
         self.assertEqual([], concurrency_problems(text, "ok"))
         self.assertEqual([], concurrency_problems("name: CI\non: push\n", "plain"))
 
-    def test_actionlint_ignores_are_the_queue_key_and_macos_26_label(self) -> None:
+    def test_workflows_pin_hosted_ubuntu_26_04(self) -> None:
+        workflow_dir = ROOT / ".github" / "workflows"
+        paths = sorted(workflow_dir.glob("*.yml")) + sorted(workflow_dir.glob("*.yaml"))
+        self.assertGreater(len(paths), 0)
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(workflow=path.name):
+                self.assertNotIn("ubuntu-latest", text)
+                self.assertNotIn("ubuntu-24.04", text)
+                self.assertNotIn("ubuntu-22.04", text)
+                self.assertNotIn("ubuntu-20.04", text)
+
+    def test_actionlint_ignores_are_the_queue_key_and_unknown_hosted_labels(
+        self,
+    ) -> None:
         config_path = ROOT / ".github" / "actionlint.yaml"
         config = config_path.read_text(encoding="utf-8")
         ignores = re.findall(r"(?m)^      - '([^']*)'$", config)
-        expected = [
+        one_block = [
             _ACTIONLINT_QUEUE_IGNORE,
             _ACTIONLINT_MACOS_26_IGNORE,
-            _ACTIONLINT_QUEUE_IGNORE,
-            _ACTIONLINT_MACOS_26_IGNORE,
+            _ACTIONLINT_UBUNTU_26_IGNORE,
+            _ACTIONLINT_UBUNTU_26_ARM_IGNORE,
         ]
+        expected = one_block + one_block
         self.assertEqual(expected, ignores)
         self.assertIn(".github/workflows/**/*.yml:", config)
         self.assertIn(".github/workflows/**/*.yaml:", config)
@@ -694,6 +711,18 @@ class DependencyPolicyTest(unittest.TestCase):
         )
         self.assertIsNone(label.search('label "macos-15" is unknown'))
         self.assertIsNone(label.search('label "macos-26-intel" is unknown'))
+        ubuntu = re.compile(_ACTIONLINT_UBUNTU_26_IGNORE)
+        self.assertIsNotNone(
+            ubuntu.search(
+                'label "ubuntu-26.04" is unknown. available labels are "ubuntu-24.04"'
+            )
+        )
+        self.assertIsNone(ubuntu.search('label "ubuntu-24.04" is unknown'))
+        self.assertIsNone(ubuntu.search('label "ubuntu-26.04-arm" is unknown'))
+        ubuntu_arm = re.compile(_ACTIONLINT_UBUNTU_26_ARM_IGNORE)
+        self.assertIsNotNone(ubuntu_arm.search('label "ubuntu-26.04-arm" is unknown'))
+        self.assertIsNone(ubuntu_arm.search('label "ubuntu-26.04" is unknown'))
+        self.assertIsNone(ubuntu_arm.search('label "ubuntu-24.04-arm" is unknown'))
         self.assertNotIn(".*", config)
         self.assertNotIn("self-hosted-runner:", config)
 

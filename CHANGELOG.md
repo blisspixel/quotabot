@@ -4,6 +4,18 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- Hosted Ubuntu jobs select `ubuntu-26.04`, and the Linux arm64 release
+  cells select `ubuntu-26.04-arm`. Checked 2026-11-17: both images are
+  generally available, and `ubuntu-latest` finishes moving to 26.04 on
+  2026-11-19. The x64 image readme `20261111.196.1` and the arm64 image
+  readme `20261111.184.1` are both 26.04.1 LTS. The next Linux x64 CLI
+  and desktop archives link the x64 image's glibc. The next Linux arm64
+  CLI archive links the arm64 image's glibc. Published 0.11.19 archives
+  were not rebuilt. Install smoke uses `ubuntu-26.04`, so it does not
+  prove those archives run on Ubuntu 24.04. Pinned actionlint 1.7.7 stops
+  its Ubuntu label list at 24.04. The ignores match only
+  `label "ubuntu-26.04" is unknown` and
+  `label "ubuntu-26.04-arm" is unknown`.
 - LM Studio decision models stay listed and are excluded from generation
   routes. The published `GET /api/v1/models` schema, checked 2026-11-17,
   adds `type: "decision"` and still has no producer-device field.

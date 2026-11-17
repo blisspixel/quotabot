@@ -491,9 +491,15 @@ Pinned actionlint 1.7.7 does not parse `concurrency.queue`. The gap is still
 open in [rhysd/actionlint#657](https://github.com/rhysd/actionlint/issues/657)
 and [rhysd/actionlint#654](https://github.com/rhysd/actionlint/pull/654), and
 it is absent from actionlint 1.7.12. The same pin does not list the
-GitHub-hosted `macos-26` label, which actionlint 1.7.8 added. The ignores
-in `.github/actionlint.yaml` cover only that unknown key and the message
-`label "macos-26" is unknown`. They do not add a self-hosted runner list.
+GitHub-hosted `macos-26` label, which actionlint 1.7.8 added, and its
+Ubuntu label list stops at `ubuntu-24.04` and `ubuntu-24.04-arm`. Checked
+2026-11-17 in `rule_runner_label.go` at tag v1.7.7. Hosted Ubuntu jobs
+select `ubuntu-26.04`, and the Linux arm64 release cells select
+`ubuntu-26.04-arm`. The ignores in `.github/actionlint.yaml` cover only
+that unknown key and the messages `label "macos-26" is unknown`,
+`label "ubuntu-26.04" is unknown`, and
+`label "ubuntu-26.04-arm" is unknown`. They do not add a self-hosted
+runner list.
 The policy test fails the build when `cancel-in-progress` is not the
 literal `false` or when `queue: max` is missing.
 
