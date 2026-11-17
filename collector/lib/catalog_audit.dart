@@ -31,6 +31,10 @@ class ModelListSource {
   /// Other model lists stay presence-only. A missing field is not a date.
   final bool publishesShutdownDates;
 
+  /// What this source does not prove. Printed so a clean result is not read
+  /// as a check of a different model page. Null keeps the older report.
+  final String? coverageNote;
+
   const ModelListSource({
     required this.provider,
     required this.endpoint,
@@ -39,6 +43,7 @@ class ModelListSource {
     this.includeModel = _includeAllModels,
     this.maxPages = 20,
     this.publishesShutdownDates = false,
+    this.coverageNote,
   });
 
   String? secretFrom(Map<String, String> environment) {
@@ -87,6 +92,9 @@ class ProviderCatalogAudit {
   /// Catalog models on this source that announced a shutdown date.
   final List<CatalogShutdown> shutdowns;
 
+  /// What this source does not prove, copied from [ModelListSource.coverageNote].
+  final String? coverageNote;
+
   const ProviderCatalogAudit({
     required this.provider,
     required this.endpoint,
@@ -100,6 +108,7 @@ class ProviderCatalogAudit {
     required this.catalogOnly,
     this.shutdownDatesChecked = false,
     this.shutdowns = const [],
+    this.coverageNote,
   });
 
   bool get hasDrift => missingFromCatalog.isNotEmpty || catalogOnly.isNotEmpty;
@@ -121,6 +130,7 @@ class ProviderCatalogAudit {
         'shutdown_dates_checked': shutdownDatesChecked,
         if (shutdowns.isNotEmpty)
           'shutdowns': shutdowns.map((shutdown) => shutdown.toJson()).toList(),
+        if (coverageNote != null) 'coverage_note': coverageNote,
       };
 }
 
@@ -288,6 +298,9 @@ String formatCatalogAuditReport(
                     : 'clean')
             : 'error';
     lines.add('${provider.provider}: $status');
+    if (provider.coverageNote != null) {
+      lines.add('  ${provider.coverageNote}');
+    }
     if (provider.error != null) {
       lines.add('  ${provider.error}');
     }
@@ -415,7 +428,10 @@ Future<CatalogAuditReport> auditModelCatalog({
     for (final source in sources ?? defaultModelListSources()) {
       providerAudits.add(await _auditProvider(
         source: source,
-        catalogIds: _catalogIds(catalog[source.provider] ?? const []),
+        catalogIds: _catalogIds(
+          catalog[source.provider] ?? const [],
+          includeModel: source.includeModel,
+        ),
         environment: environment,
         client: httpClient,
         timeout: timeout,
@@ -582,6 +598,7 @@ ProviderCatalogAudit _providerAudit({
     missingFromCatalog: ok ? missing : const [],
     catalogOnly: ok ? catalogOnly : const [],
     shutdownDatesChecked: shutdownDatesChecked,
+    coverageNote: source.coverageNote,
     shutdowns: catalogShutdownFindings(
       catalogIds: catalogIds,
       shutdownDates: shutdownDatesById(listed),
@@ -591,8 +608,16 @@ ProviderCatalogAudit _providerAudit({
   );
 }
 
-List<String> _catalogIds(List<ModelInfo> models) =>
-    (models.map((m) => m.id).toSet().toList()..sort());
+List<String> _catalogIds(
+  List<ModelInfo> models, {
+  ModelFilter includeModel = _includeAllModels,
+}) =>
+    (models
+        .map((model) => model.id)
+        .where((id) => includeModel(id, null))
+        .toSet()
+        .toList()
+      ..sort());
 
 List<String> parseModelList(
   Object? decoded, {
@@ -795,6 +820,9 @@ List<ModelListSource> defaultModelListSources() => [
         requiredEnv: const ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
         headers: (secret) => {'x-goog-api-key': secret ?? ''},
         includeModel: _includeGeminiModel,
+        coverageNote: 'The Antigravity check covers only Gemini ids that '
+            'also exist on the Gemini API. It does not prove the '
+            'Antigravity model page.',
       ),
     ];
 

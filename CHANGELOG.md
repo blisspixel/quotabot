@@ -4,6 +4,19 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- The Antigravity catalog matches the model page and a live `agy models`
+  list checked 2026-11-17. It adds `gemini-4-hydrogen`, `gemini-4-argon`,
+  `claude-opus-5-5`, and `claude-sonnet-5-5`. It keeps `gemini-4-carbon`
+  and `gemini-3.8-flash`. It drops `gemini-3.5-flash-lite`,
+  `claude-sonnet-4.6-thinking`, `claude-opus-4.6-thinking`, and
+  `gpt-oss-120b`. The page marks the 4.6 thinking rows and GPT-OSS-120b
+  removed on 2026-11-18. That account list already omitted the 4.6 ids
+  and `gemini-3.5-flash-lite`, and it still included
+  `gpt-oss-120b-medium`. Catalog ids are the stable prefixes of the
+  effort-suffixed account ids. Claude rows omit context length because
+  Antigravity does not publish it. The catalog audit compares only
+  Gemini ids with the Gemini API list and says that check does not prove
+  the Antigravity model page.
 - The Claude and Codex stalled-grant tests allow five seconds of process
   time. The injected deadline stays 20 milliseconds, and the bound stays
   under the eight-second default, so a missed override still fails.
