@@ -476,7 +476,9 @@ Capacity evidence is absent on subscription providers.
 runtime executes in a cloud rather than on-device carries
 `cloud_offloaded: true`. Current evidence is an Ollama `-cloud` tag or a
 Lemonade `recipe: "cloud"` or `cloud_provider` field, including a cloud component
-inside a supported composite. Composites with unresolved component scope are
+inside a supported composite. Rechecked 2026-11-17, `rocmfpx`, `halogen`, and
+`gufo` are supported local leaves. A guest container is not `cloud_offloaded`
+and is not an on-device claim. Composites with unresolved component scope are
 omitted from normalized inventory with a count-only provider detail. A
 cloud-offloaded model is excluded
 from `--budget=local` and free budgets, though it stays listed under

@@ -235,13 +235,16 @@ _LemonadeInventory? _lemonadeInventoryFromJson(dynamic data) {
 
 enum _ComponentScope { legacyLocal, cloud, unresolved }
 
-/// Negative execution evidence from Lemonade v2026.39.1's model serializer.
+/// Negative execution evidence from Lemonade's model serializer.
 /// Only `components` identities and their embedded `models` metadata are read;
 /// collection routing policies, prompts, and backend arguments are not inspected.
 /// A complete supported non-cloud tree preserves legacy eligibility. It does
 /// not prove execution in the collector's physical environment.
-/// Sources: src/cpp/server/server.cpp:model_info_to_json, model_types.h, and the
-/// recipe registry in CMakeLists.txt at that tag, reviewed 2026-09-30.
+/// The serializer shape was reviewed at v2026.39.1 on 2026-09-30. The recipe
+/// registry in CMakeLists.txt `LEMON_BACKENDS` was rechecked at v2026.46.2 on
+/// 2026-11-17. `rocmfpx`, `halogen`, and `gufo` are guest containers with
+/// local GPU devices and chat-only modes. They are leaves, not `cloud`.
+/// Container format is not a cloud veto and is not on-device proof.
 class _CompositeScopeResolver {
   static const _maxDepth = 3;
   static const _maxNodes = 64;
@@ -257,6 +260,9 @@ class _CompositeScopeResolver {
     'vllm',
     'thenoise',
     'ds4',
+    'rocmfpx',
+    'halogen',
+    'gufo',
     'thinksound',
     'acestep',
     'onnxruntime',

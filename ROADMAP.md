@@ -291,7 +291,11 @@ pin `2024-11-05` through `2025-11-25`.
    cannot replace `POST /api/show`. Upstream-veto discovery is unchanged. For
    Lemonade composites, require complete component scope rather than assuming
    `collection.router` is local. The bounded resolver shipped in 0.11.8 excludes
-   cloud and unresolved components; positive producer identity remains open.
+   cloud and unresolved components. Rechecked 2026-11-17 at Lemonade
+   v2026.46.2, `rocmfpx`, `halogen`, and `gufo` are guest-container leaves
+   with local GPU devices. A complete composite that uses them keeps legacy
+   eligibility and `execution_location: unknown`. Container format is not
+   on-device proof. Positive producer identity remains open.
    As of 2026-10-22, local models publish `execution_location` as `unknown` or
    `remote` only. `remote` repeats a cloud or upstream veto. `unknown` keeps
    the loopback safety net. Loaded state, localhost, KV-cache GPU offload, and

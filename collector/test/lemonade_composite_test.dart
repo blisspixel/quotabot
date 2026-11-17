@@ -76,6 +76,45 @@ void main() {
     }
   });
 
+  test('v2026.46.2 local container recipes keep legacy eligibility', () {
+    for (final recipe in ['rocmfpx', 'halogen', 'gufo', ' Gufo ']) {
+      final quota = _quota(_collection('test-composite', [
+        _leaf('local-chat', recipe: recipe),
+      ]));
+      expect(quota.models, hasLength(1), reason: recipe);
+      expect(quota.models.single.cloudOffloaded, isFalse, reason: recipe);
+      expect(quota.models.single.executionLocation, ExecutionLocation.unknown,
+          reason: recipe);
+      expect(quota.models.single.toJson()['execution_location'], 'unknown',
+          reason: recipe);
+      expect(isLocalRuntimeAvailableAt(quota, 100), isTrue, reason: recipe);
+      expect(
+          buildModelRegistry([quota], 100,
+                  requirements: const ModelRequirements(
+                      budgetPolicy: ModelBudgetPolicy.local))
+              .single
+              .model
+              .id,
+          'test-composite',
+          reason: recipe);
+    }
+  });
+
+  test('a local container recipe beside cloud still vetoes the composite', () {
+    final quota = _quota(_collection('test-composite', [
+      _leaf('local-chat', recipe: 'halogen'),
+      _cloud('cloud-chat'),
+    ]));
+    expect(quota.models, hasLength(1));
+    expect(quota.models.single.cloudOffloaded, isTrue);
+    expect(quota.models.single.executionLocation, ExecutionLocation.remote);
+    expect(
+        buildModelRegistry([quota], 100,
+            requirements:
+                const ModelRequirements(budgetPolicy: ModelBudgetPolicy.local)),
+        isEmpty);
+  });
+
   test('complete supported non-cloud components retain legacy eligibility', () {
     final quota = _quota(_collection('test-composite', [
       _leaf('local-chat'),
