@@ -111,7 +111,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         self.assertEqual(
             "        include:\n"
-            "          - os: ubuntu-latest\n"
+            "          - os: ubuntu-26.04\n"
             "            script: bash tools/package-linux.sh\n"
             "            archive: release/quotabot-linux-x64-desktop.tar.gz\n",
             matrix,
@@ -159,7 +159,10 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             "needs: [create-release, build, package-macos-cli, package-windows-cli]",
             verify_job,
         )
-        self.assertIn("ubuntu-24.04-arm", verify_job)
+        self.assertIn("ubuntu-26.04-arm", verify_job)
+        self.assertIn("os: ubuntu-26.04", build_job)
+        self.assertNotIn("ubuntu-latest", workflow)
+        self.assertNotIn("ubuntu-24.04", workflow)
         self.assertIn("name: release-archive-cli-", verify_job)
         self.assertIn("gh attestation verify", verify_job)
         self.assertIn("--source-digest", verify_job)

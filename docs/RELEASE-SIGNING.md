@@ -464,6 +464,15 @@ run. A separate credential-free rehearsal verifier and each release packaging
 job independently download the original unsigned handoff and repeat that
 comparison before evidence or a signed package can be accepted.
 
+Hosted Ubuntu build, verify, and rehearsal jobs use `ubuntu-26.04`. The
+Linux arm64 release build and verify cells use `ubuntu-26.04-arm`.
+Checked 2026-11-17, the x64 image readme `20261111.196.1` and the arm64
+image readme `20261111.184.1` are both 26.04.1 LTS. The next Linux x64
+CLI and desktop archives link the x64 image's glibc. The next Linux
+arm64 CLI archive links the arm64 image's glibc. Published 0.11.19
+archives were not rebuilt. That pin does not prove the same archive runs
+on Ubuntu 24.04.
+
 All macOS build, signing, packaging, verification, and rehearsal jobs use the
 explicit `macos-26` arm64 image and Xcode 26.6 build 17F113. Ordinary CI compiles
 minimal arm64 CLI and app fixtures, applies hardened ad hoc signatures in the

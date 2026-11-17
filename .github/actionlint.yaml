@@ -11,12 +11,22 @@
 # 1.7.8 added it. This repository stays on 1.7.7 because 1.7.12 still does
 # not parse concurrency.queue. The second ignore matches only the unknown
 # macos-26 label message. It is not a self-hosted runner list.
+#
+# actionlint 1.7.7 also stops its Ubuntu label list at ubuntu-24.04 and
+# ubuntu-24.04-arm. Checked 2026-11-17 in rule_runner_label.go at tag
+# v1.7.7. The Ubuntu ignores match only the unknown ubuntu-26.04 and
+# ubuntu-26.04-arm messages. The closing quote keeps ubuntu-24.04 and
+# ubuntu-26.04-arm from sharing one pattern.
 paths:
   .github/workflows/**/*.yml:
     ignore:
       - 'unexpected key "queue" for "concurrency" section'
       - 'label "macos-26" is unknown'
+      - 'label "ubuntu-26\.04" is unknown'
+      - 'label "ubuntu-26\.04-arm" is unknown'
   .github/workflows/**/*.yaml:
     ignore:
       - 'unexpected key "queue" for "concurrency" section'
       - 'label "macos-26" is unknown'
+      - 'label "ubuntu-26\.04" is unknown'
+      - 'label "ubuntu-26\.04-arm" is unknown'

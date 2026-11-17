@@ -394,6 +394,18 @@ retained for 14 days. The workflow is implemented but has not completed
 successfully because owner identities and the required environment values and
 secrets are still absent.
 
+Every hosted Ubuntu job selects `ubuntu-26.04`. The Linux arm64 release
+build and verify cells select `ubuntu-26.04-arm`. Checked 2026-11-17,
+[Ubuntu 26.04 is generally available](https://github.com/actions/runner-images/issues/14747)
+and the [`ubuntu-latest` migration](https://github.com/actions/runner-images/issues/14748)
+completes on 2026-11-19. The x64 image readme `20261111.196.1` and the
+arm64 image readme `20261111.184.1` are both 26.04.1 LTS. The next Linux
+x64 CLI and desktop archives link the x64 image's glibc. The next Linux
+arm64 CLI archive links the arm64 image's glibc. Published 0.11.19
+archives were not rebuilt. Install smoke runs on `ubuntu-26.04` and does
+not prove those archives run on Ubuntu 24.04. No hosted job stays on
+`ubuntu-latest` or `ubuntu-24.04`.
+
 Every macOS CI, release, and rehearsal job selects the explicit `macos-26` arm64
 runner and `/Applications/Xcode_26.6.app/Contents/Developer`. The
 `tools/require-macos-toolchain.sh` gate requires Xcode 26.6 build 17F113 and the
