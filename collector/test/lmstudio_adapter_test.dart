@@ -5,8 +5,12 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/lmstudio.dart';
+import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/decision.dart';
 import 'package:quotabot_collector/http_client.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/registry.dart';
+import 'package:quotabot_collector/routing_context.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -192,4 +196,145 @@ void main() {
     expect(parsed.installed.single.quant, isNull);
     expect(parsed.installed.single.context, isNull);
   });
+
+  test('a decision model stays listed and cannot win generation', () async {
+    final client = MockClient((request) async {
+      expect(request.url.path, '/api/v1/models');
+      return http.Response(
+        jsonEncode({
+          'models': [
+            lmStudioModel(
+              key: 'example/router',
+              type: 'decision',
+              loadedInstances: [
+                {
+                  'id': 'example/router',
+                  'config': {
+                    'context_length': 4096,
+                    'offload_kv_cache_to_gpu': true,
+                  },
+                },
+              ],
+              capabilities: {
+                'vision': true,
+                'trained_for_tool_use': true,
+                ...lmStudioReasoningCapability,
+              },
+            ),
+            lmStudioModel(
+              key: 'example/coder',
+              type: 'llm',
+              loadedInstances: const [],
+              maxContextLength: 131072,
+              capabilities: {
+                'vision': false,
+                'trained_for_tool_use': true,
+                ...lmStudioReasoningCapability,
+              },
+            ),
+          ],
+        }),
+        200,
+      );
+    });
+
+    final quota = await LmStudioAdapter(client: client).collect();
+    final decision =
+        quota.models.singleWhere((model) => model.id == 'example/router');
+    final coder =
+        quota.models.singleWhere((model) => model.id == 'example/coder');
+
+    expect(quota.ok, isTrue);
+    expect(quota.status, 'ready - no model loaded');
+    expect(quota.localGenerationReadiness, 'cold');
+    expect(decision.loaded, isTrue);
+    expect(decision.textGeneration, isFalse);
+    expect(decision.embedding, isNull);
+    expect(decision.reasoning, isNull);
+    expect(decision.tools, isTrue);
+    expect(decision.vision, isTrue);
+    expect(decision.executionLocation, ExecutionLocation.unknown);
+    final decisionJson = decision.toJson();
+    expect(decisionJson['text_generation'], isFalse);
+    expect(decisionJson['execution_location'], 'unknown');
+    expect(decisionJson.containsKey('reasoning'), isFalse);
+    expect(coder.textGeneration, isNull);
+    expect(coder.reasoning, isNull);
+    expect(coder.embedding, isFalse);
+    expect(coder.loaded, isFalse);
+
+    final suggestion = suggestModel([quota], quota.asOf);
+    expect(suggestion.recommended?.model.id, 'example/coder');
+    expect(suggestion.ranked.map((entry) => entry.model.id), ['example/coder']);
+
+    final route = decide(
+      [quota],
+      quota.asOf,
+      context: providerRouteDecisionContext([quota], quota.asOf),
+    ).route;
+    expect(route.recommended?.provider, 'lmstudio');
+    expect(route.recommended?.localModel?.modelId, 'example/coder');
+  });
+
+  test('a decision-only inventory cannot become local generation capacity',
+      () async {
+    final client = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'models': [
+            lmStudioModel(
+              key: 'example/router',
+              type: ' Decision ',
+              loadedInstances: [
+                {
+                  'id': 'example/router',
+                  'config': {'context_length': 2048},
+                },
+              ],
+            ),
+          ],
+        }),
+        200,
+      );
+    });
+
+    final quota = await LmStudioAdapter(client: client).collect();
+    expect(quota.models.single.textGeneration, isFalse);
+    expect(quota.models.single.loaded, isTrue);
+    expect(quota.localGenerationReadiness, isNull);
+    expect(quota.status, 'reachable - no generation models');
+
+    final suggestion = suggestModel([quota], quota.asOf);
+    expect(suggestion.recommended, isNull);
+    expect(
+      suggestion.reason,
+      contains('non-text deployments'),
+    );
+
+    final route = decide([quota], quota.asOf).route;
+    expect(route.recommended, isNull);
+    expect(route.fallback.kind, RouteFallbackKind.passthrough);
+  });
 }
+
+Map<String, Object?> lmStudioModel({
+  required String key,
+  required String type,
+  required List<Object?> loadedInstances,
+  int? maxContextLength,
+  Map<String, Object?>? capabilities,
+}) =>
+    {
+      'key': key,
+      'type': type,
+      'loaded_instances': loadedInstances,
+      if (maxContextLength != null) 'max_context_length': maxContextLength,
+      if (capabilities != null) 'capabilities': capabilities,
+    };
+
+const lmStudioReasoningCapability = {
+  'reasoning': {
+    'allowed_options': ['off', 'on'],
+    'default': 'on',
+  },
+};

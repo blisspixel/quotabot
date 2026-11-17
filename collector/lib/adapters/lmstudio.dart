@@ -136,7 +136,10 @@ class LmStudioAdapter {
 /// from that instance's config. The installed inventory retains the model's
 /// maximum separately. Unlike v0, v1
 /// exposes a real parameter size (`params_string`) and object-shaped
-/// quantization. Pure for testing; reads metadata only.
+/// quantization. A published `type` of `decision` stays listed and is excluded
+/// from generation. `capabilities.reasoning` stays undeclared: the list still
+/// has no producer-device field. Checked 2026-11-17. Pure for testing; reads
+/// metadata only.
 LmStudioModelInventory? lmStudioV1FromJson(
   dynamic data,
 ) {
@@ -156,9 +159,11 @@ LmStudioModelInventory? lmStudioV1FromJson(
     // denied; either way it cannot satisfy a requirement for that capability.
     final capabilities = m['capabilities'];
     final declared = capabilities is Map ? capabilities : null;
-    // v1's `type` separates a text generator from an embedding model. Unlike
-    // v0 it does not distinguish a vision model, which is why vision is read
-    // from the capability flags above rather than from the type.
+    // v1's `type` separates an LLM, an embedding model, and a decision model.
+    // Checked 2026-11-17 at https://lmstudio.ai/docs/developer/rest/list.
+    // A decision model answers typed questions and is not a chat model, so it
+    // stays listed with text generation denied. Unlike v0, v1 does not
+    // distinguish a vision model by type; vision comes from the flags above.
     final type =
         m['type'] is String ? (m['type'] as String).trim().toLowerCase() : null;
     LocalModel modelWithContext(int? context) => (
@@ -182,7 +187,7 @@ LmStudioModelInventory? lmStudioV1FromJson(
           // broaden local reasoning routing from its reasoning configuration yet.
           reasoning: null,
           embedding: _declaredEmbedding(type),
-          textGeneration: null,
+          textGeneration: type == 'decision' ? false : null,
           digest: null,
         );
     installed.add(modelWithContext(boundedIntFromWire(

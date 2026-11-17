@@ -754,12 +754,15 @@ format overhead can differ from the estimate.
   a parameter count, so quotabot does not fill the parameter-size slot from it.
   LM Link can serve a localhost request on another device, and the current model
   list has no documented per-model execution-location field. Rechecked on
-  2026-10-22, `GET /api/v1/models` still has no producer-device field.
+  2026-11-17, `GET /api/v1/models` at
+  <https://lmstudio.ai/docs/developer/rest/list> still has no producer-device
+  field. The same schema adds `type: "decision"` and an optional
+  `capabilities.reasoning` object. A decision model stays listed and is not a
+  generation route. The reasoning object stays undeclared.
   `offload_kv_cache_to_gpu` and a loaded instance do not establish where the
   model runs. The current runtime classification does not certify LM Link as
   on-device; do not use its host-fit estimate as proof of remote-device
-  capacity. Reasoning declarations remain unadmitted pending that location
-  contract.
+  capacity.
 - Lemonade: the AMD/lemonade-sdk OpenAI-compatible server. `GET /api/v1/models`
   (falling back to `/v1/models`) lists downloaded local models by default and
   can also list configured cloud-provider routes. quotabot reads

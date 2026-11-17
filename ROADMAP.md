@@ -296,9 +296,10 @@ pin `2024-11-05` through `2025-11-25`.
    `remote` only. `remote` repeats a cloud or upstream veto. `unknown` keeps
    the loopback safety net. Loaded state, localhost, KV-cache GPU offload, and
    a host GPU counter do not prove on-device execution, and no `on_device`
-   value is emitted. The current LM Studio model list still has no
-   producer-device field. No routing-classifier or validation inference
-   belongs in a metadata probe.
+   value is emitted. Rechecked 2026-11-17, the LM Studio model list still has
+   no producer-device field. Its published `decision` type stays out of text
+   generation. `capabilities.reasoning` stays undeclared. No routing-classifier
+   or validation inference belongs in a metadata probe.
 4. **Polish one consistent desktop language.** Build on the existing typography,
    theme and controls. Make the recommendation prominent, distinguish remaining
    included quota from price, and make focus, disabled, busy and warning states
