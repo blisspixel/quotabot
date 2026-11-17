@@ -497,7 +497,9 @@ void main() {
     ).collectAccounts();
     stopwatch.stop();
 
-    expect(stopwatch.elapsed, lessThan(const Duration(seconds: 1)));
+    // Five seconds stays under the eight-second default deadline, so a
+    // missed override still fails, and a slow CI process can pass.
+    expect(stopwatch.elapsed, lessThan(const Duration(seconds: 5)));
     expect(quotas, hasLength(1));
     expect(quotas.single.ok, isTrue);
     expect(quotas.single.account, hostIdentity());
