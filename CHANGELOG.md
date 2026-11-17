@@ -4,6 +4,10 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- Ollama list responses leave capability fields undeclared. The published
+  `GET /api/tags` model summary, checked 2026-11-17, omits capabilities.
+  A daemon array cannot replace `POST /api/show`, whose published schema
+  still carries `capabilities`. A failed show leaves those fields undeclared.
 - CI, release, and the macOS signing rehearsal use the macos-26 arm64 runner
   and Xcode 26.6 build 17F113. The macOS 26 arm64 runner image readme
   20261102.0473.1, checked 2026-11-16, lists that Xcode build as the default.

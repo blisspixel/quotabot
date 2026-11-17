@@ -719,8 +719,14 @@ format overhead can differ from the estimate.
 - Ollama: `GET /api/tags` (installed) and `GET /api/ps` (loaded). `/api/ps` also
   reports each running model's `context_length` and GPU-resident bytes, which
   quotabot labels as `running context` and `GPU resident`. Neither value proves
-  that the model is busy. Neither list declares what a model can do, so
-  quotabot also reads `POST /api/show` per model for its `capabilities` array
+  that the model is busy. Neither list declares what a model can do.
+  Rechecked 2026-11-17: the published `GET /api/tags` model summary at
+  <https://docs.ollama.com/api/tags> omits capabilities. A daemon may still
+  send an array, and that array has been shorter than `POST /api/show`, so
+  quotabot leaves the list fields undeclared. The same day's
+  `POST /api/show` schema at
+  <https://docs.ollama.com/api-reference/show-model-details> still publishes
+  `capabilities`. quotabot reads that array per model
   (tool use, vision, and explicitly declared `thinking`) and its architecture-prefixed
   `<arch>.context_length`. Honors `OLLAMA_HOST`, default
   `http://127.0.0.1:11434`.

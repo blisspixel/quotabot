@@ -285,8 +285,10 @@ pin `2024-11-05` through `2025-11-25`.
    LM Studio LM Link, WSL and tunnel forwarding, and Lemonade composites before
    admitting those cases to a stronger local-only policy.
    Keep explicit non-text deployment kinds out of text generation while still
-   showing their inventory. Verify Ollama's new list-level capabilities against
-   the existing upstream-veto discovery before replacing detail reads. For
+   showing their inventory. Ollama list-level capabilities were rechecked on
+   2026-11-17 against the published `GET /api/tags` model summary. That schema
+   omits capabilities, and a daemon-supplied array stays undeclared so it
+   cannot replace `POST /api/show`. Upstream-veto discovery is unchanged. For
    Lemonade composites, require complete component scope rather than assuming
    `collection.router` is local. The bounded resolver shipped in 0.11.8 excludes
    cloud and unresolved components; positive producer identity remains open.
