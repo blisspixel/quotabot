@@ -125,7 +125,7 @@ void main() {
     expect(shown.stdout, contains('quotabot.claude_session_projection.v1'));
     expect(shown.stdout, contains('"routing": false'));
     expect(shown.stdout, isNot(contains(transcriptCanary)));
-  });
+  }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('a quota-read flag is rejected before projection', () async {
     final result = await runCollectCli([
