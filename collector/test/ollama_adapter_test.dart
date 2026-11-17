@@ -200,6 +200,27 @@ void main() {
     expect(models.single.quant, isNull);
   });
 
+  test('a list capabilities array stays undeclared until /api/show', () {
+    final models = ollamaModelsFromJson({
+      'models': [
+        {
+          'name': 'deepseek-r1:32b',
+          'capabilities': ['completion', 'thinking'],
+          'remote_host': 'https://example.invalid:11434',
+          'remote_model': 'deepseek-r1',
+        },
+      ],
+    });
+
+    final model = models.single;
+    expect(model.tools, isNull);
+    expect(model.vision, isNull);
+    expect(model.reasoning, isNull);
+    expect(model.embedding, isNull);
+    expect(model.textGeneration, isNull);
+    expect(model.upstreamRouting, UpstreamRouting.declared);
+  });
+
   group('OllamaAdapter capability enrichment', () {
     /// Answers the model-list endpoints with [installed] and nothing loaded,
     /// and `/api/show` from [show] keyed by the requested model name.
@@ -257,6 +278,67 @@ void main() {
       final seer = q.models.firstWhere((m) => m.id == 'seer:24b');
       expect(seer.vision, isTrue);
       expect(seer.contextTokens, 393216);
+    });
+
+    test('a shorter list capabilities array does not replace /api/show',
+        () async {
+      final probed = <String>[];
+      final q = await OllamaAdapter(
+        capabilityCache: OllamaCapabilityCache(),
+        client: runtime(
+          [
+            {
+              'name': 'deepseek-r1:32b',
+              'digest': 'sha256:a',
+              // The list omits tools. Trusting it as exhaustive would hide a
+              // capability that /api/show still declares.
+              'capabilities': ['completion', 'thinking'],
+              'remote_host': 'https://example.invalid:11434',
+              'remote_model': 'deepseek-r1',
+            },
+          ],
+          {
+            'deepseek-r1:32b': {
+              'capabilities': ['completion', 'tools', 'thinking'],
+              'remote_host': 'https://example.invalid:11434',
+              'remote_model': 'deepseek-r1',
+            },
+          },
+          onShow: probed.add,
+        ),
+      ).collect();
+
+      expect(probed, ['deepseek-r1:32b']);
+      final model = q.models.single;
+      expect(model.tools, isTrue);
+      expect(model.vision, isFalse);
+      expect(model.embedding, isFalse);
+      expect(model.reasoning, 'reasoning');
+      expect(model.upstreamRouting, UpstreamRouting.declared);
+    });
+
+    test('a list capabilities array cannot fill in a failed /api/show',
+        () async {
+      final q = await OllamaAdapter(
+        capabilityCache: OllamaCapabilityCache(),
+        client: runtime(
+          [
+            {
+              'name': 'deepseek-r1:32b',
+              'digest': 'sha256:a',
+              'capabilities': ['completion', 'tools', 'thinking'],
+            },
+          ],
+          const {},
+        ),
+      ).collect();
+
+      final model = q.models.single;
+      expect(model.id, 'deepseek-r1:32b');
+      expect(model.tools, isNull);
+      expect(model.vision, isNull);
+      expect(model.embedding, isNull);
+      expect(model.reasoning, isNull);
     });
 
     test('a running context window still wins over the model maximum',

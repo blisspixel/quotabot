@@ -175,8 +175,11 @@ class OllamaAdapter {
         },
       );
 
-  /// Fills in the declared capabilities and maximum context that `/api/tags`
-  /// omits, by reading each model's own metadata from `/api/show`.
+  /// Fills in declared capabilities and maximum context from `/api/show`.
+  ///
+  /// The published `GET /api/tags` model summary does not include
+  /// capabilities. A daemon may still send an array, and that array has
+  /// been shorter than `/api/show`, so the list fields stay undeclared.
   ///
   /// Without this every capability filter (`--require-tools`,
   /// `--require-vision`, `--min-context`) would reject every Ollama model,
@@ -507,8 +510,11 @@ List<LocalModel> ollamaModelsFromJson(dynamic data) {
       // ollama.com, not on-device.
       cloud: ollamaModelNameIsCloud(name),
       upstreamRouting: ollamaUpstreamRoutingFromJson(m),
-      // Neither model-list endpoint declares capabilities; `/api/show` does,
-      // and the adapter folds that in afterwards.
+      // The published list schema omits capabilities. Checked 2026-11-17
+      // at https://docs.ollama.com/api/tags. A daemon array is ignored:
+      // Ollama has returned a shorter list than POST /api/show, so trusting
+      // it would mark a capable model as lacking tools. `/api/show` folds
+      // the authoritative array in afterwards.
       tools: null,
       vision: null,
       reasoning: null,
