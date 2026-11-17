@@ -4,6 +4,14 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+- The Claude and Codex stalled-grant tests allow five seconds of process
+  time. The injected deadline stays 20 milliseconds, and the bound stays
+  under the eight-second default, so a missed override still fails.
+  Windows CI measured 2.5 seconds for the Claude case in run 44120936546.
+- The Claude status projection CLI test uses the same two-minute process
+  budget as the other multi-process CLI tests. It launches four collector
+  processes. On macOS 26 the 30-second default timed out in main CI run
+  44111848474. The projection behavior is unchanged.
 - Lemonade composite leaves admit `rocmfpx`, `halogen`, and `gufo`.
   Checked 2026-11-17 at tag v2026.46.2: `LEMON_BACKENDS` adds those
   recipes, and each descriptor is a guest container with local GPU
